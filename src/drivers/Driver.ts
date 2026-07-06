@@ -81,8 +81,9 @@ export interface Driver {
   /** Children of the given tree path. Empty path = top level of the connection. */
   children(path: string[]): Promise<TreeItemData[]>;
 
-  /** Run a raw statement (SQL, or a Redis command line). */
-  query(sql: string): Promise<QueryResult>;
+  /** Run a raw statement (SQL, or a Redis command line). `database` selects
+   *  which database to run against on engines that support several per server. */
+  query(sql: string, database?: string): Promise<QueryResult>;
 
   /**
    * Preview a table's rows (paginated). Sets `editable`, `columnsMeta`, `page`,

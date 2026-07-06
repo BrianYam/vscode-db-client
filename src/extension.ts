@@ -56,7 +56,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
   });
 
   reg("openDbClient.newQuery", (node: DbNode) => {
-    QueryPanel.create(ctx, manager, store, node.connectionId);
+    QueryPanel.create(ctx, manager, store, node.connectionId, {
+      database: node.nodePath[0],
+    });
   });
 
   reg("openDbClient.previewTable", (node: DbNode) => {

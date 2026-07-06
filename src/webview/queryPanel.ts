@@ -9,6 +9,8 @@ interface PanelOptions {
   previewPath?: string[];
   /** Equality filter for a "view related row" preview. */
   filter?: PreviewFilter;
+  /** Database to run raw queries against (multi-database servers). */
+  database?: string;
 }
 
 const PAGE_SIZE = 100;
@@ -30,6 +32,7 @@ export class QueryPanel {
   private lastEditable?: EditTarget;
   private previewPath?: string[];
   private filter?: PreviewFilter;
+  private database?: string;
   private offset = 0;
 
   private constructor(
@@ -47,6 +50,7 @@ export class QueryPanel {
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true }
     );
+    this.database = options.database;
     this.panel.webview.html = this.render(options.initialSql ?? "", config?.type ?? "postgres");
 
     this.panel.webview.onDidReceiveMessage(async (msg) => {
@@ -117,7 +121,7 @@ export class QueryPanel {
     try {
       const driver = await this.manager.getDriver(this.connectionId);
       const start = Date.now();
-      const result = await driver.query(trimmed);
+      const result = await driver.query(trimmed, this.database);
       result.elapsedMs = Date.now() - start;
       this.show(result);
     } catch (err) {

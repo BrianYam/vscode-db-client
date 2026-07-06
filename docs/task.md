@@ -63,6 +63,13 @@ Checked = implemented in this repo. Unchecked = remaining work.
 ## M5.4 — Tree UX  ✅ DONE 2026-07-06
 - [x] `[SDD][M5.4]` Drag-and-drop to reorder connections (persisted to globalState order)
 
+## M5.5 — Server-level browsing (all databases)  ✅ DONE 2026-07-06
+- [x] `[SDD][M5.5]` Postgres tree = connection → databases → schemas → tables → columns
+- [x] `[SDD][M5.5]` Database field now optional; enumerate all DBs via pg_database
+- [x] `[SDD][M5.5]` Pool-per-database (lazy); previews/edits target the right DB pool
+- [x] `[SDD][M5.5]` FK related-row carries the database; New Query runs against its DB
+- [x] `[SDD][M5.5]` Connection-string mode keeps schema-first (single DB) behaviour
+
 ## M6 — SSH Tunnel  ✅ DONE 2026-07-06
 - [x] `[SDD][M6]` `ssh2` local port-forward established before driver.connect()
 - [x] `[SDD][M6]` SSH form section: enable, host/port, username, auth (Auto/Password/Key/Agent), timeout
