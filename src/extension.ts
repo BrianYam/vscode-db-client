@@ -3,6 +3,7 @@ import { ConnectionStore } from "./connections/store";
 import { ConnectionManager } from "./connections/manager";
 import { DatabaseTreeProvider, DbNode } from "./tree/DatabaseTreeProvider";
 import { ConnectionFormPanel } from "./webview/connectionFormPanel";
+import { SettingsPanel } from "./webview/settingsPanel";
 import { QueryPanel } from "./webview/queryPanel";
 import { setSqliteWasmDir } from "./drivers/sqlite";
 import { initLog } from "./log";
@@ -27,6 +28,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     ctx.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
   reg("openDbClient.refresh", () => tree.refresh());
+
+  reg("openDbClient.settings", () => SettingsPanel.open(ctx));
 
   reg("openDbClient.refreshNode", (node: DbNode) => tree.refresh(node));
 

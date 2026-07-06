@@ -66,6 +66,11 @@
         "title": "View DDL / Structure"
       },
       {
+        "command": "openDbClient.settings",
+        "title": "Settings & Guides",
+        "icon": "$(gear)"
+      },
+      {
         "command": "openDbClient.refreshNode",
         "title": "Refresh",
         "icon": "$(refresh)"
@@ -83,6 +88,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "openDbClient.settings",
+          "when": "view == openDbClient.connections",
+          "group": "navigation@0"
+        },
         {
           "command": "openDbClient.addConnection",
           "when": "view == openDbClient.connections",
