@@ -39,8 +39,14 @@ export class DatabaseTreeProvider
 
   constructor(
     private readonly store: ConnectionStore,
-    private readonly manager: ConnectionManager
+    private readonly manager: ConnectionManager,
+    private readonly extensionUri: vscode.Uri
   ) {}
+
+  private engineIcon(type: string, connected: boolean): vscode.Uri {
+    const name = connected ? `${type}-connected` : type;
+    return vscode.Uri.joinPath(this.extensionUri, "media", "icons", `${name}.svg`);
+  }
 
   /** Close a connection: bump its generation so the subtree collapses. */
   markDisconnected(id: string): void {
@@ -94,10 +100,7 @@ export class DatabaseTreeProvider
         );
         node.id = `${c.id}#${this.genOf(c.id)}`;
         node.description = describe(c.type);
-        node.iconPath = new vscode.ThemeIcon(
-          "database",
-          connected ? new vscode.ThemeColor("charts.green") : undefined
-        );
+        node.iconPath = this.engineIcon(c.type, connected);
         return node;
       });
     }

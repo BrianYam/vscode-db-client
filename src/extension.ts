@@ -14,7 +14,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const store = new ConnectionStore(ctx);
   const manager = new ConnectionManager(store);
-  const tree = new DatabaseTreeProvider(store, manager);
+  const tree = new DatabaseTreeProvider(store, manager, ctx.extensionUri);
 
   ctx.subscriptions.push(
     vscode.window.createTreeView("openDbClient.connections", {
