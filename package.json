@@ -1,0 +1,120 @@
+{
+  "name": "open-db-client",
+  "displayName": "Open DB Client",
+  "description": "Lightweight database client for VS Code with unlimited connections (PostgreSQL, MySQL/MariaDB, SQLite, Redis).",
+  "version": "0.1.0",
+  "publisher": "brianlab",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "openDbClient",
+          "title": "Open DB Client",
+          "icon": "media/database.svg"
+        }
+      ]
+    },
+    "views": {
+      "openDbClient": [
+        {
+          "id": "openDbClient.connections",
+          "name": "Connections"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "openDbClient.addConnection",
+        "title": "Add Connection",
+        "icon": "$(add)"
+      },
+      {
+        "command": "openDbClient.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "openDbClient.editConnection",
+        "title": "Edit Connection",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "openDbClient.deleteConnection",
+        "title": "Delete Connection",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "openDbClient.newQuery",
+        "title": "New Query",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "openDbClient.previewTable",
+        "title": "Select Top 200"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "openDbClient.addConnection",
+          "when": "view == openDbClient.connections",
+          "group": "navigation@1"
+        },
+        {
+          "command": "openDbClient.refresh",
+          "when": "view == openDbClient.connections",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "openDbClient.newQuery",
+          "when": "view == openDbClient.connections && viewItem =~ /connection|database/",
+          "group": "inline@1"
+        },
+        {
+          "command": "openDbClient.editConnection",
+          "when": "view == openDbClient.connections && viewItem == connection",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "openDbClient.deleteConnection",
+          "when": "view == openDbClient.connections && viewItem == connection",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "openDbClient.previewTable",
+          "when": "view == openDbClient.connections && viewItem == table",
+          "group": "1_query@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1",
+    "mysql2": "^3.11.0",
+    "pg": "^8.12.0",
+    "sql.js": "^1.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "@types/sql.js": "^1.4.9",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.0"
+  }
+}
