@@ -28,6 +28,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   reg("openDbClient.refresh", () => tree.refresh());
 
+  reg("openDbClient.refreshNode", (node: DbNode) => tree.refresh(node));
+
   reg("openDbClient.connect", async (node: DbNode) => {
     try {
       await manager.getDriver(node.connectionId);

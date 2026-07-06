@@ -66,6 +66,11 @@
         "title": "View DDL / Structure"
       },
       {
+        "command": "openDbClient.refreshNode",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "openDbClient.connect",
         "title": "Connect",
         "icon": "$(plug)"
@@ -90,6 +95,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "openDbClient.refreshNode",
+          "when": "view == openDbClient.connections && viewItem =~ /connection|database|schema|table|view/",
+          "group": "inline@0"
+        },
         {
           "command": "openDbClient.newQuery",
           "when": "view == openDbClient.connections && viewItem =~ /connection|database/",
