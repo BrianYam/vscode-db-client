@@ -68,7 +68,8 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5.5]` Database field now optional; enumerate all DBs via pg_database
 - [x] `[SDD][M5.5]` Pool-per-database (lazy); previews/edits target the right DB pool
 - [x] `[SDD][M5.5]` FK related-row carries the database; New Query runs against its DB
-- [x] `[SDD][M5.5]` Connection-string mode keeps schema-first (single DB) behaviour
+- [x] `[SDD][M5.5]` Connection-string mode ALSO lists all DBs (rewrites the db path segment per pool)
+- [x] `[SDD][M5.5]` Composes with SSH tunnel (host rewrite + db rewrite together)
 
 ## M6 — SSH Tunnel  ✅ DONE 2026-07-06
 - [x] `[SDD][M6]` `ssh2` local port-forward established before driver.connect()
