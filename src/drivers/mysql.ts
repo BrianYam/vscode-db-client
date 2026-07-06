@@ -9,6 +9,7 @@ import {
   TreeItemData,
 } from "./Driver";
 import { buildTls } from "./ssl";
+import { quoteBacktick as qb } from "./ident";
 
 /** MySQL / MariaDB driver backed by the pure-JS `mysql2` pool. */
 export class MySqlDriver implements Driver {
@@ -119,10 +120,10 @@ export class MySqlDriver implements Driver {
     filter?: PreviewFilter
   ): Promise<QueryResult> {
     const [db, table] = path;
-    const where = filter ? ` WHERE \`${filter.column}\` = ?` : "";
+    const where = filter ? ` WHERE ${qb(filter.column)} = ?` : "";
     const params = filter ? [filter.value] : [];
     const [rows, fields] = await this.p.query(
-      `SELECT * FROM \`${db}\`.\`${table}\`${where} LIMIT ${limit} OFFSET ${offset}`,
+      `SELECT * FROM ${qb(db)}.${qb(table)}${where} LIMIT ${limit} OFFSET ${offset}`,
       params
     );
     const data = (rows as Array<Record<string, unknown>>) ?? [];
@@ -145,10 +146,10 @@ export class MySqlDriver implements Driver {
 
   async countRows(path: string[], filter?: PreviewFilter): Promise<number> {
     const [db, table] = path;
-    const where = filter ? ` WHERE \`${filter.column}\` = ?` : "";
+    const where = filter ? ` WHERE ${qb(filter.column)} = ?` : "";
     const params = filter ? [filter.value] : [];
     const [rows] = await this.p.query<mysql.RowDataPacket[]>(
-      `SELECT count(*) AS n FROM \`${db}\`.\`${table}\`${where}`,
+      `SELECT count(*) AS n FROM ${qb(db)}.${qb(table)}${where}`,
       params
     );
     return Number(rows[0]?.n ?? 0);
@@ -205,7 +206,7 @@ export class MySqlDriver implements Driver {
   async getDDL(path: string[]): Promise<string> {
     const [db, table] = path;
     const [rows] = await this.p.query<mysql.RowDataPacket[]>(
-      `SHOW CREATE TABLE \`${db}\`.\`${table}\``
+      `SHOW CREATE TABLE ${qb(db)}.${qb(table)}`
     );
     const row = rows[0] ?? {};
     return String(row["Create Table"] ?? row["Create View"] ?? "-- unavailable");
@@ -219,17 +220,17 @@ export class MySqlDriver implements Driver {
   ): Promise<void> {
     const [db, tbl] = table;
     const pkCols = Object.keys(pkValues);
-    const where = pkCols.map((c) => `\`${c}\` = ?`).join(" AND ");
-    const sql = `UPDATE \`${db}\`.\`${tbl}\` SET \`${column}\` = ? WHERE ${where}`;
+    const where = pkCols.map((c) => `${qb(c)} = ?`).join(" AND ");
+    const sql = `UPDATE ${qb(db)}.${qb(tbl)} SET ${qb(column)} = ? WHERE ${where}`;
     await this.p.query(sql, [value, ...pkCols.map((c) => pkValues[c])]);
   }
 
   async deleteRow(table: string[], pkValues: Record<string, unknown>): Promise<void> {
     const [db, tbl] = table;
     const pkCols = Object.keys(pkValues);
-    const where = pkCols.map((c) => `\`${c}\` = ?`).join(" AND ");
+    const where = pkCols.map((c) => `${qb(c)} = ?`).join(" AND ");
     await this.p.query(
-      `DELETE FROM \`${db}\`.\`${tbl}\` WHERE ${where}`,
+      `DELETE FROM ${qb(db)}.${qb(tbl)} WHERE ${where}`,
       pkCols.map((c) => pkValues[c])
     );
   }
@@ -240,10 +241,10 @@ export class MySqlDriver implements Driver {
     if (!cols.length) {
       throw new Error("No values provided for insert");
     }
-    const colList = cols.map((c) => `\`${c}\``).join(", ");
+    const colList = cols.map((c) => qb(c)).join(", ");
     const placeholders = cols.map(() => "?").join(", ");
     await this.p.query(
-      `INSERT INTO \`${db}\`.\`${tbl}\` (${colList}) VALUES (${placeholders})`,
+      `INSERT INTO ${qb(db)}.${qb(tbl)} (${colList}) VALUES (${placeholders})`,
       cols.map((c) => values[c])
     );
   }

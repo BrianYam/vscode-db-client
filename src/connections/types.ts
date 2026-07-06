@@ -7,6 +7,8 @@ export type DatabaseType = "postgres" | "mysql" | "sqlite" | "redis";
  */
 export interface ConnectionConfig {
   id: string;
+  /** Config schema version; absent = legacy (pre-versioning) record. */
+  schemaVersion?: number;
   type: DatabaseType;
   name: string;
   // SQL / Redis network fields
@@ -20,6 +22,8 @@ export interface ConnectionConfig {
   redisDb?: number;
   // SQL / Redis: enable TLS/SSL
   ssl?: boolean;
+  /** Skip certificate verification (accept self-signed). Default off = verify. */
+  allowInvalidCert?: boolean;
   // Optional SSL certificate file paths
   sslCA?: string;
   sslCert?: string;

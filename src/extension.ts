@@ -5,8 +5,10 @@ import { DatabaseTreeProvider, DbNode } from "./tree/DatabaseTreeProvider";
 import { ConnectionFormPanel } from "./webview/connectionFormPanel";
 import { QueryPanel } from "./webview/queryPanel";
 import { setSqliteWasmDir } from "./drivers/sqlite";
+import { initLog } from "./log";
 
 export function activate(ctx: vscode.ExtensionContext): void {
+  initLog(ctx);
   // sql.js needs to locate its .wasm file inside node_modules at runtime.
   setSqliteWasmDir(vscode.Uri.joinPath(ctx.extensionUri, "node_modules", "sql.js", "dist").fsPath);
 

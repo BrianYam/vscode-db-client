@@ -10,18 +10,17 @@ export interface TlsOptions {
 
 /**
  * Build TLS options from a connection config. Returns undefined when SSL is off.
- * Providing a CA turns on certificate verification; without one we accept
- * self-signed certs (rejectUnauthorized: false), which is the common case for
- * quick access to cloud databases.
+ * Certificate verification is ON by default; it is only disabled when the user
+ * explicitly ticks "allow self-signed" (`allowInvalidCert`). A supplied CA is
+ * loaded and used for verification.
  */
 export function buildTls(config: ConnectionConfig): TlsOptions | undefined {
   if (!config.ssl) {
     return undefined;
   }
-  const tls: TlsOptions = { rejectUnauthorized: false };
+  const tls: TlsOptions = { rejectUnauthorized: !config.allowInvalidCert };
   if (config.sslCA) {
     tls.ca = fs.readFileSync(config.sslCA);
-    tls.rejectUnauthorized = true;
   }
   if (config.sslCert) {
     tls.cert = fs.readFileSync(config.sslCert);

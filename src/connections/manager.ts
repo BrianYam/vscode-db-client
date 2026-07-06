@@ -2,6 +2,7 @@ import { ConnectionStore } from "./store";
 import { createDriver } from "../drivers/registry";
 import { Driver } from "../drivers/Driver";
 import { SshTunnel, openTunnelForConfig } from "./sshTunnel";
+import { logError } from "../log";
 
 /** Owns live driver instances (and their SSH tunnels) and connects on demand. */
 export class ConnectionManager {
@@ -37,6 +38,7 @@ export class ConnectionManager {
       const password = await this.store.getPassword(id);
       await driver.connect(password);
     } catch (err) {
+      logError(`connect:${config.type}:${config.name}`, err);
       this.tunnels.get(id)?.close();
       this.tunnels.delete(id);
       throw err;

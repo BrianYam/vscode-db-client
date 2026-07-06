@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { ConnectionManager } from "../connections/manager";
 import { ConnectionStore } from "../connections/store";
 import { EditTarget, PreviewFilter, QueryResult } from "../drivers/Driver";
+import { logError } from "../log";
 
 interface PanelOptions {
   initialSql?: string;
@@ -109,6 +110,7 @@ export class QueryPanel {
       result.elapsedMs = Date.now() - start;
       this.show(result);
     } catch (err) {
+      logError("previewTable", err);
       this.post({ type: "error", message: (err as Error).message });
     }
   }
@@ -125,6 +127,7 @@ export class QueryPanel {
       result.elapsedMs = Date.now() - start;
       this.show(result);
     } catch (err) {
+      logError("query", err);
       this.post({ type: "error", message: (err as Error).message });
     }
   }

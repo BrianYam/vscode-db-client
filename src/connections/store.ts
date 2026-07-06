@@ -22,7 +22,7 @@ export class ConnectionStore {
   constructor(private readonly ctx: vscode.ExtensionContext) {}
 
   all(): ConnectionConfig[] {
-    return this.ctx.globalState.get<ConnectionConfig[]>(KEY, []);
+    return this.ctx.globalState.get<ConnectionConfig[]>(KEY, []).map(upcast);
   }
 
   get(id: string): ConnectionConfig | undefined {
@@ -31,7 +31,7 @@ export class ConnectionStore {
 
   async save(config: ConnectionConfig, secrets: Secrets = {}): Promise<void> {
     const list = this.all().filter((c) => c.id !== config.id);
-    list.push(config);
+    list.push({ ...config, schemaVersion: CURRENT_SCHEMA_VERSION });
     await this.ctx.globalState.update(KEY, list);
     await this.storeSecret(secretKey(config.id), secrets.password);
     await this.storeSecret(sshPwKey(config.id), secrets.sshPassword);
@@ -87,4 +87,20 @@ export class ConnectionStore {
 /** Small helper: unique-ish id without external deps. */
 export function newId(): string {
   return "c_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+export const CURRENT_SCHEMA_VERSION = 1;
+
+/**
+ * Upcast a persisted config to the current schema. Legacy records (no
+ * schemaVersion) predate certificate verification being on by default, so an
+ * SSL-enabled legacy connection is migrated to `allowInvalidCert: true` to
+ * preserve its original behaviour — verification is not silently turned on
+ * under an existing, working connection.
+ */
+function upcast(c: ConnectionConfig): ConnectionConfig {
+  if (c.schemaVersion === undefined && c.ssl && c.allowInvalidCert === undefined) {
+    return { ...c, allowInvalidCert: true };
+  }
+  return c;
 }

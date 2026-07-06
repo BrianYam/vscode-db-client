@@ -20,6 +20,7 @@ interface FormPayload {
   filePath?: string;
   redisDb?: number;
   ssl?: boolean;
+  allowInvalidCert?: boolean;
   sslCA?: string;
   sslCert?: string;
   sslKey?: string;
@@ -111,6 +112,7 @@ export class ConnectionFormPanel {
       filePath: payload.filePath?.trim() || undefined,
       redisDb: payload.redisDb,
       ssl: payload.ssl || undefined,
+      allowInvalidCert: payload.allowInvalidCert || undefined,
       sslCA: payload.sslCA?.trim() || undefined,
       sslCert: payload.sslCert?.trim() || undefined,
       sslKey: payload.sslKey?.trim() || undefined,
@@ -214,6 +216,7 @@ export class ConnectionFormPanel {
       filePath: e?.filePath ?? "",
       redisDb: e?.redisDb ?? 0,
       ssl: e?.ssl ?? false,
+      allowInvalidCert: e?.allowInvalidCert ?? false,
       sslCA: e?.sslCA ?? "",
       sslCert: e?.sslCert ?? "",
       sslKey: e?.sslKey ?? "",
@@ -343,6 +346,10 @@ export class ConnectionFormPanel {
     </div>
 
     <div class="sslbox hidden" id="sslBox">
+      <div class="row" style="margin-bottom:12px">
+        <input type="checkbox" id="allowInvalidCert" style="width:auto;flex:0" />
+        <label style="width:auto;margin:0">Allow self-signed / skip certificate verification</label>
+      </div>
       <div class="row">
         <label>CA Certificate</label>
         <input type="text" id="sslCA" placeholder="path to CA cert (optional)" />
@@ -431,6 +438,7 @@ export class ConnectionFormPanel {
     $('filePath').value = state.filePath;
     $('redisDb').value = state.redisDb;
     $('ssl').checked = state.ssl;
+    $('allowInvalidCert').checked = state.allowInvalidCert;
     $('sslCA').value = state.sslCA;
     $('sslCert').value = state.sslCert;
     $('sslKey').value = state.sslKey;
@@ -533,6 +541,7 @@ export class ConnectionFormPanel {
         filePath: $('filePath').value,
         redisDb: Number($('redisDb').value) || 0,
         ssl: $('ssl').checked,
+        allowInvalidCert: $('allowInvalidCert').checked,
         sslCA: $('sslCA').value,
         sslCert: $('sslCert').value,
         sslKey: $('sslKey').value,

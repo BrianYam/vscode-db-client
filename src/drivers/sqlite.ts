@@ -9,6 +9,7 @@ import {
   QueryResult,
   TreeItemData,
 } from "./Driver";
+import { quoteIdent as qi } from "./ident";
 
 // sql.js is a WASM build — no native compilation needed. The .wasm file lives
 // in node_modules/sql.js/dist and is located via this directory, set once at
@@ -115,10 +116,10 @@ export class SqliteDriver implements Driver {
     limit = 100,
     filter?: PreviewFilter
   ): Promise<QueryResult> {
-    const where = filter ? ` WHERE "${filter.column}" = :v` : "";
+    const where = filter ? ` WHERE ${qi(filter.column)} = :v` : "";
     const bind = filter ? { ":v": filter.value as never } : undefined;
     const stmt = this.d.prepare(
-      `SELECT * FROM "${path[0]}"${where} LIMIT ${limit} OFFSET ${offset}`
+      `SELECT * FROM ${qi(path[0])}${where} LIMIT ${limit} OFFSET ${offset}`
     );
     if (bind) {
       stmt.bind(bind);
@@ -148,7 +149,7 @@ export class SqliteDriver implements Driver {
   async countRows(path: string[], filter?: PreviewFilter): Promise<number> {
     if (filter) {
       const stmt = this.d.prepare(
-        `SELECT count(*) FROM "${path[0]}" WHERE "${filter.column}" = :v`
+        `SELECT count(*) FROM ${qi(path[0])} WHERE ${qi(filter.column)} = :v`
       );
       stmt.bind({ ":v": filter.value as never });
       let n = 0;
@@ -158,7 +159,7 @@ export class SqliteDriver implements Driver {
       stmt.free();
       return n;
     }
-    const res = this.d.exec(`SELECT count(*) FROM "${path[0]}"`);
+    const res = this.d.exec(`SELECT count(*) FROM ${qi(path[0])}`);
     return Number(res[0]?.values[0]?.[0] ?? 0);
   }
 
@@ -179,8 +180,8 @@ export class SqliteDriver implements Driver {
   }
 
   async tableColumns(path: string[]): Promise<ColumnMeta[]> {
-    const res = this.d.exec(`PRAGMA table_info("${path[0]}")`);
-    const fkRes = this.d.exec(`PRAGMA foreign_key_list("${path[0]}")`);
+    const res = this.d.exec(`PRAGMA table_info(${qi(path[0])})`);
+    const fkRes = this.d.exec(`PRAGMA foreign_key_list(${qi(path[0])})`);
     // foreign_key_list columns: id, seq, table, from, to, ...
     const fromIdx = fkRes[0]?.columns.indexOf("from") ?? -1;
     const fkNames = new Set(
@@ -219,17 +220,17 @@ export class SqliteDriver implements Driver {
     value: unknown
   ): Promise<void> {
     const pkCols = Object.keys(pkValues);
-    const where = pkCols.map((c) => `"${c}" = ?`).join(" AND ");
-    const sql = `UPDATE "${table[0]}" SET "${column}" = ? WHERE ${where}`;
+    const where = pkCols.map((c) => `${qi(c)} = ?`).join(" AND ");
+    const sql = `UPDATE ${qi(table[0])} SET ${qi(column)} = ? WHERE ${where}`;
     this.d.run(sql, [value as never, ...pkCols.map((c) => pkValues[c] as never)]);
     this.persist();
   }
 
   async deleteRow(table: string[], pkValues: Record<string, unknown>): Promise<void> {
     const pkCols = Object.keys(pkValues);
-    const where = pkCols.map((c) => `"${c}" = ?`).join(" AND ");
+    const where = pkCols.map((c) => `${qi(c)} = ?`).join(" AND ");
     this.d.run(
-      `DELETE FROM "${table[0]}" WHERE ${where}`,
+      `DELETE FROM ${qi(table[0])} WHERE ${where}`,
       pkCols.map((c) => pkValues[c] as never)
     );
     this.persist();
@@ -240,10 +241,10 @@ export class SqliteDriver implements Driver {
     if (!cols.length) {
       throw new Error("No values provided for insert");
     }
-    const colList = cols.map((c) => `"${c}"`).join(", ");
+    const colList = cols.map((c) => qi(c)).join(", ");
     const placeholders = cols.map(() => "?").join(", ");
     this.d.run(
-      `INSERT INTO "${table[0]}" (${colList}) VALUES (${placeholders})`,
+      `INSERT INTO ${qi(table[0])} (${colList}) VALUES (${placeholders})`,
       cols.map((c) => values[c] as never)
     );
     this.persist();
