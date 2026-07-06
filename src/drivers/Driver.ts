@@ -77,6 +77,8 @@ export interface TreeItemData {
   path: string[];
   /** Optional right-hand text (e.g. a column's type). */
   description?: string;
+  /** Optional hover tooltip (e.g. an index definition). */
+  tooltip?: string;
   /** Column-only hints for icon selection. */
   pk?: boolean;
   fk?: boolean;

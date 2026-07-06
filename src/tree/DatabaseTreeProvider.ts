@@ -210,6 +210,9 @@ export class DatabaseTreeProvider
     if (data.description) {
       node.description = data.description;
     }
+    if (data.tooltip) {
+      node.tooltip = data.tooltip;
+    }
     if (data.kind === "table" || data.kind === "view" || data.kind === "key") {
       node.command = {
         command: "openDbClient.previewTable",

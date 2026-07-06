@@ -10,6 +10,7 @@ import {
 } from "./Driver";
 import { buildTls } from "./ssl";
 import { quoteBacktick as qb } from "./ident";
+import { tableFolders } from "./postgres";
 
 /** MySQL / MariaDB driver backed by the pure-JS `mysql2` pool. */
 export class MySqlDriver implements Driver {
@@ -81,19 +82,96 @@ export class MySqlDriver implements Driver {
       });
     }
     if (path.length === 2) {
-      const cols = await this.tableColumns(path);
-      return cols.map((c) => ({
-        label: c.name,
-        kind: "column" as const,
-        expandable: false,
-        path: [...path, c.name],
-        description: marker(c),
-        pk: c.pk,
-        fk: c.fk,
-        dataType: c.type,
-      }));
+      return tableFolders(path);
+    }
+    if (path.length === 3) {
+      const tablePath = path.slice(0, 2);
+      switch (path[2]) {
+        case "@columns":
+          return this.columnNodes(tablePath);
+        case "@indexes":
+          return this.indexNodes(tablePath);
+        case "@fk":
+          return this.fkNodes(tablePath);
+        case "@triggers":
+          return this.triggerNodes(tablePath);
+      }
     }
     return [];
+  }
+
+  private async columnNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const cols = await this.tableColumns(tablePath);
+    return cols.map((c) => ({
+      label: c.name,
+      kind: "column" as const,
+      expandable: false,
+      path: [...tablePath, "@columns", c.name],
+      description: marker(c),
+      pk: c.pk,
+      fk: c.fk,
+      dataType: c.type,
+    }));
+  }
+
+  private async indexNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const [db, table] = tablePath;
+    const [rows] = await this.p.query<mysql.RowDataPacket[]>(
+      `SELECT index_name, non_unique, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols
+       FROM information_schema.statistics
+       WHERE table_schema = ? AND table_name = ?
+       GROUP BY index_name, non_unique ORDER BY index_name`,
+      [db, table]
+    );
+    return rows.map((r) => {
+      const name = String(r.index_name ?? r.INDEX_NAME);
+      const unique = Number(r.non_unique ?? r.NON_UNIQUE) === 0;
+      const cols = String(r.cols ?? r.COLS ?? "");
+      return {
+        label: name,
+        kind: "info" as const,
+        icon: unique ? "key" : "list-selection",
+        expandable: false,
+        path: [...tablePath, "@indexes", name],
+        description: `${unique ? "unique " : ""}(${cols})`,
+      };
+    });
+  }
+
+  private async fkNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const fks = await this.foreignKeys(tablePath);
+    return fks.map((fk) => ({
+      label: fk.column,
+      kind: "info" as const,
+      icon: "references",
+      expandable: false,
+      path: [...tablePath, "@fk", fk.column],
+      description: `→ ${fk.refTable.join(".")}.${fk.refColumn}`,
+    }));
+  }
+
+  private async triggerNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const [db, table] = tablePath;
+    const [rows] = await this.p.query<mysql.RowDataPacket[]>(
+      `SELECT trigger_name, action_timing, event_manipulation
+       FROM information_schema.triggers
+       WHERE event_object_schema = ? AND event_object_table = ?
+       ORDER BY trigger_name`,
+      [db, table]
+    );
+    return rows.map((r) => {
+      const name = String(r.trigger_name ?? r.TRIGGER_NAME);
+      const timing = String(r.action_timing ?? r.ACTION_TIMING ?? "");
+      const event = String(r.event_manipulation ?? r.EVENT_MANIPULATION ?? "");
+      return {
+        label: name,
+        kind: "info" as const,
+        icon: "zap",
+        expandable: false,
+        path: [...tablePath, "@triggers", name],
+        description: `${timing} ${event}`.toLowerCase(),
+      };
+    });
   }
 
   async query(sql: string): Promise<QueryResult> {

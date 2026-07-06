@@ -10,6 +10,7 @@ import {
   TreeItemData,
 } from "./Driver";
 import { quoteIdent as qi } from "./ident";
+import { tableFolders } from "./postgres";
 
 // sql.js is a WASM build — no native compilation needed. The .wasm file lives
 // in node_modules/sql.js/dist and is located via this directory, set once at
@@ -81,19 +82,90 @@ export class SqliteDriver implements Driver {
       }));
     }
     if (path.length === 1) {
-      const cols = await this.tableColumns(path);
-      return cols.map((c) => ({
-        label: c.name,
-        kind: "column" as const,
-        expandable: false,
-        path: [...path, c.name],
-        description: marker(c),
-        pk: c.pk,
-        fk: c.fk,
-        dataType: c.type,
-      }));
+      return tableFolders(path);
+    }
+    if (path.length === 2) {
+      const tablePath = path.slice(0, 1);
+      switch (path[1]) {
+        case "@columns":
+          return this.columnNodes(tablePath);
+        case "@indexes":
+          return this.indexNodes(tablePath);
+        case "@fk":
+          return this.fkNodes(tablePath);
+        case "@triggers":
+          return this.triggerNodes(tablePath);
+      }
     }
     return [];
+  }
+
+  private async columnNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const cols = await this.tableColumns(tablePath);
+    return cols.map((c) => ({
+      label: c.name,
+      kind: "column" as const,
+      expandable: false,
+      path: [...tablePath, "@columns", c.name],
+      description: marker(c),
+      pk: c.pk,
+      fk: c.fk,
+      dataType: c.type,
+    }));
+  }
+
+  private async indexNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const res = this.d.exec(`PRAGMA index_list(${qi(tablePath[0])})`);
+    if (res.length === 0) {
+      return [];
+    }
+    const cols = res[0].columns;
+    const iName = cols.indexOf("name");
+    const iUnique = cols.indexOf("unique");
+    return res[0].values.map((r) => {
+      const name = String(r[iName]);
+      const unique = Number(r[iUnique]) === 1;
+      return {
+        label: name,
+        kind: "info" as const,
+        icon: unique ? "key" : "list-selection",
+        expandable: false,
+        path: [...tablePath, "@indexes", name],
+        description: unique ? "unique" : undefined,
+      };
+    });
+  }
+
+  private async fkNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const fks = await this.foreignKeys(tablePath);
+    return fks.map((fk) => ({
+      label: fk.column,
+      kind: "info" as const,
+      icon: "references",
+      expandable: false,
+      path: [...tablePath, "@fk", fk.column],
+      description: `→ ${fk.refTable.join(".")}.${fk.refColumn}`,
+    }));
+  }
+
+  private async triggerNodes(tablePath: string[]): Promise<TreeItemData[]> {
+    const stmt = this.d.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`
+    );
+    stmt.bind([tablePath[0]]);
+    const out: TreeItemData[] = [];
+    while (stmt.step()) {
+      const name = String(stmt.get()[0]);
+      out.push({
+        label: name,
+        kind: "info",
+        icon: "zap",
+        expandable: false,
+        path: [...tablePath, "@triggers", name],
+      });
+    }
+    stmt.free();
+    return out;
   }
 
   async query(sql: string): Promise<QueryResult> {
