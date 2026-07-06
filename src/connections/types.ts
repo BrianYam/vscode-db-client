@@ -27,7 +27,17 @@ export interface ConnectionConfig {
   // Connect via a raw connection string instead of individual fields
   useConnectionString?: boolean;
   connectionString?: string;
+  // SSH tunnel (secrets — sshPassword / sshPassphrase — live in SecretStorage)
+  sshEnabled?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUsername?: string;
+  sshAuth?: SshAuth;
+  sshPrivateKeyPath?: string;
+  sshConnectTimeout?: number;
 }
+
+export type SshAuth = "auto" | "password" | "key" | "agent";
 
 export const DEFAULT_PORTS: Record<DatabaseType, number> = {
   postgres: 5432,

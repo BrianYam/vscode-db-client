@@ -60,8 +60,14 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5.3]` Connection-string mode: toggle + "Use" parser; drivers connect via string
 - [x] `[SDD][M5.3]` SSL Config: CA / Client Cert / Client Key file paths (Browse) wired into TLS
 
-## M6 — SSH Tunnel
-- [ ] `[SDD][M6]` `ssh2` local port-forward established before driver.connect(); tunnel fields in form
+## M6 — SSH Tunnel  ✅ DONE 2026-07-06
+- [x] `[SDD][M6]` `ssh2` local port-forward established before driver.connect()
+- [x] `[SDD][M6]` SSH form section: enable, host/port, username, auth (Auto/Password/Key/Agent), timeout
+- [x] `[SDD][M6]` Password / key + passphrase auth; `~` expansion; SSH agent support
+- [x] `[SDD][M6]` SSH password + passphrase stored in SecretStorage (not globalState)
+- [x] `[SDD][M6]` Tunnel lifecycle tied to connection (opened on connect, closed on disconnect)
+- [x] `[SDD][M6]` Test Connection also opens the tunnel
+- [x] `[SDD][M6]` SSH tunnel + connection string: parse host/port from URL, rewrite to local port
 
 ## M7 — Advanced (lowest priority)
 - [ ] `[SDD][M7]` ER diagram generation from foreign keys

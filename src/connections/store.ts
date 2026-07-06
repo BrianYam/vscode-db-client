@@ -3,6 +3,15 @@ import { ConnectionConfig } from "./types";
 
 const KEY = "openDbClient.connections";
 const secretKey = (id: string) => `openDbClient.password.${id}`;
+const sshPwKey = (id: string) => `openDbClient.sshPassword.${id}`;
+const sshPassphraseKey = (id: string) => `openDbClient.sshPassphrase.${id}`;
+
+/** Secret values kept out of globalState. */
+export interface Secrets {
+  password?: string;
+  sshPassword?: string;
+  sshPassphrase?: string;
+}
 
 /**
  * Persists connection configs in globalState and passwords in SecretStorage.
@@ -20,12 +29,18 @@ export class ConnectionStore {
     return this.all().find((c) => c.id === id);
   }
 
-  async save(config: ConnectionConfig, password?: string): Promise<void> {
+  async save(config: ConnectionConfig, secrets: Secrets = {}): Promise<void> {
     const list = this.all().filter((c) => c.id !== config.id);
     list.push(config);
     await this.ctx.globalState.update(KEY, list);
-    if (password !== undefined && password !== "") {
-      await this.ctx.secrets.store(secretKey(config.id), password);
+    await this.storeSecret(secretKey(config.id), secrets.password);
+    await this.storeSecret(sshPwKey(config.id), secrets.sshPassword);
+    await this.storeSecret(sshPassphraseKey(config.id), secrets.sshPassphrase);
+  }
+
+  private async storeSecret(key: string, value?: string): Promise<void> {
+    if (value !== undefined && value !== "") {
+      await this.ctx.secrets.store(key, value);
     }
   }
 
@@ -33,10 +48,20 @@ export class ConnectionStore {
     const list = this.all().filter((c) => c.id !== id);
     await this.ctx.globalState.update(KEY, list);
     await this.ctx.secrets.delete(secretKey(id));
+    await this.ctx.secrets.delete(sshPwKey(id));
+    await this.ctx.secrets.delete(sshPassphraseKey(id));
   }
 
   getPassword(id: string): Promise<string | undefined> {
     return Promise.resolve(this.ctx.secrets.get(secretKey(id)));
+  }
+
+  getSshPassword(id: string): Promise<string | undefined> {
+    return Promise.resolve(this.ctx.secrets.get(sshPwKey(id)));
+  }
+
+  getSshPassphrase(id: string): Promise<string | undefined> {
+    return Promise.resolve(this.ctx.secrets.get(sshPassphraseKey(id)));
   }
 }
 

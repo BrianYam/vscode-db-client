@@ -1,8 +1,14 @@
 import * as vscode from "vscode";
-import { ConnectionConfig, DatabaseType, DEFAULT_PORTS } from "../connections/types";
-import { ConnectionStore, newId } from "../connections/store";
+import {
+  ConnectionConfig,
+  DatabaseType,
+  DEFAULT_PORTS,
+  SshAuth,
+} from "../connections/types";
+import { ConnectionStore, newId, Secrets } from "../connections/store";
 import { ConnectionManager } from "../connections/manager";
 import { createDriver } from "../drivers/registry";
+import { SshTunnel, openTunnelForConfig } from "../connections/sshTunnel";
 
 interface FormPayload {
   type: DatabaseType;
@@ -19,6 +25,19 @@ interface FormPayload {
   sslKey?: string;
   useConnectionString?: boolean;
   connectionString?: string;
+  sshEnabled?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUsername?: string;
+  sshAuth?: SshAuth;
+  sshPrivateKeyPath?: string;
+  sshConnectTimeout?: number;
+}
+
+interface FormSecrets {
+  password?: string;
+  sshPassword?: string;
+  sshPassphrase?: string;
 }
 
 type Refresh = () => void;
@@ -56,17 +75,19 @@ export class ConnectionFormPanel {
       switch (msg.type) {
         case "ready":
           if (this.existing) {
-            const pw = await this.store.getPassword(this.existing.id);
-            if (pw) {
-              this.post({ type: "prefill", password: pw });
-            }
+            this.post({
+              type: "prefill",
+              password: (await this.store.getPassword(this.existing.id)) ?? "",
+              sshPassword: (await this.store.getSshPassword(this.existing.id)) ?? "",
+              sshPassphrase: (await this.store.getSshPassphrase(this.existing.id)) ?? "",
+            });
           }
           break;
         case "test":
-          await this.test(msg.payload, msg.password);
+          await this.test(msg.payload, msg.secrets ?? {});
           break;
         case "save":
-          await this.save(msg.payload, msg.password, msg.thenConnect);
+          await this.save(msg.payload, msg.secrets ?? {}, msg.thenConnect);
           break;
         case "browse":
           await this.browse(msg.field);
@@ -95,26 +116,48 @@ export class ConnectionFormPanel {
       sslKey: payload.sslKey?.trim() || undefined,
       useConnectionString: payload.useConnectionString || undefined,
       connectionString: payload.connectionString?.trim() || undefined,
+      sshEnabled: payload.sshEnabled || undefined,
+      sshHost: payload.sshHost?.trim() || undefined,
+      sshPort: payload.sshPort,
+      sshUsername: payload.sshUsername?.trim() || undefined,
+      sshAuth: payload.sshAuth,
+      sshPrivateKeyPath: payload.sshPrivateKeyPath?.trim() || undefined,
+      sshConnectTimeout: payload.sshConnectTimeout,
     };
   }
 
-  private async test(payload: FormPayload, password?: string): Promise<void> {
+  private async test(payload: FormPayload, secrets: FormSecrets): Promise<void> {
     const config = this.toConfig(payload);
-    const pw = password || (this.existing ? await this.store.getPassword(config.id) : undefined);
+    const pw =
+      secrets.password || (this.existing ? await this.store.getPassword(config.id) : undefined);
     const start = Date.now();
-    const driver = createDriver(config);
+    let tunnel: SshTunnel | undefined;
+    let driver: ReturnType<typeof createDriver> | undefined;
     try {
+      let effective = config;
+      if (config.sshEnabled && config.type !== "sqlite") {
+        const sshPassword =
+          secrets.sshPassword ||
+          (this.existing ? await this.store.getSshPassword(config.id) : undefined);
+        const sshPassphrase =
+          secrets.sshPassphrase ||
+          (this.existing ? await this.store.getSshPassphrase(config.id) : undefined);
+        const opened = await openTunnelForConfig(config, { sshPassword, sshPassphrase });
+        tunnel = opened.tunnel;
+        effective = opened.effectiveConfig;
+      }
+      driver = createDriver(effective);
       await driver.connect(pw);
-      const ms = Date.now() - start;
-      this.post({ type: "testResult", ok: true, message: `Connection successful`, ms });
+      this.post({ type: "testResult", ok: true, message: "Connection successful", ms: Date.now() - start });
     } catch (err) {
       this.post({ type: "testResult", ok: false, message: (err as Error).message, ms: Date.now() - start });
     } finally {
-      await driver.dispose().catch(() => undefined);
+      await driver?.dispose().catch(() => undefined);
+      tunnel?.close();
     }
   }
 
-  private async save(payload: FormPayload, password: string, thenConnect: boolean): Promise<void> {
+  private async save(payload: FormPayload, secrets: FormSecrets, thenConnect: boolean): Promise<void> {
     const config = this.toConfig(payload);
     if (!config.name) {
       this.post({ type: "testResult", ok: false, message: "Name is required", ms: 0 });
@@ -122,7 +165,12 @@ export class ConnectionFormPanel {
     }
     // Reconnect fresh if we're editing an already-open connection.
     await this.manager.disconnect(config.id);
-    await this.store.save(config, password || undefined);
+    const secretBundle: Secrets = {
+      password: secrets.password || undefined,
+      sshPassword: secrets.sshPassword || undefined,
+      sshPassphrase: secrets.sshPassphrase || undefined,
+    };
+    await this.store.save(config, secretBundle);
     this.refresh();
     if (thenConnect) {
       try {
@@ -171,6 +219,13 @@ export class ConnectionFormPanel {
       sslKey: e?.sslKey ?? "",
       useConnectionString: e?.useConnectionString ?? false,
       connectionString: e?.connectionString ?? "",
+      sshEnabled: e?.sshEnabled ?? false,
+      sshHost: e?.sshHost ?? "",
+      sshPort: e?.sshPort ?? 22,
+      sshUsername: e?.sshUsername ?? "",
+      sshAuth: e?.sshAuth ?? "auto",
+      sshPrivateKeyPath: e?.sshPrivateKeyPath ?? "",
+      sshConnectTimeout: e?.sshConnectTimeout ?? 5000,
       isEdit: !!e,
     });
     const ports = JSON.stringify(DEFAULT_PORTS);
@@ -312,6 +367,36 @@ export class ConnectionFormPanel {
       <input type="text" id="connectionString" placeholder="postgresql://user:pass@host:5432/dbname" />
       <button class="secondary" id="csUse" type="button">🔎 Use</button>
     </div>
+
+    <div class="toggle">
+      <input type="checkbox" id="sshEnable" /> <label style="margin:0">Use SSH Tunnel</label>
+    </div>
+    <div class="sslbox hidden" id="sshBox">
+      <div class="grid">
+        <div><label class="req">SSH Host</label><input type="text" id="sshHost" placeholder="bastion.example.com" /></div>
+        <div><label class="req">SSH Port</label><input type="number" id="sshPort" /></div>
+        <div><label>SSH Username</label><input type="text" id="sshUsername" /></div>
+        <div><label>Connect Timeout (ms)</label><input type="number" id="sshConnectTimeout" /></div>
+      </div>
+      <label>Auth</label>
+      <div class="types" id="sshAuthBtns" style="margin-bottom:12px">
+        <div class="type" data-auth="auto">Auto</div>
+        <div class="type" data-auth="password">Password</div>
+        <div class="type" data-auth="key">Key</div>
+        <div class="type" data-auth="agent">Agent</div>
+      </div>
+      <div class="grid">
+        <div><label>SSH Password</label><input type="password" id="sshPassword" /></div>
+        <div><label>Key Passphrase</label><input type="password" id="sshPassphrase" /></div>
+        <div class="full"><label>Private Key Path</label>
+          <div class="browse">
+            <input type="text" id="sshPrivateKeyPath" placeholder="~/.ssh/id_rsa" />
+            <button class="secondary" data-browse="sshPrivateKeyPath" type="button">…</button>
+          </div>
+        </div>
+      </div>
+      <div style="opacity:.65;font-size:12px">Tunnels the database host/port through this SSH server. "Auto" tries your SSH agent, then key, then password.</div>
+    </div>
   </div>
 
   <!-- SQLite -->
@@ -393,9 +478,28 @@ export class ConnectionFormPanel {
       }
     });
 
-    // generic browse buttons (SSL certs)
+    // generic browse buttons (SSL certs, SSH key)
     document.querySelectorAll('[data-browse]').forEach((b) =>
       b.addEventListener('click', () => vscode.postMessage({ type:'browse', field: b.getAttribute('data-browse') })));
+
+    // SSH tunnel
+    $('sshHost').value = state.sshHost;
+    $('sshPort').value = state.sshPort;
+    $('sshUsername').value = state.sshUsername;
+    $('sshPrivateKeyPath').value = state.sshPrivateKeyPath;
+    $('sshConnectTimeout').value = state.sshConnectTimeout;
+    $('sshEnable').checked = state.sshEnabled;
+    function syncSsh() { $('sshBox').classList.toggle('hidden', !$('sshEnable').checked); }
+    $('sshEnable').addEventListener('change', syncSsh);
+    syncSsh();
+    function selectAuth(a) {
+      state.sshAuth = a;
+      document.querySelectorAll('#sshAuthBtns .type').forEach((el) =>
+        el.classList.toggle('active', el.getAttribute('data-auth') === a));
+    }
+    document.querySelectorAll('#sshAuthBtns .type').forEach((el) =>
+      el.addEventListener('click', () => selectAuth(el.getAttribute('data-auth'))));
+    selectAuth(state.sshAuth);
 
     function selectType(t) {
       state.type = t;
@@ -434,6 +538,20 @@ export class ConnectionFormPanel {
         sslKey: $('sslKey').value,
         useConnectionString: $('useCS').checked,
         connectionString: $('connectionString').value,
+        sshEnabled: $('sshEnable').checked,
+        sshHost: $('sshHost').value,
+        sshPort: Number($('sshPort').value) || 22,
+        sshUsername: $('sshUsername').value,
+        sshAuth: state.sshAuth,
+        sshPrivateKeyPath: $('sshPrivateKeyPath').value,
+        sshConnectTimeout: Number($('sshConnectTimeout').value) || 5000,
+      };
+    }
+    function secrets() {
+      return {
+        password: $('password').value,
+        sshPassword: $('sshPassword').value,
+        sshPassphrase: $('sshPassphrase').value,
       };
     }
     function validate() {
@@ -450,11 +568,11 @@ export class ConnectionFormPanel {
     $('testBtn').addEventListener('click', () => {
       const err = validate(); if (err) { banner(false, err); return; }
       banner(true, 'Testing…');
-      vscode.postMessage({ type:'test', payload: payload(), password: $('password').value });
+      vscode.postMessage({ type:'test', payload: payload(), secrets: secrets() });
     });
     function doSave(thenConnect) {
       const err = validate(); if (err) { banner(false, err); return; }
-      vscode.postMessage({ type:'save', payload: payload(), password: $('password').value, thenConnect });
+      vscode.postMessage({ type:'save', payload: payload(), secrets: secrets(), thenConnect });
     }
     $('saveBtn').addEventListener('click', () => doSave(false));
     $('connectBtn').addEventListener('click', () => doSave(true));
@@ -467,8 +585,9 @@ export class ConnectionFormPanel {
         const el = $(m.field);
         if (el) el.value = m.path;
       } else if (m.type === 'prefill') {
-        $('password').value = m.password;
-        $('password').placeholder = '';
+        if (m.password) { $('password').value = m.password; $('password').placeholder = ''; }
+        if (m.sshPassword) $('sshPassword').value = m.sshPassword;
+        if (m.sshPassphrase) $('sshPassphrase').value = m.sshPassphrase;
       }
     });
 
