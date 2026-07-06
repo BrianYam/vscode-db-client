@@ -8,6 +8,22 @@ export interface EditTarget {
   pkColumns: string[];
 }
 
+/** Column metadata for rich grid headers, tree expansion, and DDL views. */
+export interface ColumnMeta {
+  name: string;
+  type: string;
+  nullable: boolean;
+  pk: boolean;
+  fk: boolean;
+}
+
+/** Pagination state for a table preview. */
+export interface PageInfo {
+  offset: number;
+  limit: number;
+  total: number;
+}
+
 /** A flat, grid-friendly result set. */
 export interface QueryResult {
   columns: string[];
@@ -17,14 +33,12 @@ export interface QueryResult {
   message?: string;
   /** Present when the grid may be edited in place (table previews only). */
   editable?: EditTarget;
-}
-
-/** Column metadata for tree expansion and DDL/structure views. */
-export interface ColumnMeta {
-  name: string;
-  type: string;
-  nullable: boolean;
-  pk: boolean;
+  /** Rich per-column metadata; present for table previews. */
+  columnsMeta?: ColumnMeta[];
+  /** Pagination info; present for table previews. */
+  page?: PageInfo;
+  /** Server round-trip time in milliseconds. */
+  elapsedMs?: number;
 }
 
 /** One child in the connection tree (schema, table, column, key, etc.). */
@@ -55,23 +69,32 @@ export interface Driver {
   /** Run a raw statement (SQL, or a Redis command line). */
   query(sql: string): Promise<QueryResult>;
 
-  /** Preview a table's rows; sets `editable` when a primary key exists. */
-  previewTable(path: string[]): Promise<QueryResult>;
+  /**
+   * Preview a table's rows (paginated). Sets `editable`, `columnsMeta`, and
+   * `page` so the grid can render rich headers and navigate pages.
+   */
+  previewTable(path: string[], offset?: number, limit?: number): Promise<QueryResult>;
 
-  /** Column metadata for a table (used by tree expansion and DDL view). */
+  /** Total row count for a table (for pagination). */
+  countRows(path: string[]): Promise<number>;
+
+  /** Column metadata for a table. */
   tableColumns(path: string[]): Promise<ColumnMeta[]>;
 
   /** A CREATE-style definition string for a table. */
   getDDL(path: string[]): Promise<string>;
 
-  /**
-   * Update a single cell, identified by the row's primary-key values.
-   * Implementations MUST parameterize values to avoid injection.
-   */
+  /** Update a single cell, identified by the row's primary-key values. */
   updateCell(
     table: string[],
     pkValues: Record<string, unknown>,
     column: string,
     value: unknown
   ): Promise<void>;
+
+  /** Delete a single row, identified by its primary-key values. */
+  deleteRow(table: string[], pkValues: Record<string, unknown>): Promise<void>;
+
+  /** Insert a row. Only the provided columns are set; the rest use defaults. */
+  insertRow(table: string[], values: Record<string, unknown>): Promise<void>;
 }

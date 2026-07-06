@@ -77,6 +77,10 @@ export class RedisDriver implements Driver {
   }
 
   // The following are table-oriented operations that don't apply to Redis.
+  async countRows(): Promise<number> {
+    return 0;
+  }
+
   async tableColumns(): Promise<ColumnMeta[]> {
     return [];
   }
@@ -87,6 +91,15 @@ export class RedisDriver implements Driver {
 
   async updateCell(): Promise<void> {
     throw new Error("Inline editing is not supported for Redis keys");
+  }
+
+  async deleteRow(table: string[]): Promise<void> {
+    // For Redis, "delete row" = delete the key.
+    await this.c.del(table[0]);
+  }
+
+  async insertRow(): Promise<void> {
+    throw new Error("Add row is not supported for Redis keys");
   }
 }
 

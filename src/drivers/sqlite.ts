@@ -51,7 +51,6 @@ export class SqliteDriver implements Driver {
     return this.db;
   }
 
-  /** Write the in-memory database back to the source file. */
   private persist(): void {
     fs.writeFileSync(this.config.filePath!, Buffer.from(this.d.export()));
   }
@@ -80,7 +79,7 @@ export class SqliteDriver implements Driver {
         kind: "column" as const,
         expandable: false,
         path: [...path, c.name],
-        description: `${c.type || "?"}${c.pk ? " 🔑" : ""}${c.nullable ? "" : " ·not null"}`,
+        description: marker(c),
       }));
     }
     return [];
@@ -88,7 +87,6 @@ export class SqliteDriver implements Driver {
 
   async query(sql: string): Promise<QueryResult> {
     const res = this.d.exec(sql);
-    // Any statement can mutate; persist if it wasn't a pure SELECT.
     if (!/^\s*select/i.test(sql)) {
       this.persist();
     }
@@ -104,34 +102,50 @@ export class SqliteDriver implements Driver {
     return { columns, rows, rowCount: rows.length };
   }
 
-  async previewTable(path: string[]): Promise<QueryResult> {
-    const result = await this.query(`SELECT * FROM "${path[0]}" LIMIT 200`);
+  async previewTable(path: string[], offset = 0, limit = 100): Promise<QueryResult> {
+    const result = await this.query(
+      `SELECT * FROM "${path[0]}" LIMIT ${limit} OFFSET ${offset}`
+    );
     const cols = await this.tableColumns(path);
+    result.columnsMeta = cols;
     const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
+    result.page = { offset, limit, total: await this.countRows(path) };
     return result;
+  }
+
+  async countRows(path: string[]): Promise<number> {
+    const res = this.d.exec(`SELECT count(*) FROM "${path[0]}"`);
+    return Number(res[0]?.values[0]?.[0] ?? 0);
   }
 
   async tableColumns(path: string[]): Promise<ColumnMeta[]> {
     const res = this.d.exec(`PRAGMA table_info("${path[0]}")`);
+    const fkRes = this.d.exec(`PRAGMA foreign_key_list("${path[0]}")`);
+    // foreign_key_list columns: id, seq, table, from, to, ...
+    const fromIdx = fkRes[0]?.columns.indexOf("from") ?? -1;
+    const fkNames = new Set(
+      fkRes[0] && fromIdx >= 0
+        ? fkRes[0].values.map((r) => String(r[fromIdx]))
+        : []
+    );
     if (res.length === 0) {
       return [];
     }
-    // columns: cid, name, type, notnull, dflt_value, pk
+    // table_info columns: cid, name, type, notnull, dflt_value, pk
     return res[0].values.map((row) => ({
       name: String(row[1]),
       type: String(row[2] ?? ""),
       nullable: Number(row[3]) === 0,
       pk: Number(row[5]) > 0,
+      fk: fkNames.has(String(row[1])),
     }));
   }
 
   async getDDL(path: string[]): Promise<string> {
-    const stmt = this.d.prepare(
-      `SELECT sql FROM sqlite_master WHERE name = ?`
-    );
+    const stmt = this.d.prepare(`SELECT sql FROM sqlite_master WHERE name = ?`);
     stmt.bind([path[0]]);
     let ddl = "-- unavailable";
     if (stmt.step()) {
@@ -150,10 +164,35 @@ export class SqliteDriver implements Driver {
     const pkCols = Object.keys(pkValues);
     const where = pkCols.map((c) => `"${c}" = ?`).join(" AND ");
     const sql = `UPDATE "${table[0]}" SET "${column}" = ? WHERE ${where}`;
-    this.d.run(sql, [
-      value as never,
-      ...pkCols.map((c) => pkValues[c] as never),
-    ]);
+    this.d.run(sql, [value as never, ...pkCols.map((c) => pkValues[c] as never)]);
     this.persist();
   }
+
+  async deleteRow(table: string[], pkValues: Record<string, unknown>): Promise<void> {
+    const pkCols = Object.keys(pkValues);
+    const where = pkCols.map((c) => `"${c}" = ?`).join(" AND ");
+    this.d.run(
+      `DELETE FROM "${table[0]}" WHERE ${where}`,
+      pkCols.map((c) => pkValues[c] as never)
+    );
+    this.persist();
+  }
+
+  async insertRow(table: string[], values: Record<string, unknown>): Promise<void> {
+    const cols = Object.keys(values);
+    if (!cols.length) {
+      throw new Error("No values provided for insert");
+    }
+    const colList = cols.map((c) => `"${c}"`).join(", ");
+    const placeholders = cols.map(() => "?").join(", ");
+    this.d.run(
+      `INSERT INTO "${table[0]}" (${colList}) VALUES (${placeholders})`,
+      cols.map((c) => values[c] as never)
+    );
+    this.persist();
+  }
+}
+
+function marker(c: ColumnMeta): string {
+  return `${c.type || "?"}${c.pk ? " 🔑" : ""}${c.fk ? " 🔗" : ""}${c.nullable ? "" : " ·not null"}`;
 }

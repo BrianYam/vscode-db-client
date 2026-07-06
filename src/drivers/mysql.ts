@@ -72,7 +72,7 @@ export class MySqlDriver implements Driver {
         kind: "column" as const,
         expandable: false,
         path: [...path, c.name],
-        description: `${c.type}${c.pk ? " 🔑" : ""}${c.nullable ? "" : " ·not null"}`,
+        description: marker(c),
       }));
     }
     return [];
@@ -98,15 +98,27 @@ export class MySqlDriver implements Driver {
     };
   }
 
-  async previewTable(path: string[]): Promise<QueryResult> {
+  async previewTable(path: string[], offset = 0, limit = 100): Promise<QueryResult> {
     const [db, table] = path;
-    const result = await this.query(`SELECT * FROM \`${db}\`.\`${table}\` LIMIT 200`);
+    const result = await this.query(
+      `SELECT * FROM \`${db}\`.\`${table}\` LIMIT ${limit} OFFSET ${offset}`
+    );
     const cols = await this.tableColumns(path);
+    result.columnsMeta = cols;
     const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
+    result.page = { offset, limit, total: await this.countRows(path) };
     return result;
+  }
+
+  async countRows(path: string[]): Promise<number> {
+    const [db, table] = path;
+    const [rows] = await this.p.query<mysql.RowDataPacket[]>(
+      `SELECT count(*) AS n FROM \`${db}\`.\`${table}\``
+    );
+    return Number(rows[0]?.n ?? 0);
   }
 
   async tableColumns(path: string[]): Promise<ColumnMeta[]> {
@@ -118,12 +130,24 @@ export class MySqlDriver implements Driver {
        ORDER BY ordinal_position`,
       [db, table]
     );
-    return rows.map((c) => ({
-      name: String(c.column_name ?? c.COLUMN_NAME),
-      type: String(c.column_type ?? c.COLUMN_TYPE),
-      nullable: String(c.is_nullable ?? c.IS_NULLABLE) === "YES",
-      pk: String(c.column_key ?? c.COLUMN_KEY) === "PRI",
-    }));
+    const [fkRows] = await this.p.query<mysql.RowDataPacket[]>(
+      `SELECT column_name FROM information_schema.key_column_usage
+       WHERE table_schema = ? AND table_name = ? AND referenced_table_name IS NOT NULL`,
+      [db, table]
+    );
+    const fkNames = new Set(
+      fkRows.map((r) => String(r.column_name ?? r.COLUMN_NAME))
+    );
+    return rows.map((c) => {
+      const name = String(c.column_name ?? c.COLUMN_NAME);
+      return {
+        name,
+        type: String(c.column_type ?? c.COLUMN_TYPE),
+        nullable: String(c.is_nullable ?? c.IS_NULLABLE) === "YES",
+        pk: String(c.column_key ?? c.COLUMN_KEY) === "PRI",
+        fk: fkNames.has(name),
+      };
+    });
   }
 
   async getDDL(path: string[]): Promise<string> {
@@ -147,4 +171,32 @@ export class MySqlDriver implements Driver {
     const sql = `UPDATE \`${db}\`.\`${tbl}\` SET \`${column}\` = ? WHERE ${where}`;
     await this.p.query(sql, [value, ...pkCols.map((c) => pkValues[c])]);
   }
+
+  async deleteRow(table: string[], pkValues: Record<string, unknown>): Promise<void> {
+    const [db, tbl] = table;
+    const pkCols = Object.keys(pkValues);
+    const where = pkCols.map((c) => `\`${c}\` = ?`).join(" AND ");
+    await this.p.query(
+      `DELETE FROM \`${db}\`.\`${tbl}\` WHERE ${where}`,
+      pkCols.map((c) => pkValues[c])
+    );
+  }
+
+  async insertRow(table: string[], values: Record<string, unknown>): Promise<void> {
+    const [db, tbl] = table;
+    const cols = Object.keys(values);
+    if (!cols.length) {
+      throw new Error("No values provided for insert");
+    }
+    const colList = cols.map((c) => `\`${c}\``).join(", ");
+    const placeholders = cols.map(() => "?").join(", ");
+    await this.p.query(
+      `INSERT INTO \`${db}\`.\`${tbl}\` (${colList}) VALUES (${placeholders})`,
+      cols.map((c) => values[c])
+    );
+  }
+}
+
+function marker(c: ColumnMeta): string {
+  return `${c.type}${c.pk ? " 🔑" : ""}${c.fk ? " 🔗" : ""}${c.nullable ? "" : " ·not null"}`;
 }

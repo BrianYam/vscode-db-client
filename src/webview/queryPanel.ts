@@ -6,11 +6,12 @@ import { EditTarget, QueryResult } from "../drivers/Driver";
 
 interface PanelOptions {
   initialSql?: string;
-  /** When set, run driver.previewTable(previewPath) as soon as the panel opens. */
   previewPath?: string[];
 }
 
-/** A SQL/command editor + results grid, one webview per invocation. */
+const PAGE_SIZE = 100;
+
+/** A SQL/command editor + a rich results grid, one webview per invocation. */
 export class QueryPanel {
   static create(
     ctx: vscode.ExtensionContext,
@@ -25,6 +26,8 @@ export class QueryPanel {
   private readonly panel: vscode.WebviewPanel;
   private lastResult?: QueryResult;
   private lastEditable?: EditTarget;
+  private previewPath?: string[];
+  private offset = 0;
 
   private constructor(
     ctx: vscode.ExtensionContext,
@@ -46,28 +49,54 @@ export class QueryPanel {
     this.panel.webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
         case "run":
+          this.previewPath = undefined;
           await this.run(msg.sql);
+          break;
+        case "page":
+          if (this.previewPath) {
+            this.offset = Math.max(0, msg.offset);
+            await this.runPreview(this.previewPath, this.offset);
+          }
+          break;
+        case "refresh":
+          if (this.previewPath) {
+            await this.runPreview(this.previewPath, this.offset);
+          }
           break;
         case "update":
           await this.handleUpdate(msg);
           break;
+        case "delete":
+          await this.handleDelete(msg.pks);
+          break;
+        case "insert":
+          await this.handleInsert(msg.values);
+          break;
         case "export":
           await this.handleExport(msg.format);
+          break;
+        case "copy":
+          await vscode.env.clipboard.writeText(String(msg.text ?? ""));
+          vscode.window.showInformationMessage("Copied to clipboard.");
           break;
       }
     });
 
     if (options.previewPath) {
-      void this.runPreview(options.previewPath);
+      this.previewPath = options.previewPath;
+      void this.runPreview(options.previewPath, 0);
     } else if (options.initialSql) {
       void this.run(options.initialSql);
     }
   }
 
-  private async runPreview(path: string[]): Promise<void> {
+  private async runPreview(path: string[], offset: number): Promise<void> {
     try {
       const driver = await this.manager.getDriver(this.connectionId);
-      this.show(await driver.previewTable(path));
+      const start = Date.now();
+      const result = await driver.previewTable(path, offset, PAGE_SIZE);
+      result.elapsedMs = Date.now() - start;
+      this.show(result);
     } catch (err) {
       this.post({ type: "error", message: (err as Error).message });
     }
@@ -80,7 +109,10 @@ export class QueryPanel {
     }
     try {
       const driver = await this.manager.getDriver(this.connectionId);
-      this.show(await driver.query(trimmed));
+      const start = Date.now();
+      const result = await driver.query(trimmed);
+      result.elapsedMs = Date.now() - start;
+      this.show(result);
     } catch (err) {
       this.post({ type: "error", message: (err as Error).message });
     }
@@ -104,26 +136,54 @@ export class QueryPanel {
     try {
       const driver = await this.manager.getDriver(this.connectionId);
       await driver.updateCell(this.lastEditable.table, msg.pk, msg.column, msg.value);
-      // Keep local state in sync for future PK lookups.
       if (this.lastResult?.rows[msg.rowIndex]) {
         this.lastResult.rows[msg.rowIndex][msg.column] = msg.value;
       }
-      this.post({
-        type: "updateResult",
-        ok: true,
-        rowIndex: msg.rowIndex,
-        column: msg.column,
-        value: msg.value,
-        message: `Updated ${msg.column}`,
-      });
+      this.post({ type: "updateResult", ok: true, message: `Updated ${msg.column}` });
     } catch (err) {
-      this.post({
-        type: "updateResult",
-        ok: false,
-        rowIndex: msg.rowIndex,
-        column: msg.column,
-        message: (err as Error).message,
-      });
+      this.post({ type: "updateResult", ok: false, message: (err as Error).message });
+    }
+  }
+
+  private async handleDelete(pks: Array<Record<string, unknown>>): Promise<void> {
+    if (!this.lastEditable || !pks?.length) {
+      return;
+    }
+    const ok = await vscode.window.showWarningMessage(
+      `Delete ${pks.length} row(s)? This cannot be undone.`,
+      { modal: true },
+      "Delete"
+    );
+    if (ok !== "Delete") {
+      return;
+    }
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      for (const pk of pks) {
+        await driver.deleteRow(this.lastEditable.table, pk);
+      }
+      vscode.window.showInformationMessage(`Deleted ${pks.length} row(s).`);
+      if (this.previewPath) {
+        await this.runPreview(this.previewPath, this.offset);
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
+  }
+
+  private async handleInsert(values: Record<string, unknown>): Promise<void> {
+    if (!this.lastEditable) {
+      return;
+    }
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      await driver.insertRow(this.lastEditable.table, values ?? {});
+      vscode.window.showInformationMessage("Row inserted.");
+      if (this.previewPath) {
+        await this.runPreview(this.previewPath, this.offset);
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Insert failed: ${(err as Error).message}`);
     }
   }
 
@@ -133,8 +193,7 @@ export class QueryPanel {
       return;
     }
     const uri = await vscode.window.showSaveDialog({
-      filters:
-        format === "csv" ? { CSV: ["csv"] } : { JSON: ["json"] },
+      filters: format === "csv" ? { CSV: ["csv"] } : { JSON: ["json"] },
       saveLabel: `Export ${format.toUpperCase()}`,
     });
     if (!uri) {
@@ -155,8 +214,7 @@ export class QueryPanel {
   }
 
   private render(initialSql: string, dbType: string): string {
-    const placeholder =
-      dbType === "redis" ? "GET mykey" : "SELECT * FROM ... LIMIT 100";
+    const placeholder = dbType === "redis" ? "GET mykey" : "SELECT * FROM ... LIMIT 100";
     const nonce = String(Date.now());
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -165,145 +223,364 @@ export class QueryPanel {
 <meta http-equiv="Content-Security-Policy"
   content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
+  :root { --border: var(--vscode-panel-border, #4443); }
   body { font-family: var(--vscode-font-family); margin: 0; padding: 8px;
-         color: var(--vscode-foreground); }
-  #sql { width: 100%; box-sizing: border-box; min-height: 90px; resize: vertical;
+         color: var(--vscode-foreground); font-size: 12px; }
+  #sql { width: 100%; box-sizing: border-box; min-height: 74px; resize: vertical;
          font-family: var(--vscode-editor-font-family, monospace); font-size: 13px;
          background: var(--vscode-input-background); color: var(--vscode-input-foreground);
          border: 1px solid var(--vscode-input-border, transparent); padding: 6px; }
-  .bar { margin: 6px 0; display: flex; gap: 8px; align-items: center; }
+  .bar { margin: 6px 0; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .spacer { flex: 1; }
   button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-           border: none; padding: 4px 12px; cursor: pointer; }
+           border: none; padding: 3px 10px; cursor: pointer; border-radius: 3px; }
   button.secondary { background: var(--vscode-button-secondaryBackground);
            color: var(--vscode-button-secondaryForeground); }
-  button:hover { background: var(--vscode-button-hoverBackground); }
-  #status { opacity: .8; font-size: 12px; }
-  table { border-collapse: collapse; width: 100%; font-size: 12px; }
-  th, td { border: 1px solid var(--vscode-panel-border, #4443); padding: 3px 8px;
-           text-align: left; white-space: pre; }
-  th { background: var(--vscode-editorWidget-background); position: sticky; top: 0; }
-  td.editable { cursor: cell; }
+  button:disabled { opacity: .4; cursor: default; }
+  button:not(:disabled):hover { background: var(--vscode-button-hoverBackground); }
+  input.search, input.filter { background: var(--vscode-input-background);
+           color: var(--vscode-input-foreground); border: 1px solid var(--border);
+           padding: 2px 6px; border-radius: 3px; }
+  input.search { width: 160px; }
+  #status, #cost, #total { opacity: .8; }
+  #grid { overflow: auto; max-height: 66vh; border: 1px solid var(--border); }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid var(--border); padding: 3px 8px; text-align: left;
+           white-space: pre; vertical-align: top; }
+  th { background: var(--vscode-editorWidget-background); position: sticky; top: 0;
+       cursor: pointer; }
+  th .cname { font-weight: 600; }
+  th .ctype { opacity: .6; font-weight: 400; font-size: 11px; }
+  th .sort { opacity: .5; font-size: 10px; }
+  th.sorted .sort { opacity: 1; color: var(--vscode-focusBorder); }
+  td.editable { cursor: cell; position: relative; }
   td.editable:hover { outline: 1px solid var(--vscode-focusBorder); }
-  td input { width: 100%; box-sizing: border-box; font: inherit;
+  td .zoom { position: absolute; right: 2px; top: 2px; opacity: 0; cursor: pointer;
+             font-size: 11px; }
+  td.editable:hover .zoom { opacity: .8; }
+  td input.cell { width: 100%; box-sizing: border-box; font: inherit;
              background: var(--vscode-input-background); color: var(--vscode-input-foreground);
              border: 1px solid var(--vscode-focusBorder); }
   .null { opacity: .5; font-style: italic; }
-  #grid { overflow: auto; max-height: 68vh; }
-  #hint { font-size: 11px; opacity: .7; margin-left: 4px; }
+  .chk { width: 22px; text-align: center; }
+  tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
+  .filterRow th { position: static; padding: 2px; }
+  .filterRow input { width: 100%; box-sizing: border-box; }
+  /* cell-detail modal */
+  #overlay { position: fixed; inset: 0; background: #0008; display: none;
+             align-items: center; justify-content: center; }
+  #modal { background: var(--vscode-editorWidget-background);
+           border: 1px solid var(--border); border-radius: 6px; padding: 14px;
+           width: min(680px, 90vw); }
+  #modal h3 { margin: 0 0 10px; text-align: center; }
+  #modal .mbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  #modal textarea { width: 100%; box-sizing: border-box; min-height: 220px;
+           font-family: var(--vscode-editor-font-family, monospace);
+           background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+           border: 1px solid var(--border); padding: 6px; }
+  #modal .mfoot { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+  select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground);
+           border: 1px solid var(--border); padding: 2px 6px; }
 </style>
 </head>
 <body>
   <textarea id="sql" placeholder="${placeholder}">${escapeHtml(initialSql)}</textarea>
   <div class="bar">
     <button id="runBtn">Run ▶</button>
+    <button id="refreshBtn" class="secondary" title="Refresh">⟳</button>
+    <button id="addBtn" class="secondary" title="Add row" disabled>＋ Row</button>
+    <button id="delBtn" class="secondary" title="Delete selected rows" disabled>🗑 Delete</button>
     <button id="csvBtn" class="secondary">Export CSV</button>
     <button id="jsonBtn" class="secondary">Export JSON</button>
+    <input id="search" class="search" placeholder="Search results…" />
     <span class="spacer"></span>
-    <span id="status">Ctrl/Cmd+Enter to run</span>
+    <span id="cost"></span>
+    <button id="prevBtn" class="secondary" disabled>‹</button>
+    <span id="pageLbl">–</span>
+    <button id="nextBtn" class="secondary" disabled>›</button>
+    <span id="total"></span>
   </div>
+  <div id="status">Ctrl/Cmd+Enter to run</div>
   <div id="grid"></div>
+
+  <div id="overlay">
+    <div id="modal">
+      <h3>Edit Data</h3>
+      <div class="mbar">
+        <select id="mfmt"><option value="plain">Plain</option><option value="json">JSON</option></select>
+        <button id="mcopy" class="secondary">Copy</button>
+        <span class="spacer"></span>
+      </div>
+      <textarea id="mtext"></textarea>
+      <div class="mfoot">
+        <button id="mclose" class="secondary">Close</button>
+        <button id="msave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addOverlay" style="position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;">
+    <div id="modal" style="max-height:86vh;overflow:auto;">
+      <h3>Add Row</h3>
+      <div style="opacity:.7;margin-bottom:8px;">Leave a field blank to use the column default / NULL.</div>
+      <div id="addForm"></div>
+      <div class="mfoot">
+        <button id="aclose" class="secondary">Close</button>
+        <button id="asave">Insert</button>
+      </div>
+    </div>
+  </div>
+
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    const sqlEl = document.getElementById('sql');
-    const statusEl = document.getElementById('status');
-    const gridEl = document.getElementById('grid');
-    let current = null; // { columns, rows, editable }
+    const $ = (id) => document.getElementById(id);
+    const sqlEl = $('sql'), statusEl = $('status'), gridEl = $('grid');
+    let raw = null;                 // last QueryResult
+    let sort = { col: null, dir: 1 };
+    let filters = {};               // colName -> substring
+    let search = '';
+    let selected = new Set();       // original row indices
+    let modalCtx = null;            // { ri, col }
 
-    function run() {
-      statusEl.textContent = 'Running…';
-      vscode.postMessage({ type: 'run', sql: sqlEl.value });
-    }
-    document.getElementById('runBtn').addEventListener('click', run);
-    document.getElementById('csvBtn').addEventListener('click',
-      () => vscode.postMessage({ type: 'export', format: 'csv' }));
-    document.getElementById('jsonBtn').addEventListener('click',
-      () => vscode.postMessage({ type: 'export', format: 'json' }));
+    function run() { statusEl.textContent = 'Running…'; vscode.postMessage({ type:'run', sql: sqlEl.value }); }
+    $('runBtn').addEventListener('click', run);
+    $('refreshBtn').addEventListener('click', () => vscode.postMessage({ type:'refresh' }));
+    $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv' }));
+    $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json' }));
+    $('search').addEventListener('input', (e) => { search = e.target.value.toLowerCase(); renderGrid(); });
     sqlEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
     });
+    $('prevBtn').addEventListener('click', () => pageBy(-1));
+    $('nextBtn').addEventListener('click', () => pageBy(1));
+    $('delBtn').addEventListener('click', deleteSelected);
 
-    function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
-    function display(v) {
+    function pageBy(dir) {
+      if (!raw || !raw.page) return;
+      const next = raw.page.offset + dir * raw.page.limit;
+      if (next < 0 || next >= raw.page.total) return;
+      vscode.postMessage({ type:'page', offset: next });
+    }
+    function deleteSelected() {
+      if (!raw || !raw.editable || !selected.size) return;
+      const pks = [...selected].map((ri) => {
+        const pk = {}; for (const k of raw.editable.pkColumns) pk[k] = raw.rows[ri][k]; return pk;
+      });
+      vscode.postMessage({ type:'delete', pks });
+    }
+
+    function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+    function display(v){
       if (v === null || v === undefined) return '<span class="null">null</span>';
       if (typeof v === 'object') v = JSON.stringify(v);
       return esc(v);
     }
+    function metaFor(name){ return (raw.columnsMeta || []).find((m) => m.name === name); }
 
-    function renderTable(r) {
-      current = r;
-      if (!r.columns.length) { gridEl.innerHTML = ''; return; }
-      const editable = !!r.editable;
-      let html = '<table><thead><tr>';
-      for (const c of r.columns) html += '<th>' + esc(c) + '</th>';
-      html += '</tr></thead><tbody>';
-      r.rows.forEach((row, ri) => {
-        html += '<tr data-ri="' + ri + '">';
-        for (const c of r.columns) {
-          const cls = editable ? ' class="editable" data-col="' + esc(c) + '"' : '';
-          html += '<td' + cls + '>' + display(row[c]) + '</td>';
-        }
-        html += '</tr>';
-      });
-      html += '</tbody></table>';
-      gridEl.innerHTML = html;
+    function computeView(){
+      let rows = raw.rows.map((row, ri) => ({ row, ri }));
+      for (const [col, txt] of Object.entries(filters)) {
+        if (!txt) continue; const t = txt.toLowerCase();
+        rows = rows.filter(({row}) => String(row[col] ?? '').toLowerCase().includes(t));
+      }
+      if (search) rows = rows.filter(({row}) =>
+        raw.columns.some((c) => String(row[c] ?? '').toLowerCase().includes(search)));
+      if (sort.col) {
+        rows.sort((a, b) => {
+          let x = a.row[sort.col], y = b.row[sort.col];
+          if (x === y) return 0;
+          if (x === null || x === undefined) return 1;
+          if (y === null || y === undefined) return -1;
+          const nx = Number(x), ny = Number(y);
+          if (!isNaN(nx) && !isNaN(ny)) return (nx - ny) * sort.dir;
+          return String(x).localeCompare(String(y)) * sort.dir;
+        });
+      }
+      return rows;
     }
 
-    // Inline edit: double-click a cell in an editable (table-preview) grid.
-    gridEl.addEventListener('dblclick', (e) => {
+    function renderGrid(){
+      if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; return; }
+      const editable = !!raw.editable;
+      const view = computeView();
+      const allSel = editable && view.length > 0 && view.every(({ri}) => selected.has(ri));
+      let h = '<table><thead><tr>';
+      if (editable) h += '<th class="chk"><input type="checkbox" id="chkAll"'+(allSel?' checked':'')+'></th>';
+      for (const c of raw.columns) {
+        const m = metaFor(c);
+        const mk = m ? (m.pk?' 🔑':'') + (m.fk?' 🔗':'') + (m.nullable?'':' <span style="color:var(--vscode-errorForeground)">*</span>') : '';
+        const sorted = sort.col === c ? ' sorted' : '';
+        const arrow = sort.col === c ? (sort.dir>0?'▲':'▼') : '⇅';
+        h += '<th class="'+sorted.trim()+'" data-col="'+esc(c)+'">' +
+             '<div class="cname">'+esc(c)+mk+' <span class="sort">'+arrow+'</span></div>' +
+             (m ? '<div class="ctype">'+esc(m.type)+'</div>' : '') + '</th>';
+      }
+      h += '</tr><tr class="filterRow">';
+      if (editable) h += '<th class="chk"></th>';
+      for (const c of raw.columns)
+        h += '<th><input class="filter" data-col="'+esc(c)+'" placeholder="filter" value="'+esc(filters[c]||'')+'"></th>';
+      h += '</tr></thead><tbody>';
+      for (const { row, ri } of view) {
+        h += '<tr data-ri="'+ri+'"'+(selected.has(ri)?' class="selected"':'')+'>';
+        if (editable) h += '<td class="chk"><input type="checkbox" class="rowchk" data-ri="'+ri+'"'+(selected.has(ri)?' checked':'')+'></td>';
+        for (const c of raw.columns) {
+          const cls = editable ? ' class="editable" data-col="'+esc(c)+'"' : '';
+          h += '<td'+cls+'>'+display(row[c])+(editable?'<span class="zoom" data-col="'+esc(c)+'">🔍</span>':'')+'</td>';
+        }
+        h += '</tr>';
+      }
+      h += '</tbody></table>';
+      gridEl.innerHTML = h;
+      wireGrid(editable);
+      $('delBtn').disabled = !editable || selected.size === 0;
+    }
+
+    function wireGrid(editable){
+      gridEl.querySelectorAll('th[data-col]').forEach((th) => {
+        th.addEventListener('click', (e) => {
+          if (e.target.closest('.filter')) return;
+          const c = th.getAttribute('data-col');
+          if (sort.col === c) sort.dir = -sort.dir; else { sort.col = c; sort.dir = 1; }
+          renderGrid();
+        });
+      });
+      gridEl.querySelectorAll('input.filter').forEach((inp) => {
+        inp.addEventListener('click', (e) => e.stopPropagation());
+        inp.addEventListener('input', (e) => { filters[inp.getAttribute('data-col')] = e.target.value; renderGrid(); });
+      });
+      if (!editable) return;
+      const all = $('chkAll');
+      if (all) all.addEventListener('change', (e) => {
+        if (e.target.checked) computeView().forEach(({ri}) => selected.add(ri)); else selected.clear();
+        renderGrid();
+      });
+      gridEl.querySelectorAll('input.rowchk').forEach((chk) => {
+        chk.addEventListener('change', (e) => {
+          const ri = Number(chk.getAttribute('data-ri'));
+          if (e.target.checked) selected.add(ri); else selected.delete(ri);
+          $('delBtn').disabled = selected.size === 0;
+          chk.closest('tr').classList.toggle('selected', e.target.checked);
+        });
+      });
+      gridEl.querySelectorAll('.zoom').forEach((z) => {
+        z.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openModal(Number(z.closest('tr').getAttribute('data-ri')), z.getAttribute('data-col'));
+        });
+      });
+    }
+    gridEl.addEventListener('dblclick', onDblEdit); // attached once
+
+    function onDblEdit(e){
       const td = e.target.closest && e.target.closest('td.editable');
-      if (!td || !current || !current.editable) return;
-      if (td.querySelector('input')) return;
+      if (!td || !raw || !raw.editable || td.querySelector('input.cell')) return;
       const ri = Number(td.parentElement.getAttribute('data-ri'));
       const col = td.getAttribute('data-col');
-      const original = current.rows[ri][col];
+      const original = raw.rows[ri][col];
       const input = document.createElement('input');
+      input.className = 'cell';
       input.value = (original === null || original === undefined) ? '' : String(original);
-      td.textContent = '';
-      td.appendChild(input);
-      input.focus();
-      input.select();
+      td.textContent = ''; td.appendChild(input); input.focus(); input.select();
       let done = false;
       const commit = () => {
         if (done) return; done = true;
         const val = input.value;
         if (String(original ?? '') === val) { td.innerHTML = display(original); return; }
-        const pk = {};
-        for (const k of current.editable.pkColumns) pk[k] = current.rows[ri][k];
-        statusEl.textContent = 'Saving…';
-        vscode.postMessage({ type: 'update', pk, column: col, value: val, rowIndex: ri });
-        td.innerHTML = display(val); // optimistic
+        saveCell(ri, col, val);
       };
       input.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-        else if (ev.key === 'Escape') { done = true; td.innerHTML = display(original); }
+        else if (ev.key === 'Escape') { done = true; renderGrid(); }
       });
       input.addEventListener('blur', commit);
+    }
+
+    function saveCell(ri, col, val){
+      const pk = {}; for (const k of raw.editable.pkColumns) pk[k] = raw.rows[ri][k];
+      raw.rows[ri][col] = val;              // optimistic
+      statusEl.textContent = 'Saving…';
+      vscode.postMessage({ type:'update', pk, column: col, value: val, rowIndex: ri });
+      renderGrid();
+    }
+
+    // ---- cell modal ----
+    function openModal(ri, col){
+      modalCtx = { ri, col };
+      const v = raw.rows[ri][col];
+      $('mfmt').value = 'plain';
+      $('mtext').value = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v));
+      $('overlay').style.display = 'flex';
+    }
+    function closeModal(){ $('overlay').style.display = 'none'; modalCtx = null; }
+    $('mclose').addEventListener('click', closeModal);
+    $('overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') closeModal(); });
+    $('mcopy').addEventListener('click', () => vscode.postMessage({ type:'copy', text: $('mtext').value }));
+    $('mfmt').addEventListener('change', () => {
+      if ($('mfmt').value === 'json') {
+        try { $('mtext').value = JSON.stringify(JSON.parse($('mtext').value), null, 2); } catch(_){}
+      }
+    });
+    $('msave').addEventListener('click', () => {
+      if (!modalCtx || !raw.editable) { closeModal(); return; }
+      saveCell(modalCtx.ri, modalCtx.col, $('mtext').value);
+      closeModal();
+    });
+
+    // ---- add-row modal ----
+    $('addBtn').addEventListener('click', openAddModal);
+    $('aclose').addEventListener('click', () => $('addOverlay').style.display = 'none');
+    $('addOverlay').addEventListener('click', (e) => { if (e.target.id === 'addOverlay') $('addOverlay').style.display = 'none'; });
+    function openAddModal(){
+      if (!raw || !raw.editable) return;
+      const form = $('addForm');
+      form.innerHTML = raw.columns.map((c) => {
+        const m = metaFor(c);
+        const label = esc(c) + (m ? ' <span class="ctype">'+esc(m.type)+(m.nullable?'':' *')+'</span>' : '');
+        return '<div style="margin-bottom:8px;"><div style="margin-bottom:2px;">'+label+'</div>' +
+          '<input class="filter addfield" data-col="'+esc(c)+'" style="width:100%;box-sizing:border-box;"></div>';
+      }).join('');
+      $('addOverlay').style.display = 'flex';
+    }
+    $('asave').addEventListener('click', () => {
+      const values = {};
+      $('addForm').querySelectorAll('input.addfield').forEach((inp) => {
+        const v = inp.value;
+        if (v !== '') values[inp.getAttribute('data-col')] = v;
+      });
+      if (!Object.keys(values).length) { statusEl.textContent = 'Nothing to insert'; return; }
+      vscode.postMessage({ type:'insert', values });
+      $('addOverlay').style.display = 'none';
     });
 
     window.addEventListener('message', (ev) => {
       const m = ev.data;
       if (m.type === 'error') {
         statusEl.textContent = 'Error';
-        gridEl.innerHTML = '<pre style="color:var(--vscode-errorForeground)">' +
-          esc(m.message) + '</pre>';
+        gridEl.innerHTML = '<pre style="color:var(--vscode-errorForeground)">'+esc(m.message)+'</pre>';
         return;
       }
       if (m.type === 'updateResult') {
-        if (m.ok) {
-          current.rows[m.rowIndex][m.column] = m.value;
-          statusEl.textContent = m.message;
-        } else {
-          statusEl.textContent = 'Update failed: ' + m.message;
-          renderTable(current); // revert optimistic change
-        }
+        statusEl.textContent = m.ok ? m.message : ('Update failed: ' + m.message);
         return;
       }
       if (m.type === 'result') {
-        const r = m.result;
-        statusEl.textContent = (r.message || (r.rowCount + ' row(s)')) +
-          (r.editable ? ' · double-click a cell to edit' : '');
-        renderTable(r);
+        raw = m.result; selected.clear(); sort = { col:null, dir:1 };
+        $('addBtn').disabled = !raw.editable;
+        const p = raw.page;
+        $('cost').textContent = raw.elapsedMs != null ? ('Cost: ' + (raw.elapsedMs/1000).toFixed(2) + 's') : '';
+        if (p) {
+          const from = p.total ? p.offset + 1 : 0, to = Math.min(p.offset + p.limit, p.total);
+          $('pageLbl').textContent = from + '–' + to;
+          $('total').textContent = 'Total ' + p.total;
+          $('prevBtn').disabled = p.offset <= 0;
+          $('nextBtn').disabled = p.offset + p.limit >= p.total;
+        } else {
+          $('pageLbl').textContent = '–'; $('total').textContent = raw.rowCount + ' row(s)';
+          $('prevBtn').disabled = true; $('nextBtn').disabled = true;
+        }
+        statusEl.textContent = (raw.message || (raw.rowCount + ' row(s)')) +
+          (raw.editable ? ' · double-click or 🔍 to edit, check rows to delete' : '');
+        renderGrid();
       }
     });
   </script>
@@ -321,15 +598,10 @@ function toCsv(result: QueryResult): string {
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const header = result.columns.map(esc).join(",");
-  const lines = result.rows.map((row) =>
-    result.columns.map((c) => esc(row[c])).join(",")
-  );
+  const lines = result.rows.map((row) => result.columns.map((c) => esc(row[c])).join(","));
   return [header, ...lines].join("\n");
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

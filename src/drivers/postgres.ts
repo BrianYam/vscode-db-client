@@ -69,7 +69,7 @@ export class PostgresDriver implements Driver {
         kind: "column" as const,
         expandable: false,
         path: [...path, c.name],
-        description: `${c.type}${c.pk ? " 🔑" : ""}${c.nullable ? "" : " ·not null"}`,
+        description: marker(c),
       }));
     }
     return [];
@@ -85,15 +85,27 @@ export class PostgresDriver implements Driver {
     };
   }
 
-  async previewTable(path: string[]): Promise<QueryResult> {
+  async previewTable(path: string[], offset = 0, limit = 100): Promise<QueryResult> {
     const [schema, table] = path;
-    const result = await this.query(`SELECT * FROM "${schema}"."${table}" LIMIT 200`);
+    const result = await this.query(
+      `SELECT * FROM "${schema}"."${table}" LIMIT ${limit} OFFSET ${offset}`
+    );
     const cols = await this.tableColumns(path);
+    result.columnsMeta = cols;
     const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
+    result.page = { offset, limit, total: await this.countRows(path) };
     return result;
+  }
+
+  async countRows(path: string[]): Promise<number> {
+    const [schema, table] = path;
+    const res = await this.p.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM "${schema}"."${table}"`
+    );
+    return Number(res.rows[0]?.n ?? 0);
   }
 
   async tableColumns(path: string[]): Promise<ColumnMeta[]> {
@@ -115,12 +127,23 @@ export class PostgresDriver implements Driver {
        WHERE i.indrelid = to_regclass($1) AND i.indisprimary`,
       [`"${schema}"."${table}"`]
     );
+    const fk = await this.p.query<{ column_name: string }>(
+      `SELECT kcu.column_name FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY'
+         AND tc.table_schema = $1 AND tc.table_name = $2`,
+      [schema, table]
+    );
     const pkNames = new Set(pk.rows.map((r) => r.attname));
+    const fkNames = new Set(fk.rows.map((r) => r.column_name));
     return cols.rows.map((c) => ({
       name: c.column_name,
       type: c.data_type,
       nullable: c.is_nullable === "YES",
       pk: pkNames.has(c.column_name),
+      fk: fkNames.has(c.column_name),
     }));
   }
 
@@ -149,4 +172,32 @@ export class PostgresDriver implements Driver {
     const sql = `UPDATE "${schema}"."${tbl}" SET "${column}" = $1 WHERE ${where}`;
     await this.p.query(sql, [value, ...pkCols.map((c) => pkValues[c])]);
   }
+
+  async deleteRow(table: string[], pkValues: Record<string, unknown>): Promise<void> {
+    const [schema, tbl] = table;
+    const pkCols = Object.keys(pkValues);
+    const where = pkCols.map((c, i) => `"${c}" = $${i + 1}`).join(" AND ");
+    await this.p.query(
+      `DELETE FROM "${schema}"."${tbl}" WHERE ${where}`,
+      pkCols.map((c) => pkValues[c])
+    );
+  }
+
+  async insertRow(table: string[], values: Record<string, unknown>): Promise<void> {
+    const [schema, tbl] = table;
+    const cols = Object.keys(values);
+    if (!cols.length) {
+      throw new Error("No values provided for insert");
+    }
+    const colList = cols.map((c) => `"${c}"`).join(", ");
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
+    await this.p.query(
+      `INSERT INTO "${schema}"."${tbl}" (${colList}) VALUES (${placeholders})`,
+      cols.map((c) => values[c])
+    );
+  }
+}
+
+function marker(c: ColumnMeta): string {
+  return `${c.type}${c.pk ? " 🔑" : ""}${c.fk ? " 🔗" : ""}${c.nullable ? "" : " ·not null"}`;
 }

@@ -32,6 +32,18 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5]` Export results to CSV / JSON (save dialog)
 - [x] `[SDD][M5]` Column expansion in tree (table → columns with types, PK marker)
 
+## M5.1 — Rich Data Grid (parity with reference client)  ✅ DONE 2026-07-06
+- [x] `[SDD][M5.1]` Typed column headers with 🔑 PK / 🔗 FK / `*` not-null markers + data type
+- [x] `[SDD][M5.1]` Per-column client-side sort (click header) and per-column filter inputs
+- [x] `[SDD][M5.1]` Global "Search results" box
+- [x] `[SDD][M5.1]` Row checkboxes + select-all; delete selected rows (by PK, with confirm)
+- [x] `[SDD][M5.1]` Server-side pagination (100/page) with prev/next + "Total N"
+- [x] `[SDD][M5.1]` Execution "Cost: Xs" timing + Refresh
+- [x] `[SDD][M5.1]` Cell-detail modal (🔍) — Plain/JSON view, Copy, Save (no Premium wall)
+- [x] `[SDD][M5.1]` **Add row** (INSERT) — form modal, blank = default/NULL
+- [x] `[SDD][M5.1]` Fix: select-all header checkbox now reflects state (un-select-all works)
+- [ ] `[SDD][M5.1]` Server-side sort/filter (currently sorts/filters the loaded page only)
+
 ## M6 — SSH Tunnel
 - [ ] `[SDD][M6]` `ssh2` local port-forward established before driver.connect(); tunnel fields in form
 
