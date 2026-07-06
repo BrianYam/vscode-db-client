@@ -135,7 +135,7 @@ export class DatabaseTreeProvider
       : vscode.TreeItemCollapsibleState.None;
     const node = new DbNode(connectionId, data.path, data.label, data.kind, collapsible);
     node.id = `${connectionId}#${this.genOf(connectionId)}:${data.path.join("/")}`;
-    node.iconPath = new vscode.ThemeIcon(iconFor(data.kind));
+    node.iconPath = data.kind === "column" ? columnIcon(data) : iconFor(data.kind);
     if (data.description) {
       node.description = data.description;
     }
@@ -156,20 +156,49 @@ function describe(type: string): string {
   ] ?? type;
 }
 
-function iconFor(kind: string): string {
+const color = (id: string) => new vscode.ThemeColor(id);
+
+/** Icon for structural node kinds (databases, schemas, tables, views, keys). */
+function iconFor(kind: string): vscode.ThemeIcon {
   switch (kind) {
-    case "schema":
     case "database":
-      return "symbol-namespace";
+      return new vscode.ThemeIcon("database", color("charts.blue"));
+    case "schema":
+      return new vscode.ThemeIcon("symbol-structure", color("charts.blue"));
     case "table":
-      return "table";
+      return new vscode.ThemeIcon("table");
     case "view":
-      return "eye";
-    case "column":
-      return "symbol-field";
+      return new vscode.ThemeIcon("eye", color("charts.purple"));
     case "key":
-      return "key";
+      return new vscode.ThemeIcon("key", color("charts.yellow"));
     default:
-      return "circle-small";
+      return new vscode.ThemeIcon("circle-small");
   }
+}
+
+/** Icon for a column, keyed on primary/foreign key and data type. */
+function columnIcon(data: TreeItemData): vscode.ThemeIcon {
+  if (data.pk) {
+    return new vscode.ThemeIcon("key", color("charts.yellow"));
+  }
+  if (data.fk) {
+    return new vscode.ThemeIcon("references", color("charts.blue"));
+  }
+  const t = (data.dataType ?? "").toLowerCase();
+  if (/json/.test(t)) {
+    return new vscode.ThemeIcon("symbol-object", color("charts.blue"));
+  }
+  if (/int|serial|numeric|decimal|real|double|float|money|bigint/.test(t)) {
+    return new vscode.ThemeIcon("symbol-number", color("charts.green"));
+  }
+  if (/bool/.test(t)) {
+    return new vscode.ThemeIcon("symbol-boolean", color("charts.purple"));
+  }
+  if (/time|date/.test(t)) {
+    return new vscode.ThemeIcon("calendar", color("charts.red"));
+  }
+  if (/char|text|uuid|name|enum/.test(t)) {
+    return new vscode.ThemeIcon("symbol-string", color("charts.orange"));
+  }
+  return new vscode.ThemeIcon("symbol-field", color("charts.foreground"));
 }

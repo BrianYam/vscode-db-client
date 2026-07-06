@@ -88,6 +88,9 @@ export class SqliteDriver implements Driver {
         expandable: false,
         path: [...path, c.name],
         description: marker(c),
+        pk: c.pk,
+        fk: c.fk,
+        dataType: c.type,
       }));
     }
     return [];

@@ -65,6 +65,10 @@ export interface TreeItemData {
   path: string[];
   /** Optional right-hand text (e.g. a column's type). */
   description?: string;
+  /** Column-only hints for icon selection. */
+  pk?: boolean;
+  fk?: boolean;
+  dataType?: string;
 }
 
 /**
