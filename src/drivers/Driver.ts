@@ -59,8 +59,20 @@ export interface QueryResult {
 /** One child in the connection tree (schema, table, column, key, etc.). */
 export interface TreeItemData {
   label: string;
-  kind: "database" | "schema" | "table" | "view" | "column" | "key" | "info";
+  kind:
+    | "database"
+    | "schema"
+    | "table"
+    | "view"
+    | "column"
+    | "key"
+    | "folder"
+    | "user"
+    | "role"
+    | "info";
   expandable: boolean;
+  /** Optional codicon id override for this node's icon. */
+  icon?: string;
   /** Opaque path the driver uses to resolve children of this node. */
   path: string[];
   /** Optional right-hand text (e.g. a column's type). */

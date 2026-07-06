@@ -135,7 +135,11 @@ export class DatabaseTreeProvider
       : vscode.TreeItemCollapsibleState.None;
     const node = new DbNode(connectionId, data.path, data.label, data.kind, collapsible);
     node.id = `${connectionId}#${this.genOf(connectionId)}:${data.path.join("/")}`;
-    node.iconPath = data.kind === "column" ? columnIcon(data) : iconFor(data.kind);
+    node.iconPath = data.icon
+      ? new vscode.ThemeIcon(data.icon)
+      : data.kind === "column"
+        ? columnIcon(data)
+        : iconFor(data.kind);
     if (data.description) {
       node.description = data.description;
     }
@@ -171,6 +175,12 @@ function iconFor(kind: string): vscode.ThemeIcon {
       return new vscode.ThemeIcon("eye", color("charts.purple"));
     case "key":
       return new vscode.ThemeIcon("key", color("charts.yellow"));
+    case "folder":
+      return new vscode.ThemeIcon("folder");
+    case "user":
+      return new vscode.ThemeIcon("account", color("charts.blue"));
+    case "role":
+      return new vscode.ThemeIcon("organization", color("charts.purple"));
     default:
       return new vscode.ThemeIcon("circle-small");
   }

@@ -107,7 +107,7 @@
       "view/item/context": [
         {
           "command": "openDbClient.refreshNode",
-          "when": "view == openDbClient.connections && viewItem =~ /connection|database|schema|table|view/",
+          "when": "view == openDbClient.connections && viewItem =~ /connection|database|schema|table|view|folder/",
           "group": "inline@0"
         },
         {
