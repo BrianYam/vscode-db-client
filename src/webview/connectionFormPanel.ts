@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as vscode from "vscode";
 import {
   ConnectionConfig,
@@ -56,6 +57,7 @@ export class ConnectionFormPanel {
   }
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly extensionUri: vscode.Uri;
 
   private constructor(
     ctx: vscode.ExtensionContext,
@@ -64,6 +66,7 @@ export class ConnectionFormPanel {
     private readonly refresh: Refresh,
     private readonly existing?: ConnectionConfig
   ) {
+    this.extensionUri = ctx.extensionUri;
     this.panel = vscode.window.createWebviewPanel(
       "openDbClient.connectionForm",
       existing ? `Edit: ${existing.name}` : "New Connection",
@@ -203,6 +206,25 @@ export class ConnectionFormPanel {
     void this.panel.webview.postMessage(msg);
   }
 
+  /** Read a bundled engine icon and return inline-safe SVG markup. */
+  private iconSvg(type: string): string {
+    try {
+      const file = vscode.Uri.joinPath(
+        this.extensionUri,
+        "media",
+        "icons",
+        `${type}.svg`
+      ).fsPath;
+      return fs
+        .readFileSync(file, "utf8")
+        .replace(/<\?xml[^>]*\?>/i, "")
+        .replace(/<!DOCTYPE[^>]*>/i, "")
+        .trim();
+    } catch {
+      return "";
+    }
+  }
+
   private render(): string {
     const e = this.existing;
     const nonce = String(Date.now());
@@ -260,6 +282,8 @@ export class ConnectionFormPanel {
     border: 1px solid var(--vscode-panel-border, #4443); font-size: 13px; }
   .type.active { background: var(--vscode-button-background);
     color: var(--vscode-button-foreground); border-color: transparent; }
+  .type { display: inline-flex; align-items: center; gap: 7px; }
+  .type svg { width: 18px; height: 18px; flex: 0 0 auto; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; margin-bottom: 16px; }
   .full { grid-column: 1 / -1; }
   .portrow { display: flex; gap: 6px; }
@@ -299,10 +323,10 @@ export class ConnectionFormPanel {
   <div style="height:16px"></div>
   <label>Server Type</label>
   <div class="types" id="types">
-    <div class="type" data-t="postgres">🐘 PostgreSQL</div>
-    <div class="type" data-t="mysql">🐬 MySQL / MariaDB</div>
-    <div class="type" data-t="sqlite">📁 SQLite</div>
-    <div class="type" data-t="redis">🟥 Redis</div>
+    <div class="type" data-t="postgres">${this.iconSvg("postgres")} PostgreSQL</div>
+    <div class="type" data-t="mysql">${this.iconSvg("mysql")} MySQL / MariaDB</div>
+    <div class="type" data-t="sqlite">${this.iconSvg("sqlite")} SQLite</div>
+    <div class="type" data-t="redis">${this.iconSvg("redis")} Redis</div>
   </div>
 
   <!-- Network engines -->
