@@ -24,6 +24,7 @@ export class PostgresDriver implements Driver {
       database: this.config.database || "postgres",
       max: 4,
       connectionTimeoutMillis: 10_000,
+      ssl: this.config.ssl ? { rejectUnauthorized: false } : undefined,
     });
     const client = await this.pool.connect();
     client.release();

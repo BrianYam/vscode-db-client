@@ -24,6 +24,7 @@ export class MySqlDriver implements Driver {
       database: this.config.database || undefined,
       connectionLimit: 4,
       connectTimeout: 10_000,
+      ssl: this.config.ssl ? { rejectUnauthorized: false } : undefined,
     });
     const conn = await this.pool.getConnection();
     conn.release();

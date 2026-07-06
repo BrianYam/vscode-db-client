@@ -15,6 +15,7 @@ export class RedisDriver implements Driver {
       username: this.config.username || undefined,
       password: password || undefined,
       db: this.config.redisDb ?? 0,
+      tls: this.config.ssl ? {} : undefined,
       lazyConnect: true,
       connectTimeout: 10_000,
       maxRetriesPerRequest: 1,

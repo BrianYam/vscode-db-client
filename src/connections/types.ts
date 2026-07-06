@@ -18,6 +18,8 @@ export interface ConnectionConfig {
   filePath?: string;
   // Redis only
   redisDb?: number;
+  // SQL / Redis: enable TLS/SSL
+  ssl?: boolean;
 }
 
 export const DEFAULT_PORTS: Record<DatabaseType, number> = {

@@ -50,6 +50,13 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5.2]` "View Related Row" opens the referenced table filtered by the FK value
 - [x] `[SDD][M5.2]` Filtered preview is fully rich (typed headers, editable, paginated)
 
+## M5.3 — Connection Form UI  ✅ DONE 2026-07-06
+- [x] `[SDD][M5.3]` Webview form replaces native input-box chain
+- [x] `[SDD][M5.3]` Server-type picker (chips), adaptive fields per engine
+- [x] `[SDD][M5.3]` Test Connection button with success/error banner + "Cost: Nms"
+- [x] `[SDD][M5.3]` Save / Save & Connect / Close; SSL toggle; SQLite file Browse dialog
+- [x] `[SDD][M5.3]` Real SSL/TLS support wired into pg / mysql2 / ioredis
+
 ## M6 — SSH Tunnel
 - [ ] `[SDD][M6]` `ssh2` local port-forward established before driver.connect(); tunnel fields in form
 

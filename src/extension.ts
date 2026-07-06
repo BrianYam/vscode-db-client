@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { ConnectionStore } from "./connections/store";
 import { ConnectionManager } from "./connections/manager";
 import { DatabaseTreeProvider, DbNode } from "./tree/DatabaseTreeProvider";
-import { promptForConnection } from "./webview/connectionForm";
+import { ConnectionFormPanel } from "./webview/connectionFormPanel";
 import { QueryPanel } from "./webview/queryPanel";
 import { setSqliteWasmDir } from "./drivers/sqlite";
 
@@ -23,26 +23,16 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   reg("openDbClient.refresh", () => tree.refresh());
 
-  reg("openDbClient.addConnection", async () => {
-    const result = await promptForConnection();
-    if (result) {
-      await store.save(result.config, result.password);
-      tree.refresh();
-      vscode.window.showInformationMessage(`Saved connection "${result.config.name}".`);
-    }
+  reg("openDbClient.addConnection", () => {
+    ConnectionFormPanel.open(ctx, store, manager, () => tree.refresh());
   });
 
-  reg("openDbClient.editConnection", async (node: DbNode) => {
+  reg("openDbClient.editConnection", (node: DbNode) => {
     const existing = store.get(node.connectionId);
     if (!existing) {
       return;
     }
-    const result = await promptForConnection(existing);
-    if (result) {
-      await manager.disconnect(existing.id);
-      await store.save(result.config, result.password);
-      tree.refresh();
-    }
+    ConnectionFormPanel.open(ctx, store, manager, () => tree.refresh(), existing);
   });
 
   reg("openDbClient.deleteConnection", async (node: DbNode) => {
