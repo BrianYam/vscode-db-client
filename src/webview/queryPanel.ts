@@ -2,11 +2,13 @@ import * as fs from "fs";
 import * as vscode from "vscode";
 import { ConnectionManager } from "../connections/manager";
 import { ConnectionStore } from "../connections/store";
-import { EditTarget, QueryResult } from "../drivers/Driver";
+import { EditTarget, PreviewFilter, QueryResult } from "../drivers/Driver";
 
 interface PanelOptions {
   initialSql?: string;
   previewPath?: string[];
+  /** Equality filter for a "view related row" preview. */
+  filter?: PreviewFilter;
 }
 
 const PAGE_SIZE = 100;
@@ -27,16 +29,17 @@ export class QueryPanel {
   private lastResult?: QueryResult;
   private lastEditable?: EditTarget;
   private previewPath?: string[];
+  private filter?: PreviewFilter;
   private offset = 0;
 
   private constructor(
-    ctx: vscode.ExtensionContext,
+    private readonly ctx: vscode.ExtensionContext,
     private readonly manager: ConnectionManager,
-    store: ConnectionStore,
+    private readonly store: ConnectionStore,
     private readonly connectionId: string,
     options: PanelOptions
   ) {
-    const config = store.get(connectionId);
+    const config = this.store.get(connectionId);
     const title = config ? `Query: ${config.name}` : "Query";
     this.panel = vscode.window.createWebviewPanel(
       "openDbClient.query",
@@ -72,6 +75,9 @@ export class QueryPanel {
         case "insert":
           await this.handleInsert(msg.values);
           break;
+        case "openRelated":
+          this.openRelated(msg.column, msg.value);
+          break;
         case "export":
           await this.handleExport(msg.format);
           break;
@@ -84,6 +90,7 @@ export class QueryPanel {
 
     if (options.previewPath) {
       this.previewPath = options.previewPath;
+      this.filter = options.filter;
       void this.runPreview(options.previewPath, 0);
     } else if (options.initialSql) {
       void this.run(options.initialSql);
@@ -94,7 +101,7 @@ export class QueryPanel {
     try {
       const driver = await this.manager.getDriver(this.connectionId);
       const start = Date.now();
-      const result = await driver.previewTable(path, offset, PAGE_SIZE);
+      const result = await driver.previewTable(path, offset, PAGE_SIZE, this.filter);
       result.elapsedMs = Date.now() - start;
       this.show(result);
     } catch (err) {
@@ -169,6 +176,20 @@ export class QueryPanel {
     } catch (err) {
       vscode.window.showErrorMessage((err as Error).message);
     }
+  }
+
+  private openRelated(column: string, value: unknown): void {
+    const fk = this.lastResult?.foreignKeys?.find((f) => f.column === column);
+    if (!fk) {
+      vscode.window.showWarningMessage(`No foreign key found on "${column}".`);
+      return;
+    }
+    const refName = fk.refTable.join(".");
+    QueryPanel.create(this.ctx, this.manager, this.store, this.connectionId, {
+      previewPath: fk.refTable,
+      filter: { column: fk.refColumn, value },
+      initialSql: `SELECT * FROM ${refName} WHERE ${fk.refColumn} = '${String(value)}'`,
+    });
   }
 
   private async handleInsert(values: Record<string, unknown>): Promise<void> {
@@ -258,6 +279,11 @@ export class QueryPanel {
   td .zoom { position: absolute; right: 2px; top: 2px; opacity: 0; cursor: pointer;
              font-size: 11px; }
   td.editable:hover .zoom { opacity: .8; }
+  td.fkcell { position: relative; }
+  td.fkcell .fkval { color: var(--vscode-textLink-foreground); text-decoration: underline dotted; }
+  td .relbtn { position: absolute; right: 2px; bottom: 2px; opacity: 0; cursor: pointer;
+             font-size: 11px; color: var(--vscode-textLink-foreground); }
+  td.fkcell:hover .relbtn { opacity: 1; }
   td input.cell { width: 100%; box-sizing: border-box; font: inherit;
              background: var(--vscode-input-background); color: var(--vscode-input-foreground);
              border: 1px solid var(--vscode-focusBorder); }
@@ -420,12 +446,22 @@ export class QueryPanel {
       for (const c of raw.columns)
         h += '<th><input class="filter" data-col="'+esc(c)+'" placeholder="filter" value="'+esc(filters[c]||'')+'"></th>';
       h += '</tr></thead><tbody>';
+      const fkCols = new Set((raw.foreignKeys || []).map((f) => f.column));
       for (const { row, ri } of view) {
         h += '<tr data-ri="'+ri+'"'+(selected.has(ri)?' class="selected"':'')+'>';
         if (editable) h += '<td class="chk"><input type="checkbox" class="rowchk" data-ri="'+ri+'"'+(selected.has(ri)?' checked':'')+'></td>';
         for (const c of raw.columns) {
-          const cls = editable ? ' class="editable" data-col="'+esc(c)+'"' : '';
-          h += '<td'+cls+'>'+display(row[c])+(editable?'<span class="zoom" data-col="'+esc(c)+'">🔍</span>':'')+'</td>';
+          const isFk = fkCols.has(c);
+          const classes = [];
+          if (editable) classes.push('editable');
+          if (isFk) classes.push('fkcell');
+          const clsAttr = classes.length ? ' class="'+classes.join(' ')+'"' : '';
+          const dataCol = (editable || isFk) ? ' data-col="'+esc(c)+'"' : '';
+          const val = row[c];
+          let inner = (isFk && val != null) ? '<span class="fkval">'+display(val)+'</span>' : display(val);
+          if (editable) inner += '<span class="zoom" data-col="'+esc(c)+'">🔍</span>';
+          if (isFk && val != null) inner += '<span class="relbtn" data-col="'+esc(c)+'" title="View related row">↗</span>';
+          h += '<td'+clsAttr+dataCol+'>'+inner+'</td>';
         }
         h += '</tr>';
       }
@@ -447,6 +483,14 @@ export class QueryPanel {
       gridEl.querySelectorAll('input.filter').forEach((inp) => {
         inp.addEventListener('click', (e) => e.stopPropagation());
         inp.addEventListener('input', (e) => { filters[inp.getAttribute('data-col')] = e.target.value; renderGrid(); });
+      });
+      gridEl.querySelectorAll('.relbtn').forEach((b) => {
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const ri = Number(b.closest('tr').getAttribute('data-ri'));
+          const col = b.getAttribute('data-col');
+          vscode.postMessage({ type:'openRelated', column: col, value: raw.rows[ri][col] });
+        });
       });
       if (!editable) return;
       const all = $('chkAll');

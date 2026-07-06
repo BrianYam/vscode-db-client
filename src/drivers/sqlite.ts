@@ -1,7 +1,14 @@
 import * as fs from "fs";
 import initSqlJs, { Database, SqlJsStatic } from "sql.js";
 import { ConnectionConfig } from "../connections/types";
-import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
+import {
+  ColumnMeta,
+  Driver,
+  ForeignKey,
+  PreviewFilter,
+  QueryResult,
+  TreeItemData,
+} from "./Driver";
 
 // sql.js is a WASM build — no native compilation needed. The .wasm file lives
 // in node_modules/sql.js/dist and is located via this directory, set once at
@@ -102,23 +109,73 @@ export class SqliteDriver implements Driver {
     return { columns, rows, rowCount: rows.length };
   }
 
-  async previewTable(path: string[], offset = 0, limit = 100): Promise<QueryResult> {
-    const result = await this.query(
-      `SELECT * FROM "${path[0]}" LIMIT ${limit} OFFSET ${offset}`
+  async previewTable(
+    path: string[],
+    offset = 0,
+    limit = 100,
+    filter?: PreviewFilter
+  ): Promise<QueryResult> {
+    const where = filter ? ` WHERE "${filter.column}" = :v` : "";
+    const bind = filter ? { ":v": filter.value as never } : undefined;
+    const stmt = this.d.prepare(
+      `SELECT * FROM "${path[0]}"${where} LIMIT ${limit} OFFSET ${offset}`
     );
+    if (bind) {
+      stmt.bind(bind);
+    }
+    const rows: Array<Record<string, unknown>> = [];
+    let columns: string[] = [];
+    while (stmt.step()) {
+      columns = stmt.getColumnNames();
+      rows.push(stmt.getAsObject() as Record<string, unknown>);
+    }
+    stmt.free();
+    const result: QueryResult = { columns, rows, rowCount: rows.length };
     const cols = await this.tableColumns(path);
     result.columnsMeta = cols;
+    if (!columns.length) {
+      result.columns = cols.map((c) => c.name);
+    }
+    result.foreignKeys = await this.foreignKeys(path);
     const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
-    result.page = { offset, limit, total: await this.countRows(path) };
+    result.page = { offset, limit, total: await this.countRows(path, filter) };
     return result;
   }
 
-  async countRows(path: string[]): Promise<number> {
+  async countRows(path: string[], filter?: PreviewFilter): Promise<number> {
+    if (filter) {
+      const stmt = this.d.prepare(
+        `SELECT count(*) FROM "${path[0]}" WHERE "${filter.column}" = :v`
+      );
+      stmt.bind({ ":v": filter.value as never });
+      let n = 0;
+      if (stmt.step()) {
+        n = Number(stmt.get()[0]);
+      }
+      stmt.free();
+      return n;
+    }
     const res = this.d.exec(`SELECT count(*) FROM "${path[0]}"`);
     return Number(res[0]?.values[0]?.[0] ?? 0);
+  }
+
+  async foreignKeys(path: string[]): Promise<ForeignKey[]> {
+    const res = this.d.exec(`PRAGMA foreign_key_list("${path[0]}")`);
+    if (res.length === 0) {
+      return [];
+    }
+    const cols = res[0].columns;
+    const iTable = cols.indexOf("table");
+    const iFrom = cols.indexOf("from");
+    const iTo = cols.indexOf("to");
+    return res[0].values.map((r) => ({
+      column: String(r[iFrom]),
+      refTable: [String(r[iTable])],
+      refColumn: String(r[iTo]),
+    }));
   }
 
   async tableColumns(path: string[]): Promise<ColumnMeta[]> {

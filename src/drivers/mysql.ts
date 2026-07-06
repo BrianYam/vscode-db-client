@@ -1,6 +1,13 @@
 import * as mysql from "mysql2/promise";
 import { ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
-import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
+import {
+  ColumnMeta,
+  Driver,
+  ForeignKey,
+  PreviewFilter,
+  QueryResult,
+  TreeItemData,
+} from "./Driver";
 
 /** MySQL / MariaDB driver backed by the pure-JS `mysql2` pool. */
 export class MySqlDriver implements Driver {
@@ -98,27 +105,65 @@ export class MySqlDriver implements Driver {
     };
   }
 
-  async previewTable(path: string[], offset = 0, limit = 100): Promise<QueryResult> {
+  async previewTable(
+    path: string[],
+    offset = 0,
+    limit = 100,
+    filter?: PreviewFilter
+  ): Promise<QueryResult> {
     const [db, table] = path;
-    const result = await this.query(
-      `SELECT * FROM \`${db}\`.\`${table}\` LIMIT ${limit} OFFSET ${offset}`
+    const where = filter ? ` WHERE \`${filter.column}\` = ?` : "";
+    const params = filter ? [filter.value] : [];
+    const [rows, fields] = await this.p.query(
+      `SELECT * FROM \`${db}\`.\`${table}\`${where} LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
+    const data = (rows as Array<Record<string, unknown>>) ?? [];
+    const result: QueryResult = {
+      columns: (fields as mysql.FieldPacket[] | undefined)?.map((f) => f.name) ??
+        (data[0] ? Object.keys(data[0]) : []),
+      rows: data,
+      rowCount: data.length,
+    };
     const cols = await this.tableColumns(path);
     result.columnsMeta = cols;
+    result.foreignKeys = await this.foreignKeys(path);
     const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
-    result.page = { offset, limit, total: await this.countRows(path) };
+    result.page = { offset, limit, total: await this.countRows(path, filter) };
     return result;
   }
 
-  async countRows(path: string[]): Promise<number> {
+  async countRows(path: string[], filter?: PreviewFilter): Promise<number> {
     const [db, table] = path;
+    const where = filter ? ` WHERE \`${filter.column}\` = ?` : "";
+    const params = filter ? [filter.value] : [];
     const [rows] = await this.p.query<mysql.RowDataPacket[]>(
-      `SELECT count(*) AS n FROM \`${db}\`.\`${table}\``
+      `SELECT count(*) AS n FROM \`${db}\`.\`${table}\`${where}`,
+      params
     );
     return Number(rows[0]?.n ?? 0);
+  }
+
+  async foreignKeys(path: string[]): Promise<ForeignKey[]> {
+    const [db, table] = path;
+    const [rows] = await this.p.query<mysql.RowDataPacket[]>(
+      `SELECT column_name AS col, referenced_table_schema AS ref_schema,
+              referenced_table_name AS ref_table, referenced_column_name AS ref_col
+       FROM information_schema.key_column_usage
+       WHERE table_schema = ? AND table_name = ? AND referenced_table_name IS NOT NULL`,
+      [db, table]
+    );
+    return rows.map((r) => ({
+      column: String(r.col ?? r.COL),
+      refTable: [
+        String(r.ref_schema ?? r.REF_SCHEMA),
+        String(r.ref_table ?? r.REF_TABLE),
+      ],
+      refColumn: String(r.ref_col ?? r.REF_COL),
+    }));
   }
 
   async tableColumns(path: string[]): Promise<ColumnMeta[]> {

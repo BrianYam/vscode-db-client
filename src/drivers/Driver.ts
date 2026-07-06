@@ -24,6 +24,19 @@ export interface PageInfo {
   total: number;
 }
 
+/** A foreign-key relationship from one column to a referenced table column. */
+export interface ForeignKey {
+  column: string;
+  refTable: string[];
+  refColumn: string;
+}
+
+/** Optional equality filter applied to a table preview (used for related rows). */
+export interface PreviewFilter {
+  column: string;
+  value: unknown;
+}
+
 /** A flat, grid-friendly result set. */
 export interface QueryResult {
   columns: string[];
@@ -37,6 +50,8 @@ export interface QueryResult {
   columnsMeta?: ColumnMeta[];
   /** Pagination info; present for table previews. */
   page?: PageInfo;
+  /** Foreign keys of the previewed table (for "view related row"). */
+  foreignKeys?: ForeignKey[];
   /** Server round-trip time in milliseconds. */
   elapsedMs?: number;
 }
@@ -70,10 +85,18 @@ export interface Driver {
   query(sql: string): Promise<QueryResult>;
 
   /**
-   * Preview a table's rows (paginated). Sets `editable`, `columnsMeta`, and
-   * `page` so the grid can render rich headers and navigate pages.
+   * Preview a table's rows (paginated). Sets `editable`, `columnsMeta`, `page`,
+   * and `foreignKeys`. An optional equality `filter` powers "view related row".
    */
-  previewTable(path: string[], offset?: number, limit?: number): Promise<QueryResult>;
+  previewTable(
+    path: string[],
+    offset?: number,
+    limit?: number,
+    filter?: PreviewFilter
+  ): Promise<QueryResult>;
+
+  /** Foreign-key relationships for a table. */
+  foreignKeys(path: string[]): Promise<ForeignKey[]>;
 
   /** Total row count for a table (for pagination). */
   countRows(path: string[]): Promise<number>;

@@ -44,6 +44,12 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5.1]` Fix: select-all header checkbox now reflects state (un-select-all works)
 - [ ] `[SDD][M5.1]` Server-side sort/filter (currently sorts/filters the loaded page only)
 
+## M5.2 — Foreign Keys & Related Rows  ✅ DONE 2026-07-06
+- [x] `[SDD][M5.2]` FK target discovery per engine (column → referenced table/column)
+- [x] `[SDD][M5.2]` FK cells marked (link colour + dotted underline) with a ↗ affordance
+- [x] `[SDD][M5.2]` "View Related Row" opens the referenced table filtered by the FK value
+- [x] `[SDD][M5.2]` Filtered preview is fully rich (typed headers, editable, paginated)
+
 ## M6 — SSH Tunnel
 - [ ] `[SDD][M6]` `ssh2` local port-forward established before driver.connect(); tunnel fields in form
 

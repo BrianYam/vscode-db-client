@@ -81,6 +81,10 @@ export class RedisDriver implements Driver {
     return 0;
   }
 
+  async foreignKeys(): Promise<[]> {
+    return [];
+  }
+
   async tableColumns(): Promise<ColumnMeta[]> {
     return [];
   }

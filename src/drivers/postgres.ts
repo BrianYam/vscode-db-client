@@ -1,6 +1,13 @@
 import { Pool } from "pg";
 import { ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
-import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
+import {
+  ColumnMeta,
+  Driver,
+  ForeignKey,
+  PreviewFilter,
+  QueryResult,
+  TreeItemData,
+} from "./Driver";
 
 /** PostgreSQL driver backed by the pure-JS `pg` pool. */
 export class PostgresDriver implements Driver {
@@ -85,27 +92,73 @@ export class PostgresDriver implements Driver {
     };
   }
 
-  async previewTable(path: string[], offset = 0, limit = 100): Promise<QueryResult> {
+  async previewTable(
+    path: string[],
+    offset = 0,
+    limit = 100,
+    filter?: PreviewFilter
+  ): Promise<QueryResult> {
     const [schema, table] = path;
-    const result = await this.query(
-      `SELECT * FROM "${schema}"."${table}" LIMIT ${limit} OFFSET ${offset}`
+    const where = filter ? ` WHERE "${filter.column}" = $1` : "";
+    const params = filter ? [filter.value] : [];
+    const res = await this.p.query(
+      `SELECT * FROM "${schema}"."${table}"${where} LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
+    const result: QueryResult = {
+      columns: res.fields?.map((f) => f.name) ?? [],
+      rows: (res.rows as Array<Record<string, unknown>>) ?? [],
+      rowCount: res.rowCount ?? res.rows?.length ?? 0,
+    };
     const cols = await this.tableColumns(path);
     result.columnsMeta = cols;
+    result.foreignKeys = await this.foreignKeys(path);
     const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
-    result.page = { offset, limit, total: await this.countRows(path) };
+    const total = await this.countRows(path, filter);
+    result.page = { offset, limit, total };
     return result;
   }
 
-  async countRows(path: string[]): Promise<number> {
+  async countRows(path: string[], filter?: PreviewFilter): Promise<number> {
     const [schema, table] = path;
+    const where = filter ? ` WHERE "${filter.column}" = $1` : "";
+    const params = filter ? [filter.value] : [];
     const res = await this.p.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM "${schema}"."${table}"`
+      `SELECT count(*)::text AS n FROM "${schema}"."${table}"${where}`,
+      params
     );
     return Number(res.rows[0]?.n ?? 0);
+  }
+
+  async foreignKeys(path: string[]): Promise<ForeignKey[]> {
+    const [schema, table] = path;
+    const res = await this.p.query<{
+      col: string;
+      ref_schema: string;
+      ref_table: string;
+      ref_col: string;
+    }>(
+      `SELECT kcu.column_name AS col,
+              ccu.table_schema AS ref_schema,
+              ccu.table_name   AS ref_table,
+              ccu.column_name  AS ref_col
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu
+         ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY'
+         AND tc.table_schema = $1 AND tc.table_name = $2`,
+      [schema, table]
+    );
+    return res.rows.map((r) => ({
+      column: r.col,
+      refTable: [r.ref_schema, r.ref_table],
+      refColumn: r.ref_col,
+    }));
   }
 
   async tableColumns(path: string[]): Promise<ColumnMeta[]> {
