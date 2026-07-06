@@ -205,6 +205,20 @@ export class SqliteDriver implements Driver {
     }));
   }
 
+  async schemaHints(): Promise<{ tables: string[]; columns: string[] }> {
+    const res = this.d.exec(
+      `SELECT name FROM sqlite_master WHERE type IN ('table','view')
+       AND name NOT LIKE 'sqlite_%' ORDER BY name`
+    );
+    const tables = res[0]?.values.map((r) => String(r[0])) ?? [];
+    const columns = new Set<string>();
+    for (const t of tables) {
+      const info = this.d.exec(`PRAGMA table_info(${qi(t)})`);
+      info[0]?.values.forEach((r) => columns.add(String(r[1])));
+    }
+    return { tables, columns: [...columns] };
+  }
+
   async getDDL(path: string[]): Promise<string> {
     const stmt = this.d.prepare(`SELECT sql FROM sqlite_master WHERE name = ?`);
     stmt.bind([path[0]]);

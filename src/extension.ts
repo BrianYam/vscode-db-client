@@ -5,6 +5,7 @@ import { DatabaseTreeProvider, DbNode, splitQueryPath } from "./tree/DatabaseTre
 import { ConnectionFormPanel } from "./webview/connectionFormPanel";
 import { SettingsPanel } from "./webview/settingsPanel";
 import { QueryStore } from "./connections/queryStore";
+import { registerSqlFeatures, bindQueryDoc } from "./sqlFeatures";
 import { QueryPanel } from "./webview/queryPanel";
 import { setSqliteWasmDir } from "./drivers/sqlite";
 import { initLog } from "./log";
@@ -18,6 +19,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const manager = new ConnectionManager(store);
   const queries = new QueryStore(ctx.globalStorageUri);
   const tree = new DatabaseTreeProvider(store, manager, ctx.extensionUri, queries);
+  registerSqlFeatures(ctx, queries, manager);
 
   ctx.subscriptions.push(
     vscode.window.createTreeView("openDbClient.connections", {
@@ -126,9 +128,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
     return { scope, parent: relative.slice(0, -1), name: relative[relative.length - 1] };
   };
 
+  // Open a query file in VS Code's NATIVE editor. We bind the doc to its
+  // connection so our CompletionItemProvider (native IntelliSense) and CodeLens
+  // (▶ Run / { } JSON) light up and run against the right server in OUR grid.
   reg("openDbClient.openQueryFile", async (node: DbNode) => {
     const { scope, parent, name } = fileParts(node);
     const uri = queries.fileUri(node.connectionId, scope, parent, name);
+    bindQueryDoc(uri, node.connectionId, scope[0] ?? "");
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.languages.setTextDocumentLanguage(doc, "sql");
     await vscode.window.showTextDocument(doc);
@@ -137,10 +143,26 @@ export function activate(ctx: vscode.ExtensionContext): void {
   reg("openDbClient.runQueryFile", async (node: DbNode) => {
     const { scope, parent, name } = fileParts(node);
     const sql = await queries.read(queries.fileUri(node.connectionId, scope, parent, name));
-    QueryPanel.create(ctx, manager, store, node.connectionId, {
-      database: scope[0],
-      initialSql: sql,
-    });
+    QueryPanel.runInResults(ctx, manager, store, node.connectionId, scope[0], sql);
+  });
+
+  // Invoked by the inline CodeLens on query files.
+  reg("openDbClient.runSql", (connId: string, database: string, sql: string) => {
+    QueryPanel.runInResults(ctx, manager, store, connId, database || undefined, sql);
+  });
+
+  reg("openDbClient.runSqlJson", async (connId: string, database: string, sql: string) => {
+    try {
+      const driver = await manager.getDriver(connId);
+      const result = await driver.query(sql, database || undefined);
+      const doc = await vscode.workspace.openTextDocument({
+        content: JSON.stringify(result.rows, null, 2),
+        language: "json",
+      });
+      await vscode.window.showTextDocument(doc, { preview: true });
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
   });
 
   reg("openDbClient.deleteQueryFile", async (node: DbNode) => {

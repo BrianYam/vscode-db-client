@@ -148,6 +148,10 @@ export class RedisDriver implements Driver {
     return [];
   }
 
+  async schemaHints(): Promise<{ tables: string[]; columns: string[] }> {
+    return { tables: [], columns: [] };
+  }
+
   async tableColumns(): Promise<ColumnMeta[]> {
     return [];
   }

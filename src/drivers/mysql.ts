@@ -206,6 +206,27 @@ export class MySqlDriver implements Driver {
     });
   }
 
+  async schemaHints(database?: string): Promise<{ tables: string[]; columns: string[] }> {
+    const db = database ?? this.config.database ?? "";
+    if (!db) {
+      return { tables: [], columns: [] };
+    }
+    const [t] = await this.p.query<mysql.RowDataPacket[]>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = ? ORDER BY table_name LIMIT 2000`,
+      [db]
+    );
+    const [c] = await this.p.query<mysql.RowDataPacket[]>(
+      `SELECT DISTINCT column_name FROM information_schema.columns
+       WHERE table_schema = ? ORDER BY column_name LIMIT 4000`,
+      [db]
+    );
+    return {
+      tables: t.map((r) => String(r.table_name ?? r.TABLE_NAME)),
+      columns: c.map((r) => String(r.column_name ?? r.COLUMN_NAME)),
+    };
+  }
+
   async getDDL(path: string[]): Promise<string> {
     const [db, table] = path;
     const [rows] = await this.p.query<mysql.RowDataPacket[]>(

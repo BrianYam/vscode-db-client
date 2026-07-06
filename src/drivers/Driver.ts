@@ -115,6 +115,9 @@ export interface Driver {
   /** Foreign-key relationships for a table. */
   foreignKeys(path: string[]): Promise<ForeignKey[]>;
 
+  /** Table and column names for editor autocomplete. */
+  schemaHints(database?: string): Promise<{ tables: string[]; columns: string[] }>;
+
   /** Total row count for a table (for pagination). */
   countRows(path: string[]): Promise<number>;
 

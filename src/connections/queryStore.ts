@@ -1,8 +1,25 @@
+import * as path from "path";
 import * as vscode from "vscode";
 
 export interface QueryEntry {
   name: string;
   isDir: boolean;
+}
+
+/** Encode a connection + DB scope into one self-describing folder name. */
+function encodeKey(connId: string, scope: string[]): string {
+  return `${connId}@@${scope.join("@")}`;
+}
+
+/** Parse a scope-key folder name back into its connection id + scope. */
+export function parseKey(key: string): { connId: string; scope: string[] } {
+  const at = key.indexOf("@@");
+  if (at < 0) {
+    return { connId: key, scope: [] };
+  }
+  const connId = key.slice(0, at);
+  const rest = key.slice(at + 2);
+  return { connId, scope: rest ? rest.split("@") : [] };
 }
 
 /**
@@ -24,9 +41,19 @@ export class QueryStore {
     return vscode.Uri.joinPath(
       this.root,
       "queries",
-      this.san(connId),
-      ...scope.map((s) => this.san(s || "default"))
+      this.san(encodeKey(connId, scope.map((s) => s || "default")))
     );
+  }
+
+  /** Resolve a `.sql` file uri back to its connection + database, if it's ours. */
+  resolveUri(uri: vscode.Uri): { connId: string; database: string } | undefined {
+    const marker = path.join(this.root.fsPath, "queries") + path.sep;
+    if (!uri.fsPath.startsWith(marker)) {
+      return undefined;
+    }
+    const firstSeg = uri.fsPath.slice(marker.length).split(path.sep)[0];
+    const { connId, scope } = parseKey(firstSeg);
+    return { connId, database: scope[0] ?? "" };
   }
 
   dirUri(connId: string, scope: string[], relative: string[]): vscode.Uri {

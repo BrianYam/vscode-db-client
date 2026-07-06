@@ -212,7 +212,7 @@
         {
           "command": "openDbClient.deleteQueryFile",
           "when": "view == openDbClient.connections && viewItem == queryfile",
-          "group": "1_query@2"
+          "group": "1_query@3"
         }
       ]
     }

@@ -12,6 +12,14 @@ interface PanelOptions {
   filter?: PreviewFilter;
   /** Database to run raw queries against (multi-database servers). */
   database?: string;
+  /** Backing .sql file (fsPath) — enables Save; also names the panel. */
+  filePath?: string;
+  /** Run the initialSql automatically on open. */
+  autoRun?: boolean;
+}
+
+function basename(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p;
 }
 
 const PAGE_SIZE = 100;
@@ -28,13 +36,48 @@ export class QueryPanel {
     return new QueryPanel(ctx, manager, store, connectionId, options);
   }
 
+  // One reusable results panel per connection (for CodeLens "Run").
+  private static results = new Map<string, QueryPanel>();
+
+  static runInResults(
+    ctx: vscode.ExtensionContext,
+    manager: ConnectionManager,
+    store: ConnectionStore,
+    connectionId: string,
+    database: string | undefined,
+    sql: string
+  ): void {
+    const existing = QueryPanel.results.get(connectionId);
+    if (existing && !existing.disposed) {
+      existing.rerun(sql, database);
+      existing.panel.reveal(vscode.ViewColumn.Active, true);
+      return;
+    }
+    const panel = new QueryPanel(ctx, manager, store, connectionId, {
+      database,
+      initialSql: sql,
+      autoRun: true,
+    });
+    QueryPanel.results.set(connectionId, panel);
+    panel.panel.onDidDispose(() => QueryPanel.results.delete(connectionId));
+  }
+
   private readonly panel: vscode.WebviewPanel;
   private lastResult?: QueryResult;
   private lastEditable?: EditTarget;
   private previewPath?: string[];
   private filter?: PreviewFilter;
   private database?: string;
+  private filePath?: string;
   private offset = 0;
+  private disposed = false;
+
+  private rerun(sql: string, database?: string): void {
+    this.previewPath = undefined;
+    this.database = database;
+    this.post({ type: "setSql", sql });
+    void this.run(sql);
+  }
 
   private constructor(
     private readonly ctx: vscode.ExtensionContext,
@@ -44,15 +87,25 @@ export class QueryPanel {
     options: PanelOptions
   ) {
     const config = this.store.get(connectionId);
-    const title = config ? `Query: ${config.name}` : "Query";
+    this.database = options.database;
+    this.filePath = options.filePath;
+    const title = options.filePath
+      ? basename(options.filePath)
+      : config
+        ? `Query: ${config.name}`
+        : "Query";
     this.panel = vscode.window.createWebviewPanel(
       "openDbClient.query",
       title,
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true }
     );
-    this.database = options.database;
-    this.panel.webview.html = this.render(options.initialSql ?? "", config?.type ?? "postgres");
+    this.panel.webview.html = this.render(
+      options.initialSql ?? "",
+      config?.type ?? "postgres",
+      !!options.filePath
+    );
+    this.panel.onDidDispose(() => (this.disposed = true));
 
     this.panel.webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
@@ -90,6 +143,12 @@ export class QueryPanel {
           await vscode.env.clipboard.writeText(String(msg.text ?? ""));
           vscode.window.showInformationMessage("Copied to clipboard.");
           break;
+        case "saveFile":
+          if (this.filePath) {
+            fs.writeFileSync(this.filePath, String(msg.sql ?? ""), "utf8");
+            this.post({ type: "saved" });
+          }
+          break;
       }
     });
 
@@ -97,7 +156,7 @@ export class QueryPanel {
       this.previewPath = options.previewPath;
       this.filter = options.filter;
       void this.runPreview(options.previewPath, 0);
-    } else if (options.initialSql) {
+    } else if (options.initialSql && options.autoRun) {
       void this.run(options.initialSql);
     }
   }
@@ -241,7 +300,7 @@ export class QueryPanel {
     void this.panel.webview.postMessage(msg);
   }
 
-  private render(initialSql: string, dbType: string): string {
+  private render(initialSql: string, dbType: string, hasFile: boolean): string {
     const placeholder = dbType === "redis" ? "GET mykey" : "SELECT * FROM ... LIMIT 100";
     const nonce = String(Date.now());
     return /* html */ `<!DOCTYPE html>
@@ -320,6 +379,7 @@ export class QueryPanel {
   <textarea id="sql" placeholder="${placeholder}">${escapeHtml(initialSql)}</textarea>
   <div class="bar">
     <button id="runBtn">Run ▶</button>
+    ${hasFile ? '<button id="saveBtn" class="secondary" title="Save to file (Cmd/Ctrl+S)">💾 Save</button>' : ""}
     <button id="refreshBtn" class="secondary" title="Refresh">⟳</button>
     <button id="addBtn" class="secondary" title="Add row" disabled>＋ Row</button>
     <button id="delBtn" class="secondary" title="Delete selected rows" disabled>🗑 Delete</button>
@@ -377,6 +437,15 @@ export class QueryPanel {
 
     function run() { statusEl.textContent = 'Running…'; vscode.postMessage({ type:'run', sql: sqlEl.value }); }
     $('runBtn').addEventListener('click', run);
+    function saveFile() {
+      const btn = $('saveBtn'); if (!btn) return;
+      statusEl.textContent = 'Saving…';
+      vscode.postMessage({ type: 'saveFile', sql: sqlEl.value });
+    }
+    if ($('saveBtn')) $('saveBtn').addEventListener('click', saveFile);
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveFile(); }
+    });
     $('refreshBtn').addEventListener('click', () => vscode.postMessage({ type:'refresh' }));
     $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv' }));
     $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json' }));
@@ -384,6 +453,7 @@ export class QueryPanel {
     sqlEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
     });
+
     $('prevBtn').addEventListener('click', () => pageBy(-1));
     $('nextBtn').addEventListener('click', () => pageBy(1));
     $('delBtn').addEventListener('click', deleteSelected);
@@ -614,6 +684,8 @@ export class QueryPanel {
         statusEl.textContent = m.ok ? m.message : ('Update failed: ' + m.message);
         return;
       }
+      if (m.type === 'saved') { statusEl.textContent = 'Saved ✓'; return; }
+      if (m.type === 'setSql') { sqlEl.value = m.sql; return; }
       if (m.type === 'result') {
         raw = m.result; selected.clear(); sort = { col:null, dir:1 };
         $('addBtn').disabled = !raw.editable;
