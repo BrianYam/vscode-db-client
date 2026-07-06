@@ -60,6 +60,10 @@
       {
         "command": "openDbClient.previewTable",
         "title": "Select Top 200"
+      },
+      {
+        "command": "openDbClient.showDDL",
+        "title": "View DDL / Structure"
       }
     ],
     "menus": {
@@ -93,8 +97,13 @@
         },
         {
           "command": "openDbClient.previewTable",
-          "when": "view == openDbClient.connections && viewItem == table",
+          "when": "view == openDbClient.connections && viewItem =~ /table|view/",
           "group": "1_query@1"
+        },
+        {
+          "command": "openDbClient.showDDL",
+          "when": "view == openDbClient.connections && viewItem =~ /table|view/",
+          "group": "1_query@2"
         }
       ]
     }

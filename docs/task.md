@@ -23,14 +23,14 @@ Checked = implemented in this repo. Unchecked = remaining work.
 
 ## M4 — SQLite
 - [x] `[SDD][M4]` `SqliteDriver` on WASM `sql.js` (no native build); tables/views; SELECT
-- [ ] `[SDD][M4]` **Write-back**: persist INSERT/UPDATE/DELETE to the `.db` file (export `db.export()` → `fs.writeFileSync`). _Open item._
+- [x] `[SDD][M4]` **Write-back**: modifying statements persist via `db.export()` → `fs.writeFileSync`
 - [ ] `[SDD][M4]` File picker in the form instead of typing the path
 
-## M5 — Editing & Export (next up)
-- [ ] `[SDD][M5]` Inline cell edit in results grid → generate UPDATE
-- [ ] `[SDD][M5]` Right-click table → view DDL / column structure
-- [ ] `[SDD][M5]` Export results to CSV / JSON
-- [ ] `[SDD][M5]` Column expansion in tree (table → columns with types)
+## M5 — Editing & Export  ✅ DONE 2026-07-06
+- [x] `[SDD][M5]` Inline cell edit in results grid → parameterized UPDATE (table previews with a PK)
+- [x] `[SDD][M5]` Right-click table → View DDL / structure (SHOW CREATE / sqlite_master / reconstructed)
+- [x] `[SDD][M5]` Export results to CSV / JSON (save dialog)
+- [x] `[SDD][M5]` Column expansion in tree (table → columns with types, PK marker)
 
 ## M6 — SSH Tunnel
 - [ ] `[SDD][M6]` `ssh2` local port-forward established before driver.connect(); tunnel fields in form

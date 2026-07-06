@@ -75,6 +75,9 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DbNode> {
       : vscode.TreeItemCollapsibleState.None;
     const node = new DbNode(connectionId, data.path, data.label, data.kind, collapsible);
     node.iconPath = new vscode.ThemeIcon(iconFor(data.kind));
+    if (data.description) {
+      node.description = data.description;
+    }
     if (data.kind === "table" || data.kind === "view" || data.kind === "key") {
       node.command = {
         command: "openDbClient.previewTable",
@@ -101,6 +104,8 @@ function iconFor(kind: string): string {
       return "table";
     case "view":
       return "eye";
+    case "column":
+      return "symbol-field";
     case "key":
       return "key";
     default:

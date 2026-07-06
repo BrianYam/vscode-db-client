@@ -72,6 +72,20 @@ export function activate(ctx: vscode.ExtensionContext): void {
     });
   });
 
+  reg("openDbClient.showDDL", async (node: DbNode) => {
+    try {
+      const driver = await manager.getDriver(node.connectionId);
+      const ddl = await driver.getDDL(node.nodePath);
+      const doc = await vscode.workspace.openTextDocument({
+        content: ddl,
+        language: "sql",
+      });
+      await vscode.window.showTextDocument(doc, { preview: true });
+    } catch (err) {
+      vscode.window.showErrorMessage((err as Error).message);
+    }
+  });
+
   ctx.subscriptions.push({ dispose: () => void manager.disposeAll() });
 }
 

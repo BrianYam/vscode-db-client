@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import initSqlJs, { Database, SqlJsStatic } from "sql.js";
 import { ConnectionConfig } from "../connections/types";
-import { Driver, QueryResult, TreeItemData } from "./Driver";
+import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
 
 // sql.js is a WASM build — no native compilation needed. The .wasm file lives
 // in node_modules/sql.js/dist and is located via this directory, set once at
@@ -22,9 +22,8 @@ async function getSqlJs(): Promise<SqlJsStatic> {
 }
 
 /**
- * SQLite driver. NOTE: sql.js works on an in-memory copy of the file, so writes
- * do not persist back to disk yet (see task.md — "SQLite write-back"). Reads and
- * SELECT queries work fully.
+ * SQLite driver on WASM sql.js. Works on an in-memory copy of the file; writes
+ * are persisted back to disk after each modifying statement (see persist()).
  */
 export class SqliteDriver implements Driver {
   private db?: Database;
@@ -37,8 +36,7 @@ export class SqliteDriver implements Driver {
       throw new Error(`SQLite file not found: ${path}`);
     }
     const SQL = await getSqlJs();
-    const bytes = fs.readFileSync(path);
-    this.db = new SQL.Database(bytes);
+    this.db = new SQL.Database(fs.readFileSync(path));
   }
 
   async dispose(): Promise<void> {
@@ -51,6 +49,11 @@ export class SqliteDriver implements Driver {
       throw new Error("Not connected");
     }
     return this.db;
+  }
+
+  /** Write the in-memory database back to the source file. */
+  private persist(): void {
+    fs.writeFileSync(this.config.filePath!, Buffer.from(this.d.export()));
   }
 
   async children(path: string[]): Promise<TreeItemData[]> {
@@ -66,8 +69,18 @@ export class SqliteDriver implements Driver {
       return res[0].values.map((row) => ({
         label: String(row[0]),
         kind: row[1] === "view" ? ("view" as const) : ("table" as const),
-        expandable: false,
+        expandable: true,
         path: [String(row[0])],
+      }));
+    }
+    if (path.length === 1) {
+      const cols = await this.tableColumns(path);
+      return cols.map((c) => ({
+        label: c.name,
+        kind: "column" as const,
+        expandable: false,
+        path: [...path, c.name],
+        description: `${c.type || "?"}${c.pk ? " 🔑" : ""}${c.nullable ? "" : " ·not null"}`,
       }));
     }
     return [];
@@ -75,6 +88,10 @@ export class SqliteDriver implements Driver {
 
   async query(sql: string): Promise<QueryResult> {
     const res = this.d.exec(sql);
+    // Any statement can mutate; persist if it wasn't a pure SELECT.
+    if (!/^\s*select/i.test(sql)) {
+      this.persist();
+    }
     if (res.length === 0) {
       return { columns: [], rows: [], rowCount: 0, message: "OK" };
     }
@@ -88,6 +105,55 @@ export class SqliteDriver implements Driver {
   }
 
   async previewTable(path: string[]): Promise<QueryResult> {
-    return this.query(`SELECT * FROM "${path[0]}" LIMIT 200`);
+    const result = await this.query(`SELECT * FROM "${path[0]}" LIMIT 200`);
+    const cols = await this.tableColumns(path);
+    const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
+    if (pkColumns.length) {
+      result.editable = { table: path, pkColumns };
+    }
+    return result;
+  }
+
+  async tableColumns(path: string[]): Promise<ColumnMeta[]> {
+    const res = this.d.exec(`PRAGMA table_info("${path[0]}")`);
+    if (res.length === 0) {
+      return [];
+    }
+    // columns: cid, name, type, notnull, dflt_value, pk
+    return res[0].values.map((row) => ({
+      name: String(row[1]),
+      type: String(row[2] ?? ""),
+      nullable: Number(row[3]) === 0,
+      pk: Number(row[5]) > 0,
+    }));
+  }
+
+  async getDDL(path: string[]): Promise<string> {
+    const stmt = this.d.prepare(
+      `SELECT sql FROM sqlite_master WHERE name = ?`
+    );
+    stmt.bind([path[0]]);
+    let ddl = "-- unavailable";
+    if (stmt.step()) {
+      ddl = String(stmt.get()[0]);
+    }
+    stmt.free();
+    return ddl;
+  }
+
+  async updateCell(
+    table: string[],
+    pkValues: Record<string, unknown>,
+    column: string,
+    value: unknown
+  ): Promise<void> {
+    const pkCols = Object.keys(pkValues);
+    const where = pkCols.map((c) => `"${c}" = ?`).join(" AND ");
+    const sql = `UPDATE "${table[0]}" SET "${column}" = ? WHERE ${where}`;
+    this.d.run(sql, [
+      value as never,
+      ...pkCols.map((c) => pkValues[c] as never),
+    ]);
+    this.persist();
   }
 }

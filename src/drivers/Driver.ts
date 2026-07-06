@@ -1,5 +1,13 @@
 import { ConnectionConfig } from "../connections/types";
 
+/** Identifies a table that a result set can be edited against. */
+export interface EditTarget {
+  /** Driver-specific path to the table, e.g. ["public","users"]. */
+  table: string[];
+  /** Primary-key column names. Editing is only offered when this is non-empty. */
+  pkColumns: string[];
+}
+
 /** A flat, grid-friendly result set. */
 export interface QueryResult {
   columns: string[];
@@ -7,17 +15,27 @@ export interface QueryResult {
   rowCount: number;
   /** Free-form message for statements that return no rows (e.g. "UPDATE 3"). */
   message?: string;
+  /** Present when the grid may be edited in place (table previews only). */
+  editable?: EditTarget;
 }
 
-/** One child in the connection tree (schema, table, key, etc.). */
+/** Column metadata for tree expansion and DDL/structure views. */
+export interface ColumnMeta {
+  name: string;
+  type: string;
+  nullable: boolean;
+  pk: boolean;
+}
+
+/** One child in the connection tree (schema, table, column, key, etc.). */
 export interface TreeItemData {
   label: string;
-  /** Distinguishes context-menu behaviour: database | schema | table | key... */
-  kind: "database" | "schema" | "table" | "view" | "key" | "info";
-  /** Whether this node can be expanded further. */
+  kind: "database" | "schema" | "table" | "view" | "column" | "key" | "info";
   expandable: boolean;
   /** Opaque path the driver uses to resolve children of this node. */
   path: string[];
+  /** Optional right-hand text (e.g. a column's type). */
+  description?: string;
 }
 
 /**
@@ -28,10 +46,7 @@ export interface TreeItemData {
 export interface Driver {
   readonly config: ConnectionConfig;
 
-  /** Open the underlying connection/pool. Throws on failure. */
   connect(password?: string): Promise<void>;
-
-  /** Close cleanly. Safe to call multiple times. */
   dispose(): Promise<void>;
 
   /** Children of the given tree path. Empty path = top level of the connection. */
@@ -40,6 +55,23 @@ export interface Driver {
   /** Run a raw statement (SQL, or a Redis command line). */
   query(sql: string): Promise<QueryResult>;
 
-  /** Convenience preview used by the "Select Top 200" command. */
+  /** Preview a table's rows; sets `editable` when a primary key exists. */
   previewTable(path: string[]): Promise<QueryResult>;
+
+  /** Column metadata for a table (used by tree expansion and DDL view). */
+  tableColumns(path: string[]): Promise<ColumnMeta[]>;
+
+  /** A CREATE-style definition string for a table. */
+  getDDL(path: string[]): Promise<string>;
+
+  /**
+   * Update a single cell, identified by the row's primary-key values.
+   * Implementations MUST parameterize values to avoid injection.
+   */
+  updateCell(
+    table: string[],
+    pkValues: Record<string, unknown>,
+    column: string,
+    value: unknown
+  ): Promise<void>;
 }

@@ -1,6 +1,6 @@
 import Redis from "ioredis";
 import { ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
-import { Driver, QueryResult, TreeItemData } from "./Driver";
+import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
 
 /** Redis driver backed by ioredis. Queries are raw command lines, e.g. "GET foo". */
 export class RedisDriver implements Driver {
@@ -74,6 +74,19 @@ export class RedisDriver implements Driver {
     const key = path[0];
     const type = await this.c.type(key);
     return this.query(previewCommandFor(type, key));
+  }
+
+  // The following are table-oriented operations that don't apply to Redis.
+  async tableColumns(): Promise<ColumnMeta[]> {
+    return [];
+  }
+
+  async getDDL(): Promise<string> {
+    throw new Error("DDL is not applicable to Redis");
+  }
+
+  async updateCell(): Promise<void> {
+    throw new Error("Inline editing is not supported for Redis keys");
   }
 }
 
