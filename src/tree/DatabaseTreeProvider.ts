@@ -29,10 +29,24 @@ export class DatabaseTreeProvider
   readonly dragMimeTypes = [DND_MIME];
   readonly dropMimeTypes = [DND_MIME];
 
+  // Per-connection generation. Bumped on disconnect so the tree item's id
+  // changes and VS Code renders the node fresh (collapsed) instead of
+  // re-querying its children and silently reconnecting.
+  private gen = new Map<string, number>();
+  private genOf(id: string): number {
+    return this.gen.get(id) ?? 0;
+  }
+
   constructor(
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager
   ) {}
+
+  /** Close a connection: bump its generation so the subtree collapses. */
+  markDisconnected(id: string): void {
+    this.gen.set(id, this.genOf(id) + 1);
+    this._onDidChange.fire(undefined);
+  }
 
   handleDrag(source: DbNode[], dataTransfer: vscode.DataTransfer): void {
     const ids = source
@@ -70,23 +84,34 @@ export class DatabaseTreeProvider
     // Root: one node per saved connection.
     if (!element) {
       return this.store.all().map((c) => {
+        const connected = this.manager.isConnected(c.id);
         const node = new DbNode(
           c.id,
           [],
           c.name,
-          "connection",
+          connected ? "connectionActive" : "connection",
           vscode.TreeItemCollapsibleState.Collapsed
         );
+        node.id = `${c.id}#${this.genOf(c.id)}`;
         node.description = describe(c.type);
-        node.iconPath = new vscode.ThemeIcon("database");
+        node.iconPath = new vscode.ThemeIcon(
+          "database",
+          connected ? new vscode.ThemeColor("charts.green") : undefined
+        );
         return node;
       });
     }
 
     // Expand a connection or an inner node via its driver.
     try {
+      const wasConnected = this.manager.isConnected(element.connectionId);
       const driver = await this.manager.getDriver(element.connectionId);
       const kids = await driver.children(element.nodePath);
+      // If expanding a connection just brought it online, refresh so the root
+      // node's icon/context reflect the live state.
+      if (!wasConnected && element.nodePath.length === 0) {
+        this._onDidChange.fire(undefined);
+      }
       return kids.map((k) => this.toNode(element.connectionId, k));
     } catch (err) {
       const node = new DbNode(
@@ -106,6 +131,7 @@ export class DatabaseTreeProvider
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None;
     const node = new DbNode(connectionId, data.path, data.label, data.kind, collapsible);
+    node.id = `${connectionId}#${this.genOf(connectionId)}:${data.path.join("/")}`;
     node.iconPath = new vscode.ThemeIcon(iconFor(data.kind));
     if (data.description) {
       node.description = data.description;

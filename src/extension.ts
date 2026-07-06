@@ -28,6 +28,21 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   reg("openDbClient.refresh", () => tree.refresh());
 
+  reg("openDbClient.connect", async (node: DbNode) => {
+    try {
+      await manager.getDriver(node.connectionId);
+      tree.refresh();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Connect failed: ${(err as Error).message}`);
+      tree.refresh();
+    }
+  });
+
+  reg("openDbClient.disconnect", async (node: DbNode) => {
+    await manager.disconnect(node.connectionId);
+    tree.markDisconnected(node.connectionId);
+  });
+
   reg("openDbClient.addConnection", () => {
     ConnectionFormPanel.open(ctx, store, manager, () => tree.refresh());
   });

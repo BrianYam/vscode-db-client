@@ -64,6 +64,16 @@
       {
         "command": "openDbClient.showDDL",
         "title": "View DDL / Structure"
+      },
+      {
+        "command": "openDbClient.connect",
+        "title": "Connect",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "openDbClient.disconnect",
+        "title": "Close Connection",
+        "icon": "$(debug-disconnect)"
       }
     ],
     "menus": {
@@ -86,13 +96,23 @@
           "group": "inline@1"
         },
         {
-          "command": "openDbClient.editConnection",
+          "command": "openDbClient.connect",
           "when": "view == openDbClient.connections && viewItem == connection",
+          "group": "0_conn@1"
+        },
+        {
+          "command": "openDbClient.disconnect",
+          "when": "view == openDbClient.connections && viewItem == connectionActive",
+          "group": "0_conn@1"
+        },
+        {
+          "command": "openDbClient.editConnection",
+          "when": "view == openDbClient.connections && viewItem =~ /^connection/",
           "group": "1_modify@1"
         },
         {
           "command": "openDbClient.deleteConnection",
-          "when": "view == openDbClient.connections && viewItem == connection",
+          "when": "view == openDbClient.connections && viewItem =~ /^connection/",
           "group": "1_modify@2"
         },
         {
