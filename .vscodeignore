@@ -1,7 +1,10 @@
 .vscode/**
+.claude/**
 src/**
 docs/**
+samples/**
 **/*.ts
 **/*.map
+**/*.vsix
 tsconfig.json
 .gitignore

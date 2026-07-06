@@ -40,9 +40,13 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [ ] `[SDD][M7]` Backup / restore (shell out to `pg_dump` / `mysqldump`)
 - [ ] `[SDD][M7]` Remaining engines (SQL Server, Oracle, Mongo, ClickHouse, …)
 
-## QA — Human Gate (Phase 4)
-- [ ] `[SDD][QA]` Live test: Postgres connect → browse → query → preview
-- [ ] `[SDD][QA]` Live test: MySQL connect → browse → query
-- [ ] `[SDD][QA]` Live test: Redis PING → SCAN keys → typed preview
-- [ ] `[SDD][QA]` Live test: SQLite open file → SELECT
-- [ ] `[SDD][QA]` Reload VS Code → connections persist, passwords intact, no cap
+## QA — Human Gate (Phase 4)  ✅ PASSED 2026-07-06
+- [x] `[SDD][QA]` Live test: Postgres connect → browse → query → preview
+- [x] `[SDD][QA]` Live test: MySQL connect → browse → query
+- [x] `[SDD][QA]` Live test: Redis PING → SCAN keys → typed preview
+- [x] `[SDD][QA]` Live test: SQLite open file → SELECT
+- [x] `[SDD][QA]` Reload VS Code → connections persist, passwords intact, no cap
+
+## Packaging / Adoption
+- [x] `[SDD][PKG]` Build installable `.vsix` → `open-db-client-0.1.0.vsix`
+- [ ] `[SDD][PKG]` Install into daily-driver VS Code (Extensions → Install from VSIX)
