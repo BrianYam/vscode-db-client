@@ -48,20 +48,65 @@ export class RedisDriver implements Driver {
   }
 
   async children(path: string[]): Promise<TreeItemData[]> {
-    // Top level -> first 500 keys (SCAN, non-blocking).
+    // Top level -> numbered databases (db0..dbN). Deeper -> keys in that db.
     if (path.length === 0) {
-      const keys = await this.scanKeys(500);
+      return this.databaseNodes();
+    }
+    if (path.length === 1) {
+      const db = Number(path[0]);
+      const keys = await this.scanKeys(db, 500);
       return keys.map((k) => ({
         label: k,
         kind: "key" as const,
         expandable: false,
-        path: [k],
+        path: [path[0], k],
       }));
     }
     return [];
   }
 
-  private async scanKeys(limit: number): Promise<string[]> {
+  private async databaseNodes(): Promise<TreeItemData[]> {
+    // How many DBs the server exposes (default 16 if CONFIG is disabled).
+    let count = 16;
+    try {
+      const cfg = (await this.c.call("CONFIG", "GET", "databases")) as string[];
+      count = Number(cfg?.[1]) || 16;
+    } catch {
+      /* CONFIG may be restricted on managed Redis; fall back to 16 */
+    }
+    // Key counts per db from INFO keyspace (only non-empty dbs are listed).
+    const counts: Record<string, string> = {};
+    try {
+      const info = String(await this.c.info("keyspace"));
+      for (const line of info.split("\n")) {
+        const m = /^db(\d+):keys=(\d+)/.exec(line.trim());
+        if (m) {
+          counts[m[1]] = m[2];
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    const current = this.config.redisDb ?? 0;
+    const nodes: TreeItemData[] = [];
+    for (let i = 0; i < count; i++) {
+      const keyCount = counts[i];
+      // Show dbs that have keys, plus the configured one (so it's always visible).
+      if (keyCount || i === current) {
+        nodes.push({
+          label: `db${i}`,
+          kind: "database",
+          expandable: true,
+          path: [String(i)],
+          description: keyCount ? `${keyCount} keys` : "empty",
+        });
+      }
+    }
+    return nodes;
+  }
+
+  private async scanKeys(db: number, limit: number): Promise<string[]> {
+    await this.c.select(db);
     const found: string[] = [];
     let cursor = "0";
     do {
@@ -72,10 +117,13 @@ export class RedisDriver implements Driver {
     return found.slice(0, limit);
   }
 
-  async query(sql: string): Promise<QueryResult> {
+  async query(sql: string, database?: string): Promise<QueryResult> {
     const parts = tokenize(sql.trim());
     if (parts.length === 0) {
       return { columns: [], rows: [], rowCount: 0, message: "Empty command" };
+    }
+    if (database !== undefined) {
+      await this.c.select(Number(database));
     }
     const [cmd, ...args] = parts;
     const raw = await this.c.call(cmd, ...args);
@@ -83,7 +131,10 @@ export class RedisDriver implements Driver {
   }
 
   async previewTable(path: string[]): Promise<QueryResult> {
-    const key = path[0];
+    // path is [dbIndex, key]
+    const db = Number(path[0]);
+    const key = path[1];
+    await this.c.select(db);
     const type = await this.c.type(key);
     return this.query(previewCommandFor(type, key));
   }
@@ -110,8 +161,9 @@ export class RedisDriver implements Driver {
   }
 
   async deleteRow(table: string[]): Promise<void> {
-    // For Redis, "delete row" = delete the key.
-    await this.c.del(table[0]);
+    // For Redis a "row" is a key. table is [dbIndex, key].
+    await this.c.select(Number(table[0]));
+    await this.c.del(table[1]);
   }
 
   async insertRow(): Promise<void> {

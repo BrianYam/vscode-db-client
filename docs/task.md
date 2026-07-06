@@ -70,6 +70,9 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5.5]` FK related-row carries the database; New Query runs against its DB
 - [x] `[SDD][M5.5]` Connection-string mode ALSO lists all DBs (rewrites the db path segment per pool)
 - [x] `[SDD][M5.5]` Composes with SSH tunnel (host rewrite + db rewrite together)
+- [x] `[SDD][M5.5]` MySQL: already server-level (lists all databases) — confirmed
+- [x] `[SDD][M5.5]` Redis: numbered DBs (db0..dbN) as a level, key counts via INFO keyspace
+- [x] `[SDD][M5.5]` SQLite: single file = single database (N/A by design)
 
 ## M6 — SSH Tunnel  ✅ DONE 2026-07-06
 - [x] `[SDD][M6]` `ssh2` local port-forward established before driver.connect()
