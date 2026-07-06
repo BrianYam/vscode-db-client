@@ -14,6 +14,11 @@ interface FormPayload {
   filePath?: string;
   redisDb?: number;
   ssl?: boolean;
+  sslCA?: string;
+  sslCert?: string;
+  sslKey?: string;
+  useConnectionString?: boolean;
+  connectionString?: string;
 }
 
 type Refresh = () => void;
@@ -49,6 +54,14 @@ export class ConnectionFormPanel {
 
     this.panel.webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
+        case "ready":
+          if (this.existing) {
+            const pw = await this.store.getPassword(this.existing.id);
+            if (pw) {
+              this.post({ type: "prefill", password: pw });
+            }
+          }
+          break;
         case "test":
           await this.test(msg.payload, msg.password);
           break;
@@ -56,7 +69,7 @@ export class ConnectionFormPanel {
           await this.save(msg.payload, msg.password, msg.thenConnect);
           break;
         case "browse":
-          await this.browse();
+          await this.browse(msg.field);
           break;
         case "close":
           this.panel.dispose();
@@ -77,6 +90,11 @@ export class ConnectionFormPanel {
       filePath: payload.filePath?.trim() || undefined,
       redisDb: payload.redisDb,
       ssl: payload.ssl || undefined,
+      sslCA: payload.sslCA?.trim() || undefined,
+      sslCert: payload.sslCert?.trim() || undefined,
+      sslKey: payload.sslKey?.trim() || undefined,
+      useConnectionString: payload.useConnectionString || undefined,
+      connectionString: payload.connectionString?.trim() || undefined,
     };
   }
 
@@ -117,14 +135,17 @@ export class ConnectionFormPanel {
     this.panel.dispose();
   }
 
-  private async browse(): Promise<void> {
+  private async browse(field: string): Promise<void> {
+    const isSqlite = field === "filePath";
     const picked = await vscode.window.showOpenDialog({
       canSelectMany: false,
-      openLabel: "Select SQLite file",
-      filters: { SQLite: ["db", "sqlite", "sqlite3", "db3"], "All files": ["*"] },
+      openLabel: isSqlite ? "Select SQLite file" : "Select certificate",
+      filters: isSqlite
+        ? { SQLite: ["db", "sqlite", "sqlite3", "db3"], "All files": ["*"] }
+        : { Certificates: ["pem", "crt", "cert", "key", "ca"], "All files": ["*"] },
     });
     if (picked && picked[0]) {
-      this.post({ type: "browsed", path: picked[0].fsPath });
+      this.post({ type: "browsed", field, path: picked[0].fsPath });
     }
   }
 
@@ -145,6 +166,11 @@ export class ConnectionFormPanel {
       filePath: e?.filePath ?? "",
       redisDb: e?.redisDb ?? 0,
       ssl: e?.ssl ?? false,
+      sslCA: e?.sslCA ?? "",
+      sslCert: e?.sslCert ?? "",
+      sslKey: e?.sslKey ?? "",
+      useConnectionString: e?.useConnectionString ?? false,
+      connectionString: e?.connectionString ?? "",
       isEdit: !!e,
     });
     const ports = JSON.stringify(DEFAULT_PORTS);
@@ -191,6 +217,18 @@ export class ConnectionFormPanel {
   .spacer { flex: 1; }
   .browse { display: flex; gap: 8px; }
   .hidden { display: none !important; }
+  .pwwrap { position: relative; }
+  .pwwrap input { padding-right: 34px; }
+  .eye { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+         cursor: pointer; opacity: .7; user-select: none; }
+  .eye:hover { opacity: 1; }
+  .sslbox { border: 1px solid var(--vscode-panel-border,#4443); border-radius: 6px;
+            padding: 12px 14px; margin-bottom: 16px; background: var(--vscode-editorWidget-background); }
+  .sslbox .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .sslbox .row label { width: 110px; margin: 0; }
+  .sslbox .row input { flex: 1; }
+  .csrow { display: flex; gap: 8px; margin-bottom: 16px; }
+  .csrow input { flex: 1; }
 </style>
 </head>
 <body>
@@ -230,7 +268,10 @@ export class ConnectionFormPanel {
       </div>
       <div>
         <label>Password</label>
-        <input type="password" id="password" placeholder="" />
+        <div class="pwwrap">
+          <input type="password" id="password" placeholder="" />
+          <span class="eye" id="eye" title="Show/hide password">👁</span>
+        </div>
       </div>
       <div class="full" id="dbField">
         <label>Database <span style="opacity:.6">(optional)</span></label>
@@ -243,6 +284,33 @@ export class ConnectionFormPanel {
     </div>
     <div class="toggle">
       <input type="checkbox" id="ssl" /> <label style="margin:0">Use SSL / TLS</label>
+      <button class="secondary hidden" id="sslConfigBtn" type="button" style="margin-left:8px">⚙ SSL Config</button>
+    </div>
+
+    <div class="sslbox hidden" id="sslBox">
+      <div class="row">
+        <label>CA Certificate</label>
+        <input type="text" id="sslCA" placeholder="path to CA cert (optional)" />
+        <button class="secondary" data-browse="sslCA" type="button">…</button>
+      </div>
+      <div class="row">
+        <label>Client Cert</label>
+        <input type="text" id="sslCert" placeholder="path to client cert (optional)" />
+        <button class="secondary" data-browse="sslCert" type="button">…</button>
+      </div>
+      <div class="row">
+        <label>Client Key</label>
+        <input type="text" id="sslKey" placeholder="path to client key (optional)" />
+        <button class="secondary" data-browse="sslKey" type="button">…</button>
+      </div>
+    </div>
+
+    <div class="toggle">
+      <input type="checkbox" id="useCS" /> <label style="margin:0">Use Connection String</label>
+    </div>
+    <div class="csrow hidden" id="csRow">
+      <input type="text" id="connectionString" placeholder="postgresql://user:pass@host:5432/dbname" />
+      <button class="secondary" id="csUse" type="button">🔎 Use</button>
     </div>
   </div>
 
@@ -278,7 +346,56 @@ export class ConnectionFormPanel {
     $('filePath').value = state.filePath;
     $('redisDb').value = state.redisDb;
     $('ssl').checked = state.ssl;
+    $('sslCA').value = state.sslCA;
+    $('sslCert').value = state.sslCert;
+    $('sslKey').value = state.sslKey;
+    $('useCS').checked = state.useConnectionString;
+    $('connectionString').value = state.connectionString;
     if (state.isEdit) $('password').placeholder = '(unchanged — leave blank to keep)';
+
+    // password reveal
+    $('eye').addEventListener('click', () => {
+      const p = $('password');
+      p.type = p.type === 'password' ? 'text' : 'password';
+      $('eye').textContent = p.type === 'password' ? '👁' : '🙈';
+    });
+
+    // SSL config visibility
+    function syncSsl() {
+      const on = $('ssl').checked;
+      $('sslConfigBtn').classList.toggle('hidden', !on);
+      if (!on) $('sslBox').classList.add('hidden');
+    }
+    $('ssl').addEventListener('change', syncSsl);
+    $('sslConfigBtn').addEventListener('click', () => $('sslBox').classList.toggle('hidden'));
+    syncSsl();
+    if (state.sslCA || state.sslCert || state.sslKey) $('sslBox').classList.remove('hidden');
+
+    // connection string visibility + parse
+    function syncCS() { $('csRow').classList.toggle('hidden', !$('useCS').checked); }
+    $('useCS').addEventListener('change', syncCS);
+    syncCS();
+    $('csUse').addEventListener('click', () => {
+      const raw = $('connectionString').value.trim();
+      if (!raw) return;
+      try {
+        const u = new URL(raw);
+        if (u.hostname) $('host').value = u.hostname;
+        if (u.port) $('port').value = u.port;
+        if (u.username) $('username').value = decodeURIComponent(u.username);
+        if (u.password) $('password').value = decodeURIComponent(u.password);
+        const path = u.pathname.replace(/^\\//, '');
+        if (state.type === 'redis') { if (path) $('redisDb').value = path; }
+        else if (path) $('database').value = path;
+        banner(true, 'Parsed connection string into fields');
+      } catch (err) {
+        banner(false, 'Could not parse connection string');
+      }
+    });
+
+    // generic browse buttons (SSL certs)
+    document.querySelectorAll('[data-browse]').forEach((b) =>
+      b.addEventListener('click', () => vscode.postMessage({ type:'browse', field: b.getAttribute('data-browse') })));
 
     function selectType(t) {
       state.type = t;
@@ -298,7 +415,7 @@ export class ConnectionFormPanel {
 
     $('portMinus').addEventListener('click', () => $('port').value = Math.max(0, Number($('port').value||0) - 1));
     $('portPlus').addEventListener('click', () => $('port').value = Number($('port').value||0) + 1);
-    $('browseBtn').addEventListener('click', () => vscode.postMessage({ type:'browse' }));
+    $('browseBtn').addEventListener('click', () => vscode.postMessage({ type:'browse', field:'filePath' }));
     $('closeBtn').addEventListener('click', () => vscode.postMessage({ type:'close' }));
 
     function payload() {
@@ -312,6 +429,11 @@ export class ConnectionFormPanel {
         filePath: $('filePath').value,
         redisDb: Number($('redisDb').value) || 0,
         ssl: $('ssl').checked,
+        sslCA: $('sslCA').value,
+        sslCert: $('sslCert').value,
+        sslKey: $('sslKey').value,
+        useConnectionString: $('useCS').checked,
+        connectionString: $('connectionString').value,
       };
     }
     function validate() {
@@ -342,9 +464,16 @@ export class ConnectionFormPanel {
       if (m.type === 'testResult') {
         banner(m.ok, (m.ok ? '✓ ' : '✗ ') + m.message + (m.ms != null ? '  ·  Cost: ' + m.ms + 'ms' : ''));
       } else if (m.type === 'browsed') {
-        $('filePath').value = m.path;
+        const el = $(m.field);
+        if (el) el.value = m.path;
+      } else if (m.type === 'prefill') {
+        $('password').value = m.password;
+        $('password').placeholder = '';
       }
     });
+
+    // Ask the extension for the stored password (edit mode).
+    vscode.postMessage({ type:'ready' });
   </script>
 </body>
 </html>`;

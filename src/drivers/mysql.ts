@@ -8,6 +8,7 @@ import {
   QueryResult,
   TreeItemData,
 } from "./Driver";
+import { buildTls } from "./ssl";
 
 /** MySQL / MariaDB driver backed by the pure-JS `mysql2` pool. */
 export class MySqlDriver implements Driver {
@@ -16,16 +17,21 @@ export class MySqlDriver implements Driver {
   constructor(public readonly config: ConnectionConfig) {}
 
   async connect(password?: string): Promise<void> {
-    this.pool = mysql.createPool({
-      host: this.config.host,
-      port: this.config.port ?? DEFAULT_PORTS.mysql,
-      user: this.config.username,
-      password,
-      database: this.config.database || undefined,
-      connectionLimit: 4,
-      connectTimeout: 10_000,
-      ssl: this.config.ssl ? { rejectUnauthorized: false } : undefined,
-    });
+    if (this.config.useConnectionString && this.config.connectionString) {
+      this.pool = mysql.createPool(this.config.connectionString);
+    } else {
+      const ssl = buildTls(this.config);
+      this.pool = mysql.createPool({
+        host: this.config.host,
+        port: this.config.port ?? DEFAULT_PORTS.mysql,
+        user: this.config.username,
+        password,
+        database: this.config.database || undefined,
+        connectionLimit: 4,
+        connectTimeout: 10_000,
+        ssl: ssl ? { ca: ssl.ca, cert: ssl.cert, key: ssl.key, rejectUnauthorized: ssl.rejectUnauthorized } : undefined,
+      });
+    }
     const conn = await this.pool.getConnection();
     conn.release();
   }

@@ -8,6 +8,7 @@ import {
   QueryResult,
   TreeItemData,
 } from "./Driver";
+import { buildTls } from "./ssl";
 
 /** PostgreSQL driver backed by the pure-JS `pg` pool. */
 export class PostgresDriver implements Driver {
@@ -16,16 +17,26 @@ export class PostgresDriver implements Driver {
   constructor(public readonly config: ConnectionConfig) {}
 
   async connect(password?: string): Promise<void> {
-    this.pool = new Pool({
-      host: this.config.host,
-      port: this.config.port ?? DEFAULT_PORTS.postgres,
-      user: this.config.username,
-      password,
-      database: this.config.database || "postgres",
-      max: 4,
-      connectionTimeoutMillis: 10_000,
-      ssl: this.config.ssl ? { rejectUnauthorized: false } : undefined,
-    });
+    const ssl = buildTls(this.config);
+    if (this.config.useConnectionString && this.config.connectionString) {
+      this.pool = new Pool({
+        connectionString: this.config.connectionString,
+        max: 4,
+        connectionTimeoutMillis: 10_000,
+        ssl,
+      });
+    } else {
+      this.pool = new Pool({
+        host: this.config.host,
+        port: this.config.port ?? DEFAULT_PORTS.postgres,
+        user: this.config.username,
+        password,
+        database: this.config.database || "postgres",
+        max: 4,
+        connectionTimeoutMillis: 10_000,
+        ssl,
+      });
+    }
     const client = await this.pool.connect();
     client.release();
   }

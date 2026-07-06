@@ -1,6 +1,7 @@
 import Redis from "ioredis";
 import { ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
 import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
+import { buildTls } from "./ssl";
 
 /** Redis driver backed by ioredis. Queries are raw command lines, e.g. "GET foo". */
 export class RedisDriver implements Driver {
@@ -9,17 +10,27 @@ export class RedisDriver implements Driver {
   constructor(public readonly config: ConnectionConfig) {}
 
   async connect(password?: string): Promise<void> {
-    this.client = new Redis({
-      host: this.config.host,
-      port: this.config.port ?? DEFAULT_PORTS.redis,
-      username: this.config.username || undefined,
-      password: password || undefined,
-      db: this.config.redisDb ?? 0,
-      tls: this.config.ssl ? {} : undefined,
+    const tls = buildTls(this.config);
+    const options = {
       lazyConnect: true,
       connectTimeout: 10_000,
       maxRetriesPerRequest: 1,
-    });
+      tls: tls
+        ? { ca: tls.ca, cert: tls.cert, key: tls.key, rejectUnauthorized: tls.rejectUnauthorized }
+        : undefined,
+    };
+    if (this.config.useConnectionString && this.config.connectionString) {
+      this.client = new Redis(this.config.connectionString, options);
+    } else {
+      this.client = new Redis({
+        host: this.config.host,
+        port: this.config.port ?? DEFAULT_PORTS.redis,
+        username: this.config.username || undefined,
+        password: password || undefined,
+        db: this.config.redisDb ?? 0,
+        ...options,
+      });
+    }
     await this.client.connect();
     await this.client.ping();
   }

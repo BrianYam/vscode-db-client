@@ -56,6 +56,9 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5.3]` Test Connection button with success/error banner + "Cost: Nms"
 - [x] `[SDD][M5.3]` Save / Save & Connect / Close; SSL toggle; SQLite file Browse dialog
 - [x] `[SDD][M5.3]` Real SSL/TLS support wired into pg / mysql2 / ioredis
+- [x] `[SDD][M5.3]` Password show/hide (eye) toggle
+- [x] `[SDD][M5.3]` Connection-string mode: toggle + "Use" parser; drivers connect via string
+- [x] `[SDD][M5.3]` SSL Config: CA / Client Cert / Client Key file paths (Browse) wired into TLS
 
 ## M6 — SSH Tunnel
 - [ ] `[SDD][M6]` `ssh2` local port-forward established before driver.connect(); tunnel fields in form

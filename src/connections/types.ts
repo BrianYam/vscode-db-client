@@ -20,6 +20,13 @@ export interface ConnectionConfig {
   redisDb?: number;
   // SQL / Redis: enable TLS/SSL
   ssl?: boolean;
+  // Optional SSL certificate file paths
+  sslCA?: string;
+  sslCert?: string;
+  sslKey?: string;
+  // Connect via a raw connection string instead of individual fields
+  useConnectionString?: boolean;
+  connectionString?: string;
 }
 
 export const DEFAULT_PORTS: Record<DatabaseType, number> = {
