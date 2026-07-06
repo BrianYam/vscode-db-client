@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { ConnectionStore } from "../connections/store";
 import { ConnectionManager } from "../connections/manager";
+import { QueryStore } from "../connections/queryStore";
 import { TreeItemData } from "../drivers/Driver";
 
 /** A node in the connections tree. */
@@ -40,7 +41,8 @@ export class DatabaseTreeProvider
   constructor(
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager,
-    private readonly extensionUri: vscode.Uri
+    private readonly extensionUri: vscode.Uri,
+    private readonly queries: QueryStore
   ) {}
 
   private engineIcon(type: string, connected: boolean): vscode.Uri {
@@ -105,6 +107,11 @@ export class DatabaseTreeProvider
       });
     }
 
+    // Query folders: extension-managed saved .sql files (not a driver concern).
+    if (element.contextValue === "queryroot" || element.contextValue === "queryfolder") {
+      return this.queryChildNodes(element);
+    }
+
     // Expand a connection or an inner node via its driver.
     try {
       const wasConnected = this.manager.isConnected(element.connectionId);
@@ -115,7 +122,12 @@ export class DatabaseTreeProvider
       if (!wasConnected && element.nodePath.length === 0) {
         this._onDidChange.fire(undefined);
       }
-      return kids.map((k) => this.toNode(element.connectionId, k));
+      const nodes = kids.map((k) => this.toNode(element.connectionId, k));
+      // Give each database AND schema a "Query" folder for saved .sql files.
+      if (element.contextValue === "database" || element.contextValue === "schema") {
+        nodes.unshift(this.queryRootNode(element.connectionId, element.nodePath));
+      }
+      return nodes;
     } catch (err) {
       const node = new DbNode(
         element.connectionId,
@@ -127,6 +139,61 @@ export class DatabaseTreeProvider
       node.iconPath = new vscode.ThemeIcon("error");
       return [node];
     }
+  }
+
+  /** Root "Query" node under a database/schema node (scopePath = its nodePath). */
+  private queryRootNode(connectionId: string, scopePath: string[]): DbNode {
+    const nodePath = [...scopePath, "@queries"];
+    const node = new DbNode(
+      connectionId,
+      nodePath,
+      "Query",
+      "queryroot",
+      vscode.TreeItemCollapsibleState.Collapsed
+    );
+    node.id = `${connectionId}#${this.genOf(connectionId)}:${nodePath.join("/")}`;
+    node.iconPath = new vscode.ThemeIcon("save-all", new vscode.ThemeColor("charts.yellow"));
+    return node;
+  }
+
+  private async queryChildNodes(folder: DbNode): Promise<DbNode[]> {
+    const { scope, relative } = splitQueryPath(folder.nodePath);
+    const entries = await this.queries.list(folder.connectionId, scope, relative);
+    if (entries.length === 0) {
+      const empty = new DbNode(
+        folder.connectionId,
+        [...folder.nodePath, "@empty"],
+        "Empty — click + to add a file or folder",
+        "queryempty",
+        vscode.TreeItemCollapsibleState.None
+      );
+      empty.iconPath = new vscode.ThemeIcon("info");
+      return [empty];
+    }
+    return entries.map((e) => {
+      const nodePath = [...folder.nodePath, e.name];
+      const node = new DbNode(
+        folder.connectionId,
+        nodePath,
+        e.name,
+        e.isDir ? "queryfolder" : "queryfile",
+        e.isDir
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None
+      );
+      node.id = `${folder.connectionId}#${this.genOf(folder.connectionId)}:${nodePath.join("/")}`;
+      node.iconPath = e.isDir
+        ? new vscode.ThemeIcon("folder")
+        : new vscode.ThemeIcon("file-code");
+      if (!e.isDir) {
+        node.command = {
+          command: "openDbClient.openQueryFile",
+          title: "Open Query",
+          arguments: [node],
+        };
+      }
+      return node;
+    });
   }
 
   private toNode(connectionId: string, data: TreeItemData): DbNode {
@@ -152,6 +219,15 @@ export class DatabaseTreeProvider
     }
     return node;
   }
+}
+
+/** Split a query-node path into its DB scope and the relative folder path. */
+export function splitQueryPath(nodePath: string[]): { scope: string[]; relative: string[] } {
+  const qi = nodePath.indexOf("@queries");
+  if (qi < 0) {
+    return { scope: nodePath, relative: [] };
+  }
+  return { scope: nodePath.slice(0, qi), relative: nodePath.slice(qi + 1) };
 }
 
 function describe(type: string): string {

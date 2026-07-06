@@ -66,6 +66,35 @@
         "title": "View DDL / Structure"
       },
       {
+        "command": "openDbClient.newQueryFile",
+        "title": "New Query File",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "openDbClient.newQueryFolder",
+        "title": "New Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "openDbClient.deleteQueryFolder",
+        "title": "Delete Folder",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "openDbClient.openQueryFile",
+        "title": "Open Query File"
+      },
+      {
+        "command": "openDbClient.runQueryFile",
+        "title": "Run Query File",
+        "icon": "$(play)"
+      },
+      {
+        "command": "openDbClient.deleteQueryFile",
+        "title": "Delete Query File",
+        "icon": "$(trash)"
+      },
+      {
         "command": "openDbClient.settings",
         "title": "Settings & Guides",
         "icon": "$(gear)"
@@ -143,6 +172,46 @@
         {
           "command": "openDbClient.showDDL",
           "when": "view == openDbClient.connections && viewItem =~ /table|view/",
+          "group": "1_query@2"
+        },
+        {
+          "command": "openDbClient.newQueryFile",
+          "when": "view == openDbClient.connections && viewItem =~ /queryroot|queryfolder/",
+          "group": "inline@1"
+        },
+        {
+          "command": "openDbClient.newQueryFolder",
+          "when": "view == openDbClient.connections && viewItem =~ /queryroot|queryfolder/",
+          "group": "inline@2"
+        },
+        {
+          "command": "openDbClient.newQueryFile",
+          "when": "view == openDbClient.connections && viewItem =~ /queryroot|queryfolder/",
+          "group": "1_query@1"
+        },
+        {
+          "command": "openDbClient.newQueryFolder",
+          "when": "view == openDbClient.connections && viewItem =~ /queryroot|queryfolder/",
+          "group": "1_query@2"
+        },
+        {
+          "command": "openDbClient.deleteQueryFolder",
+          "when": "view == openDbClient.connections && viewItem == queryfolder",
+          "group": "1_query@3"
+        },
+        {
+          "command": "openDbClient.runQueryFile",
+          "when": "view == openDbClient.connections && viewItem == queryfile",
+          "group": "inline@1"
+        },
+        {
+          "command": "openDbClient.runQueryFile",
+          "when": "view == openDbClient.connections && viewItem == queryfile",
+          "group": "1_query@1"
+        },
+        {
+          "command": "openDbClient.deleteQueryFile",
+          "when": "view == openDbClient.connections && viewItem == queryfile",
           "group": "1_query@2"
         }
       ]

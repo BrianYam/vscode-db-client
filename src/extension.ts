@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
 import { ConnectionStore } from "./connections/store";
 import { ConnectionManager } from "./connections/manager";
-import { DatabaseTreeProvider, DbNode } from "./tree/DatabaseTreeProvider";
+import { DatabaseTreeProvider, DbNode, splitQueryPath } from "./tree/DatabaseTreeProvider";
 import { ConnectionFormPanel } from "./webview/connectionFormPanel";
 import { SettingsPanel } from "./webview/settingsPanel";
+import { QueryStore } from "./connections/queryStore";
 import { QueryPanel } from "./webview/queryPanel";
 import { setSqliteWasmDir } from "./drivers/sqlite";
 import { initLog } from "./log";
@@ -15,7 +16,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const store = new ConnectionStore(ctx);
   const manager = new ConnectionManager(store);
-  const tree = new DatabaseTreeProvider(store, manager, ctx.extensionUri);
+  const queries = new QueryStore(ctx.globalStorageUri);
+  const tree = new DatabaseTreeProvider(store, manager, ctx.extensionUri, queries);
 
   ctx.subscriptions.push(
     vscode.window.createTreeView("openDbClient.connections", {
@@ -87,6 +89,84 @@ export function activate(ctx: vscode.ExtensionContext): void {
     QueryPanel.create(ctx, manager, store, node.connectionId, {
       previewPath: node.nodePath,
     });
+  });
+
+  reg("openDbClient.newQueryFile", async (node: DbNode) => {
+    const { scope, relative } = splitQueryPath(node.nodePath);
+    const name = await vscode.window.showInputBox({
+      prompt: "Query file name",
+      value: "query",
+      validateInput: (v) => (v.trim() ? undefined : "Name is required"),
+    });
+    if (!name) {
+      return;
+    }
+    const uri = await queries.createFile(node.connectionId, scope, relative, name.trim());
+    tree.refresh();
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.languages.setTextDocumentLanguage(doc, "sql");
+    await vscode.window.showTextDocument(doc);
+  });
+
+  reg("openDbClient.newQueryFolder", async (node: DbNode) => {
+    const { scope, relative } = splitQueryPath(node.nodePath);
+    const name = await vscode.window.showInputBox({
+      prompt: "Folder name",
+      validateInput: (v) => (v.trim() ? undefined : "Name is required"),
+    });
+    if (!name) {
+      return;
+    }
+    await queries.createFolder(node.connectionId, scope, relative, name.trim());
+    tree.refresh();
+  });
+
+  const fileParts = (node: DbNode) => {
+    const { scope, relative } = splitQueryPath(node.nodePath);
+    return { scope, parent: relative.slice(0, -1), name: relative[relative.length - 1] };
+  };
+
+  reg("openDbClient.openQueryFile", async (node: DbNode) => {
+    const { scope, parent, name } = fileParts(node);
+    const uri = queries.fileUri(node.connectionId, scope, parent, name);
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.languages.setTextDocumentLanguage(doc, "sql");
+    await vscode.window.showTextDocument(doc);
+  });
+
+  reg("openDbClient.runQueryFile", async (node: DbNode) => {
+    const { scope, parent, name } = fileParts(node);
+    const sql = await queries.read(queries.fileUri(node.connectionId, scope, parent, name));
+    QueryPanel.create(ctx, manager, store, node.connectionId, {
+      database: scope[0],
+      initialSql: sql,
+    });
+  });
+
+  reg("openDbClient.deleteQueryFile", async (node: DbNode) => {
+    const { scope, parent, name } = fileParts(node);
+    const ok = await vscode.window.showWarningMessage(
+      `Delete query file "${name}"?`,
+      { modal: true },
+      "Delete"
+    );
+    if (ok === "Delete") {
+      await queries.delete(queries.fileUri(node.connectionId, scope, parent, name));
+      tree.refresh();
+    }
+  });
+
+  reg("openDbClient.deleteQueryFolder", async (node: DbNode) => {
+    const { scope, relative } = splitQueryPath(node.nodePath);
+    const ok = await vscode.window.showWarningMessage(
+      `Delete folder "${relative[relative.length - 1]}" and everything in it?`,
+      { modal: true },
+      "Delete"
+    );
+    if (ok === "Delete") {
+      await queries.delete(queries.dirUri(node.connectionId, scope, relative));
+      tree.refresh();
+    }
   });
 
   reg("openDbClient.showDDL", async (node: DbNode) => {
