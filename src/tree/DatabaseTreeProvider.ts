@@ -17,14 +17,46 @@ export class DbNode extends vscode.TreeItem {
   }
 }
 
-export class DatabaseTreeProvider implements vscode.TreeDataProvider<DbNode> {
+const DND_MIME = "application/vnd.code.tree.opendbclient.connections";
+
+export class DatabaseTreeProvider
+  implements vscode.TreeDataProvider<DbNode>, vscode.TreeDragAndDropController<DbNode>
+{
   private readonly _onDidChange = new vscode.EventEmitter<DbNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChange.event;
+
+  // Drag-and-drop: reorder top-level connections.
+  readonly dragMimeTypes = [DND_MIME];
+  readonly dropMimeTypes = [DND_MIME];
 
   constructor(
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager
   ) {}
+
+  handleDrag(source: DbNode[], dataTransfer: vscode.DataTransfer): void {
+    const ids = source
+      .filter((n) => n.contextValue === "connection")
+      .map((n) => n.connectionId);
+    if (ids.length) {
+      dataTransfer.set(DND_MIME, new vscode.DataTransferItem(JSON.stringify(ids)));
+    }
+  }
+
+  async handleDrop(target: DbNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+    const item = dataTransfer.get(DND_MIME);
+    if (!item) {
+      return;
+    }
+    let ids: string[];
+    try {
+      ids = JSON.parse(await item.asString());
+    } catch {
+      return;
+    }
+    await this.store.reorder(ids, target?.connectionId);
+    this.refresh();
+  }
 
   refresh(node?: DbNode): void {
     this._onDidChange.fire(node);

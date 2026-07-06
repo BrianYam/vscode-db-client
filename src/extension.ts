@@ -15,7 +15,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const tree = new DatabaseTreeProvider(store, manager);
 
   ctx.subscriptions.push(
-    vscode.window.registerTreeDataProvider("openDbClient.connections", tree)
+    vscode.window.createTreeView("openDbClient.connections", {
+      treeDataProvider: tree,
+      dragAndDropController: tree,
+    })
   );
 
   const reg = (id: string, fn: (...a: any[]) => any) =>

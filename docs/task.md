@@ -60,6 +60,9 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][M5.3]` Connection-string mode: toggle + "Use" parser; drivers connect via string
 - [x] `[SDD][M5.3]` SSL Config: CA / Client Cert / Client Key file paths (Browse) wired into TLS
 
+## M5.4 — Tree UX  ✅ DONE 2026-07-06
+- [x] `[SDD][M5.4]` Drag-and-drop to reorder connections (persisted to globalState order)
+
 ## M6 — SSH Tunnel  ✅ DONE 2026-07-06
 - [x] `[SDD][M6]` `ssh2` local port-forward established before driver.connect()
 - [x] `[SDD][M6]` SSH form section: enable, host/port, username, auth (Auto/Password/Key/Agent), timeout

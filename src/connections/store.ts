@@ -44,6 +44,25 @@ export class ConnectionStore {
     }
   }
 
+  /** Move the dragged connections so they sit just before `targetId` (or last). */
+  async reorder(draggedIds: string[], targetId?: string): Promise<void> {
+    const list = this.all();
+    const dragged = list.filter((c) => draggedIds.includes(c.id));
+    if (!dragged.length) {
+      return;
+    }
+    const rest = list.filter((c) => !draggedIds.includes(c.id));
+    let insertAt = rest.length;
+    if (targetId) {
+      const idx = rest.findIndex((c) => c.id === targetId);
+      if (idx >= 0) {
+        insertAt = idx;
+      }
+    }
+    rest.splice(insertAt, 0, ...dragged);
+    await this.ctx.globalState.update(KEY, rest);
+  }
+
   async delete(id: string): Promise<void> {
     const list = this.all().filter((c) => c.id !== id);
     await this.ctx.globalState.update(KEY, list);
