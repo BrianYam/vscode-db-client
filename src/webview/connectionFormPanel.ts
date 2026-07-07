@@ -261,190 +261,245 @@ export class ConnectionFormPanel {
 <meta http-equiv="Content-Security-Policy"
   content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
 <style>
+  :root { --r: 8px; --bd: var(--vscode-panel-border, #ffffff1a); }
+  * { box-sizing: border-box; }
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         padding: 18px 22px; max-width: 720px; margin: 0 auto; }
-  h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; }
-  .banner { padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; display: none;
-            border-left: 4px solid; }
-  .banner.ok { display: block; background: var(--vscode-inputValidation-infoBackground, #06344d);
-            border-color: var(--vscode-testing-iconPassed, #3fb950); }
-  .banner.err { display: block; background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
-            border-color: var(--vscode-errorForeground, #f85149); }
-  label { display: block; font-size: 12px; margin-bottom: 4px; opacity: .85; }
-  .req::before { content: "• "; color: var(--vscode-errorForeground); }
+         margin: 0; padding: 30px 22px 92px; font-size: 13px; line-height: 1.4; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 6px;
+       font-size: 21px; font-weight: 600; }
+  h2 svg { width: 30px; height: 30px; }
+  .subtitle { opacity: .55; font-size: 12.5px; margin: 0 0 24px; }
+  .slabel { font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+            opacity: .55; font-weight: 600; margin: 24px 0 10px; }
+  .banner { padding: 11px 14px; border-radius: var(--r); margin-bottom: 4px; display: none;
+            font-size: 12.5px; }
+  .banner.ok { display: block; background: color-mix(in srgb, var(--vscode-testing-iconPassed,#3fb950) 16%, transparent);
+            color: var(--vscode-testing-iconPassed, #3fb950); }
+  .banner.err { display: block; background: color-mix(in srgb, var(--vscode-errorForeground,#f85149) 16%, transparent);
+            color: var(--vscode-errorForeground, #f85149); }
+  label { display: block; font-size: 12px; margin-bottom: 6px; opacity: .8; }
+  label .opt { opacity: .5; font-weight: 400; }
+  .req::before { content: "*"; color: var(--vscode-errorForeground); margin-right: 5px; }
   input[type=text], input[type=password], input[type=number] {
-    width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 4px;
+    width: 100%; height: 34px; padding: 0 12px; border-radius: var(--r); font-size: 13px;
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent); }
-  .types { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-  .type { padding: 8px 14px; border-radius: 6px; cursor: pointer; user-select: none;
-    background: var(--vscode-editorWidget-background);
-    border: 1px solid var(--vscode-panel-border, #4443); font-size: 13px; }
-  .type.active { background: var(--vscode-button-background);
-    color: var(--vscode-button-foreground); border-color: transparent; }
-  .type { display: inline-flex; align-items: center; gap: 7px; }
-  .type svg { width: 18px; height: 18px; flex: 0 0 auto; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; margin-bottom: 16px; }
+    border: 1px solid var(--vscode-input-border, #ffffff1f); outline: none;
+    transition: border-color .12s ease, box-shadow .12s ease; }
+  input:focus { border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent); }
+  input::placeholder { opacity: .45; }
+  .types { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (min-width: 560px) { .types { grid-template-columns: repeat(4, 1fr); } }
+  .type { display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 13px 10px; border-radius: var(--r); cursor: pointer; user-select: none;
+    font-size: 13px; font-weight: 500; text-align: center;
+    background: var(--vscode-editorWidget-background); border: 1px solid var(--bd);
+    transition: border-color .12s ease, background .12s ease; }
+  .type:hover { border-color: var(--vscode-focusBorder); }
+  .type.active { border-color: var(--vscode-focusBorder);
+    background: color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent);
+    box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
+  .type svg { width: 20px; height: 20px; flex: 0 0 auto; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .full { grid-column: 1 / -1; }
-  .portrow { display: flex; gap: 6px; }
-  .portrow button { width: 30px; }
-  .toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0 18px; }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-    border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; }
-  button.secondary { background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground); }
-  button:hover { background: var(--vscode-button-hoverBackground); }
-  .footer { display: flex; gap: 10px; margin-top: 22px; border-top: 1px solid var(--vscode-panel-border,#4443);
-    padding-top: 16px; }
-  .spacer { flex: 1; }
-  .browse { display: flex; gap: 8px; }
-  .hidden { display: none !important; }
+  .portrow { display: flex; }
+  .portrow input { border-radius: 0; text-align: center; }
+  .portrow button { height: 34px; width: 38px; border-radius: 0; font-size: 16px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: 1px solid var(--vscode-input-border, #ffffff1f); }
+  .portrow button:first-child { border-radius: var(--r) 0 0 var(--r); border-right: none; }
+  .portrow button:last-child { border-radius: 0 var(--r) var(--r) 0; border-left: none; }
   .pwwrap { position: relative; }
-  .pwwrap input { padding-right: 34px; }
-  .eye { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-         cursor: pointer; opacity: .7; user-select: none; }
+  .pwwrap input { padding-right: 38px; }
+  .eye { position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+         cursor: pointer; opacity: .6; user-select: none; }
   .eye:hover { opacity: 1; }
-  .sslbox { border: 1px solid var(--vscode-panel-border,#4443); border-radius: 6px;
-            padding: 12px 14px; margin-bottom: 16px; background: var(--vscode-editorWidget-background); }
-  .sslbox .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-  .sslbox .row label { width: 110px; margin: 0; }
-  .sslbox .row input { flex: 1; }
-  .csrow { display: flex; gap: 8px; margin-bottom: 16px; }
+  .opt-row { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+  .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .slider { position: absolute; inset: 0; cursor: pointer; border-radius: 22px;
+    background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #ffffff2e);
+    transition: .15s ease; }
+  .slider::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px;
+    background: var(--vscode-foreground); opacity: .65; border-radius: 50%; transition: .15s ease; }
+  .switch input:checked + .slider { background: var(--vscode-focusBorder); border-color: transparent; }
+  .switch input:checked + .slider::before { transform: translateX(16px); background: #fff; opacity: 1; }
+  .opt-row .lbl { cursor: pointer; }
+  .opt-row .link { margin-left: auto; font-size: 12px; cursor: pointer;
+    color: var(--vscode-textLink-foreground); }
+  .card { border: 1px solid var(--bd); border-radius: var(--r); padding: 16px;
+    margin: 6px 0 8px; background: var(--vscode-editorWidget-background); }
+  .card .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .card .row:last-child { margin-bottom: 0; }
+  .card .row > label { width: 110px; margin: 0; flex: 0 0 auto; }
+  .card .row input { flex: 1; }
+  .card .hint { font-size: 12px; opacity: .6; margin-top: 12px; }
+  .browse { display: flex; gap: 8px; }
+  .csrow { display: flex; gap: 10px; }
   .csrow input { flex: 1; }
+  button { height: 34px; padding: 0 15px; border-radius: var(--r); border: none; cursor: pointer;
+    font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground); transition: filter .12s ease; }
+  button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  button.ghost { background: transparent; }
+  button:hover { filter: brightness(1.12); }
+  .icon-sq { width: 38px; padding: 0; justify-content: center; }
+  .footer { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px 22px;
+    background: var(--vscode-editor-background); border-top: 1px solid var(--bd);
+    backdrop-filter: blur(6px); }
+  .footer .inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+  .spacer { flex: 1; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
-  <h2>🛢️ <span id="title">Connect to server</span></h2>
-  <div id="banner" class="banner"></div>
+  <div class="wrap">
+    <h2>
+      <svg viewBox="0 0 24 24" fill="#4E9BD6"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5c0 1.66-3.58 3-8 3S4 6.66 4 5z"/><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6c0 1.66-3.58 3-8 3S4 13.66 4 12z"/></svg>
+      <span id="title">Connect to server</span>
+    </h2>
+    <p class="subtitle">Configure a database connection — no connection limit.</p>
+    <div id="banner" class="banner"></div>
 
-  <label class="req">Name</label>
-  <input type="text" id="name" placeholder="my-database" />
+    <label class="req">Name</label>
+    <input type="text" id="name" placeholder="my-database" />
 
-  <div style="height:16px"></div>
-  <label>Server Type</label>
-  <div class="types" id="types">
-    <div class="type" data-t="postgres">${this.iconSvg("postgres")} PostgreSQL</div>
-    <div class="type" data-t="mysql">${this.iconSvg("mysql")} MySQL / MariaDB</div>
-    <div class="type" data-t="sqlite">${this.iconSvg("sqlite")} SQLite</div>
-    <div class="type" data-t="redis">${this.iconSvg("redis")} Redis</div>
-  </div>
-
-  <!-- Network engines -->
-  <div id="netFields">
-    <div class="grid">
-      <div>
-        <label class="req">Host</label>
-        <input type="text" id="host" />
-      </div>
-      <div>
-        <label class="req">Port</label>
-        <div class="portrow">
-          <button class="secondary" id="portMinus" type="button">−</button>
-          <input type="number" id="port" />
-          <button class="secondary" id="portPlus" type="button">+</button>
-        </div>
-      </div>
-      <div>
-        <label>Username</label>
-        <input type="text" id="username" />
-      </div>
-      <div>
-        <label>Password</label>
-        <div class="pwwrap">
-          <input type="password" id="password" placeholder="" />
-          <span class="eye" id="eye" title="Show/hide password">👁</span>
-        </div>
-      </div>
-      <div class="full" id="dbField">
-        <label>Database <span style="opacity:.6">(optional)</span></label>
-        <input type="text" id="database" />
-      </div>
-      <div class="full hidden" id="redisDbField">
-        <label>Redis DB index</label>
-        <input type="number" id="redisDb" value="0" />
-      </div>
-    </div>
-    <div class="toggle">
-      <input type="checkbox" id="ssl" /> <label style="margin:0">Use SSL / TLS</label>
-      <button class="secondary hidden" id="sslConfigBtn" type="button" style="margin-left:8px">⚙ SSL Config</button>
+    <div class="slabel">Server Type</div>
+    <div class="types" id="types">
+      <div class="type" data-t="postgres">${this.iconSvg("postgres")} PostgreSQL</div>
+      <div class="type" data-t="mysql">${this.iconSvg("mysql")} MySQL / MariaDB</div>
+      <div class="type" data-t="sqlite">${this.iconSvg("sqlite")} SQLite</div>
+      <div class="type" data-t="redis">${this.iconSvg("redis")} Redis</div>
     </div>
 
-    <div class="sslbox hidden" id="sslBox">
-      <div class="row" style="margin-bottom:12px">
-        <input type="checkbox" id="allowInvalidCert" style="width:auto;flex:0" />
-        <label style="width:auto;margin:0">Allow self-signed / skip certificate verification</label>
-      </div>
-      <div class="row">
-        <label>CA Certificate</label>
-        <input type="text" id="sslCA" placeholder="path to CA cert (optional)" />
-        <button class="secondary" data-browse="sslCA" type="button">…</button>
-      </div>
-      <div class="row">
-        <label>Client Cert</label>
-        <input type="text" id="sslCert" placeholder="path to client cert (optional)" />
-        <button class="secondary" data-browse="sslCert" type="button">…</button>
-      </div>
-      <div class="row">
-        <label>Client Key</label>
-        <input type="text" id="sslKey" placeholder="path to client key (optional)" />
-        <button class="secondary" data-browse="sslKey" type="button">…</button>
-      </div>
-    </div>
-
-    <div class="toggle">
-      <input type="checkbox" id="useCS" /> <label style="margin:0">Use Connection String</label>
-    </div>
-    <div class="csrow hidden" id="csRow">
-      <input type="text" id="connectionString" placeholder="postgresql://user:pass@host:5432/dbname" />
-      <button class="secondary" id="csUse" type="button">🔎 Use</button>
-    </div>
-
-    <div class="toggle">
-      <input type="checkbox" id="sshEnable" /> <label style="margin:0">Use SSH Tunnel</label>
-    </div>
-    <div class="sslbox hidden" id="sshBox">
+    <!-- Network engines -->
+    <div id="netFields">
+      <div class="slabel">Connection</div>
       <div class="grid">
-        <div><label class="req">SSH Host</label><input type="text" id="sshHost" placeholder="bastion.example.com" /></div>
-        <div><label class="req">SSH Port</label><input type="number" id="sshPort" /></div>
-        <div><label>SSH Username</label><input type="text" id="sshUsername" /></div>
-        <div><label>Connect Timeout (ms)</label><input type="number" id="sshConnectTimeout" /></div>
-      </div>
-      <label>Auth</label>
-      <div class="types" id="sshAuthBtns" style="margin-bottom:12px">
-        <div class="type" data-auth="auto">Auto</div>
-        <div class="type" data-auth="password">Password</div>
-        <div class="type" data-auth="key">Key</div>
-        <div class="type" data-auth="agent">Agent</div>
-      </div>
-      <div class="grid">
-        <div><label>SSH Password</label><input type="password" id="sshPassword" /></div>
-        <div><label>Key Passphrase</label><input type="password" id="sshPassphrase" /></div>
-        <div class="full"><label>Private Key Path</label>
-          <div class="browse">
-            <input type="text" id="sshPrivateKeyPath" placeholder="~/.ssh/id_rsa" />
-            <button class="secondary" data-browse="sshPrivateKeyPath" type="button">…</button>
+        <div>
+          <label class="req">Host</label>
+          <input type="text" id="host" />
+        </div>
+        <div>
+          <label class="req">Port</label>
+          <div class="portrow">
+            <button id="portMinus" type="button">−</button>
+            <input type="number" id="port" />
+            <button id="portPlus" type="button">+</button>
           </div>
         </div>
+        <div>
+          <label>Username</label>
+          <input type="text" id="username" />
+        </div>
+        <div>
+          <label>Password</label>
+          <div class="pwwrap">
+            <input type="password" id="password" placeholder="" />
+            <span class="eye" id="eye" title="Show/hide password">👁</span>
+          </div>
+        </div>
+        <div class="full" id="dbField">
+          <label>Database <span class="opt">(optional)</span></label>
+          <input type="text" id="database" />
+        </div>
+        <div class="full hidden" id="redisDbField">
+          <label>Redis DB index</label>
+          <input type="number" id="redisDb" value="0" />
+        </div>
       </div>
-      <div style="opacity:.65;font-size:12px">Tunnels the database host/port through this SSH server. "Auto" tries your SSH agent, then key, then password.</div>
-    </div>
-  </div>
 
-  <!-- SQLite -->
-  <div id="fileFields" class="hidden">
-    <label class="req">SQLite file path</label>
-    <div class="browse">
-      <input type="text" id="filePath" placeholder="/path/to/database.db" />
-      <button class="secondary" id="browseBtn" type="button">Browse…</button>
+      <div class="slabel">Options</div>
+      <div class="opt-row">
+        <label class="switch"><input type="checkbox" id="ssl" /><span class="slider"></span></label>
+        <label class="lbl" for="ssl">Use SSL / TLS</label>
+        <span class="link hidden" id="sslConfigBtn">⚙ Certificates</span>
+      </div>
+      <div class="card hidden" id="sslBox">
+        <div class="row" style="margin-bottom:14px">
+          <label class="switch"><input type="checkbox" id="allowInvalidCert" /><span class="slider"></span></label>
+          <label class="lbl" for="allowInvalidCert" style="width:auto">Allow self-signed / skip verification</label>
+        </div>
+        <div class="row">
+          <label>CA Certificate</label>
+          <input type="text" id="sslCA" placeholder="path to CA cert (optional)" />
+          <button class="icon-sq" data-browse="sslCA" type="button">…</button>
+        </div>
+        <div class="row">
+          <label>Client Cert</label>
+          <input type="text" id="sslCert" placeholder="path to client cert (optional)" />
+          <button class="icon-sq" data-browse="sslCert" type="button">…</button>
+        </div>
+        <div class="row">
+          <label>Client Key</label>
+          <input type="text" id="sslKey" placeholder="path to client key (optional)" />
+          <button class="icon-sq" data-browse="sslKey" type="button">…</button>
+        </div>
+      </div>
+
+      <div class="opt-row">
+        <label class="switch"><input type="checkbox" id="useCS" /><span class="slider"></span></label>
+        <label class="lbl" for="useCS">Use Connection String</label>
+      </div>
+      <div class="csrow hidden" id="csRow">
+        <input type="text" id="connectionString" placeholder="postgresql://user:pass@host:5432/dbname" />
+        <button id="csUse" type="button">🔎 Use</button>
+      </div>
+
+      <div class="opt-row">
+        <label class="switch"><input type="checkbox" id="sshEnable" /><span class="slider"></span></label>
+        <label class="lbl" for="sshEnable">Use SSH Tunnel</label>
+      </div>
+      <div class="card hidden" id="sshBox">
+        <div class="grid">
+          <div><label class="req">SSH Host</label><input type="text" id="sshHost" placeholder="bastion.example.com" /></div>
+          <div><label class="req">SSH Port</label><input type="number" id="sshPort" /></div>
+          <div><label>SSH Username</label><input type="text" id="sshUsername" /></div>
+          <div><label>Connect Timeout (ms)</label><input type="number" id="sshConnectTimeout" /></div>
+        </div>
+        <label style="margin-top:14px">Auth</label>
+        <div id="sshAuthBtns" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <div class="type" data-auth="auto">Auto</div>
+          <div class="type" data-auth="password">Password</div>
+          <div class="type" data-auth="key">Key</div>
+          <div class="type" data-auth="agent">Agent</div>
+        </div>
+        <div class="grid">
+          <div><label>SSH Password</label><input type="password" id="sshPassword" /></div>
+          <div><label>Key Passphrase</label><input type="password" id="sshPassphrase" /></div>
+          <div class="full"><label>Private Key Path</label>
+            <div class="browse">
+              <input type="text" id="sshPrivateKeyPath" placeholder="~/.ssh/id_rsa" />
+              <button class="icon-sq" data-browse="sshPrivateKeyPath" type="button">…</button>
+            </div>
+          </div>
+        </div>
+        <div class="hint">Tunnels the database host/port through this SSH server. "Auto" tries your SSH agent, then key, then password.</div>
+      </div>
+    </div>
+
+    <!-- SQLite -->
+    <div id="fileFields" class="hidden">
+      <div class="slabel">Database file</div>
+      <label class="req">SQLite file path</label>
+      <div class="browse">
+        <input type="text" id="filePath" placeholder="/path/to/database.db" />
+        <button id="browseBtn" type="button">Browse…</button>
+      </div>
     </div>
   </div>
 
   <div class="footer">
-    <button class="secondary" id="testBtn">⚡ Test Connection</button>
-    <span class="spacer"></span>
-    <button class="secondary" id="closeBtn">Close</button>
-    <button class="secondary" id="saveBtn">Save</button>
-    <button id="connectBtn">Save &amp; Connect</button>
+    <div class="inner">
+      <button class="ghost" id="testBtn">⚡ Test Connection</button>
+      <span class="spacer"></span>
+      <button class="ghost" id="closeBtn">Close</button>
+      <button id="saveBtn">Save</button>
+      <button class="primary" id="connectBtn">＋ Save &amp; Connect</button>
+    </div>
   </div>
 
   <script nonce="${nonce}">
