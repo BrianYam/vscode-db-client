@@ -465,11 +465,13 @@ export class QueryPanel {
     let selected = new Set();       // original row indices
     let modalCtx = null;            // { ri, col }
     let filterTimer = null;         // debounce for server-side filtering
-    let lastFilterCol = null;       // restore focus after a server re-render
+    let lastFilterCol = null;       // which column filter is being typed in
+    let pendingFilterFocus = null;  // set only when a filter request is in flight
     const serverBacked = () => !!(raw && raw.page);
     function scheduleServerFilter(){
       clearTimeout(filterTimer);
       filterTimer = setTimeout(() => {
+        pendingFilterFocus = lastFilterCol;
         const arr = Object.entries(filters).filter(([,v]) => v).map(([column,value]) => ({ column, value }));
         vscode.postMessage({ type:'filter', filters: arr });
       }, 350);
@@ -588,11 +590,15 @@ export class QueryPanel {
       gridEl.innerHTML = h;
       wireGrid(editable);
       $('delBtn').disabled = !editable || selected.size === 0;
-      // After a server-side filter re-render, keep the user in the box they were typing.
-      if (serverBacked() && lastFilterCol) {
-        const inp = gridEl.querySelector('input.filter[data-col="' + lastFilterCol.replace(/"/g,'\\\\"') + '"]');
-        if (inp) { inp.focus(); const v = inp.value; inp.value = ''; inp.value = v; }
-      }
+    }
+
+    // Restore focus to a per-column filter box, but ONLY right after a
+    // server-side column-filter response (never on a global-search re-render).
+    function restoreFilterFocus(){
+      if (!pendingFilterFocus) return;
+      const col = pendingFilterFocus; pendingFilterFocus = null;
+      const inp = gridEl.querySelector('input.filter[data-col="' + col.replace(/"/g,'\\\\"') + '"]');
+      if (inp) { inp.focus(); const v = inp.value; inp.value = ''; inp.value = v; }
     }
 
     function wireGrid(editable){
@@ -746,6 +752,8 @@ export class QueryPanel {
         raw = m.result; selected.clear();
         // Only reset sort/filters for a brand-new table/query, not sort/filter/page re-runs.
         if (m.fresh) { sort = { col:null, dir:1 }; filters = {}; search = ''; $('search').value = ''; lastFilterCol = null; }
+        // Show the equivalent SQL for table previews so it can be seen/edited.
+        if (raw.sql != null) sqlEl.value = raw.sql;
         $('addBtn').disabled = !raw.editable;
         const p = raw.page;
         $('cost').textContent = raw.elapsedMs != null ? ('Cost: ' + (raw.elapsedMs/1000).toFixed(2) + 's') : '';
@@ -762,6 +770,7 @@ export class QueryPanel {
         statusEl.textContent = (raw.message || (raw.rowCount + ' row(s)')) +
           (raw.editable ? ' · double-click or 🔍 to edit, check rows to delete' : '');
         renderGrid();
+        restoreFilterFocus();
       }
     });
   </script>

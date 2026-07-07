@@ -9,8 +9,8 @@ import {
   QueryResult,
   TreeItemData,
 } from "./Driver";
-import { quoteIdent as qi } from "./ident";
-import { tableFolders } from "./postgres";
+import { quoteIdent as qi, displayIdent as di } from "./ident";
+import { tableFolders, displaySql } from "./postgres";
 
 // sql.js is a WASM build — no native compilation needed. The .wasm file lives
 // in node_modules/sql.js/dist and is located via this directory, set once at
@@ -237,6 +237,7 @@ export class SqliteDriver implements Driver {
       result.editable = { table: path, pkColumns };
     }
     result.page = { offset, limit, total: await this.countRows(path, opts) };
+    result.sql = displaySql(di(path[0]), opts, "LIKE");
     return result;
   }
 

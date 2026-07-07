@@ -9,8 +9,8 @@ import {
   TreeItemData,
 } from "./Driver";
 import { buildTls } from "./ssl";
-import { quoteBacktick as qb } from "./ident";
-import { tableFolders } from "./postgres";
+import { quoteBacktick as qb, displayBacktick as db2 } from "./ident";
+import { tableFolders, displaySql } from "./postgres";
 
 /** MySQL / MariaDB driver backed by the pure-JS `mysql2` pool. */
 export class MySqlDriver implements Driver {
@@ -238,6 +238,7 @@ export class MySqlDriver implements Driver {
       result.editable = { table: path, pkColumns };
     }
     result.page = { offset, limit, total: await this.countRows(path, opts) };
+    result.sql = displaySql(`${db2(db)}.${db2(table)}`, opts, "LIKE", db2);
     return result;
   }
 

@@ -136,7 +136,10 @@ export class RedisDriver implements Driver {
     const key = path[1];
     await this.c.select(db);
     const type = await this.c.type(key);
-    return this.query(previewCommandFor(type, key));
+    const cmd = previewCommandFor(type, key);
+    const result = await this.query(cmd);
+    result.sql = cmd;
+    return result;
   }
 
   // The following are table-oriented operations that don't apply to Redis.

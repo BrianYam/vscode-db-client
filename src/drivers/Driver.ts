@@ -77,6 +77,8 @@ export interface QueryResult {
   foreignKeys?: ForeignKey[];
   /** Server round-trip time in milliseconds. */
   elapsedMs?: number;
+  /** The equivalent SQL for a table preview (shown, editable, in the editor). */
+  sql?: string;
 }
 
 /** One child in the connection tree (schema, table, column, key, etc.). */
