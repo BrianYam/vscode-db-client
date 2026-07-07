@@ -2,7 +2,13 @@ import * as fs from "fs";
 import * as vscode from "vscode";
 import { ConnectionManager } from "../connections/manager";
 import { ConnectionStore } from "../connections/store";
-import { EditTarget, PreviewFilter, QueryResult } from "../drivers/Driver";
+import {
+  ColumnFilter,
+  EditTarget,
+  PreviewFilter,
+  QueryResult,
+  SortSpec,
+} from "../drivers/Driver";
 import { logError } from "../log";
 
 interface PanelOptions {
@@ -70,6 +76,8 @@ export class QueryPanel {
   private database?: string;
   private filePath?: string;
   private offset = 0;
+  private sort?: SortSpec;
+  private columnFilters?: ColumnFilter[];
   private disposed = false;
 
   private rerun(sql: string, database?: string): void {
@@ -111,6 +119,8 @@ export class QueryPanel {
       switch (msg.type) {
         case "run":
           this.previewPath = undefined;
+          this.sort = undefined;
+          this.columnFilters = undefined;
           await this.run(msg.sql);
           break;
         case "page":
@@ -122,6 +132,20 @@ export class QueryPanel {
         case "refresh":
           if (this.previewPath) {
             await this.runPreview(this.previewPath, this.offset);
+          }
+          break;
+        case "sort":
+          if (this.previewPath) {
+            this.sort = msg.column ? { column: msg.column, dir: msg.dir } : undefined;
+            this.offset = 0;
+            await this.runPreview(this.previewPath, 0);
+          }
+          break;
+        case "filter":
+          if (this.previewPath) {
+            this.columnFilters = (msg.filters ?? []).filter((f: ColumnFilter) => f.value);
+            this.offset = 0;
+            await this.runPreview(this.previewPath, 0);
           }
           break;
         case "update":
@@ -155,19 +179,25 @@ export class QueryPanel {
     if (options.previewPath) {
       this.previewPath = options.previewPath;
       this.filter = options.filter;
-      void this.runPreview(options.previewPath, 0);
+      void this.runPreview(options.previewPath, 0, true);
     } else if (options.initialSql && options.autoRun) {
       void this.run(options.initialSql);
     }
   }
 
-  private async runPreview(path: string[], offset: number): Promise<void> {
+  private async runPreview(path: string[], offset: number, fresh = false): Promise<void> {
     try {
       const driver = await this.manager.getDriver(this.connectionId);
       const start = Date.now();
-      const result = await driver.previewTable(path, offset, PAGE_SIZE, this.filter);
+      const result = await driver.previewTable(path, {
+        offset,
+        limit: PAGE_SIZE,
+        filter: this.filter,
+        sort: this.sort,
+        columnFilters: this.columnFilters,
+      });
       result.elapsedMs = Date.now() - start;
-      this.show(result);
+      this.show(result, fresh);
     } catch (err) {
       logError("previewTable", err);
       this.post({ type: "error", message: (err as Error).message });
@@ -184,17 +214,17 @@ export class QueryPanel {
       const start = Date.now();
       const result = await driver.query(trimmed, this.database);
       result.elapsedMs = Date.now() - start;
-      this.show(result);
+      this.show(result, true);
     } catch (err) {
       logError("query", err);
       this.post({ type: "error", message: (err as Error).message });
     }
   }
 
-  private show(result: QueryResult): void {
+  private show(result: QueryResult, fresh = false): void {
     this.lastResult = result;
     this.lastEditable = result.editable;
-    this.post({ type: "result", result });
+    this.post({ type: "result", result, fresh });
   }
 
   private async handleUpdate(msg: {
@@ -434,6 +464,16 @@ export class QueryPanel {
     let search = '';
     let selected = new Set();       // original row indices
     let modalCtx = null;            // { ri, col }
+    let filterTimer = null;         // debounce for server-side filtering
+    let lastFilterCol = null;       // restore focus after a server re-render
+    const serverBacked = () => !!(raw && raw.page);
+    function scheduleServerFilter(){
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => {
+        const arr = Object.entries(filters).filter(([,v]) => v).map(([column,value]) => ({ column, value }));
+        vscode.postMessage({ type:'filter', filters: arr });
+      }, 350);
+    }
 
     function run() { statusEl.textContent = 'Running…'; vscode.postMessage({ type:'run', sql: sqlEl.value }); }
     $('runBtn').addEventListener('click', run);
@@ -482,13 +522,15 @@ export class QueryPanel {
 
     function computeView(){
       let rows = raw.rows.map((row, ri) => ({ row, ri }));
-      for (const [col, txt] of Object.entries(filters)) {
+      const server = serverBacked();
+      // Per-column filter + sort are done by the DB when server-backed.
+      if (!server) for (const [col, txt] of Object.entries(filters)) {
         if (!txt) continue; const t = txt.toLowerCase();
         rows = rows.filter(({row}) => String(row[col] ?? '').toLowerCase().includes(t));
       }
       if (search) rows = rows.filter(({row}) =>
         raw.columns.some((c) => String(row[c] ?? '').toLowerCase().includes(search)));
-      if (sort.col) {
+      if (!server && sort.col) {
         rows.sort((a, b) => {
           let x = a.row[sort.col], y = b.row[sort.col];
           if (x === y) return 0;
@@ -546,6 +588,11 @@ export class QueryPanel {
       gridEl.innerHTML = h;
       wireGrid(editable);
       $('delBtn').disabled = !editable || selected.size === 0;
+      // After a server-side filter re-render, keep the user in the box they were typing.
+      if (serverBacked() && lastFilterCol) {
+        const inp = gridEl.querySelector('input.filter[data-col="' + lastFilterCol.replace(/"/g,'\\\\"') + '"]');
+        if (inp) { inp.focus(); const v = inp.value; inp.value = ''; inp.value = v; }
+      }
     }
 
     function wireGrid(editable){
@@ -554,12 +601,21 @@ export class QueryPanel {
           if (e.target.closest('.filter')) return;
           const c = th.getAttribute('data-col');
           if (sort.col === c) sort.dir = -sort.dir; else { sort.col = c; sort.dir = 1; }
-          renderGrid();
+          if (serverBacked()) {
+            vscode.postMessage({ type:'sort', column: sort.col, dir: sort.dir > 0 ? 'asc' : 'desc' });
+          } else {
+            renderGrid();
+          }
         });
       });
       gridEl.querySelectorAll('input.filter').forEach((inp) => {
         inp.addEventListener('click', (e) => e.stopPropagation());
-        inp.addEventListener('input', (e) => { filters[inp.getAttribute('data-col')] = e.target.value; renderGrid(); });
+        inp.addEventListener('input', (e) => {
+          const col = inp.getAttribute('data-col');
+          filters[col] = e.target.value;
+          lastFilterCol = col;
+          if (serverBacked()) { scheduleServerFilter(); } else { renderGrid(); }
+        });
       });
       gridEl.querySelectorAll('.relbtn').forEach((b) => {
         b.addEventListener('click', (e) => {
@@ -687,7 +743,9 @@ export class QueryPanel {
       if (m.type === 'saved') { statusEl.textContent = 'Saved ✓'; return; }
       if (m.type === 'setSql') { sqlEl.value = m.sql; return; }
       if (m.type === 'result') {
-        raw = m.result; selected.clear(); sort = { col:null, dir:1 };
+        raw = m.result; selected.clear();
+        // Only reset sort/filters for a brand-new table/query, not sort/filter/page re-runs.
+        if (m.fresh) { sort = { col:null, dir:1 }; filters = {}; search = ''; $('search').value = ''; lastFilterCol = null; }
         $('addBtn').disabled = !raw.editable;
         const p = raw.page;
         $('cost').textContent = raw.elapsedMs != null ? ('Cost: ' + (raw.elapsedMs/1000).toFixed(2) + 's') : '';

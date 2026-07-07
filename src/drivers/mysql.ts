@@ -4,7 +4,7 @@ import {
   ColumnMeta,
   Driver,
   ForeignKey,
-  PreviewFilter,
+  PreviewOptions,
   QueryResult,
   TreeItemData,
 } from "./Driver";
@@ -194,17 +194,33 @@ export class MySqlDriver implements Driver {
     };
   }
 
-  async previewTable(
-    path: string[],
-    offset = 0,
-    limit = 100,
-    filter?: PreviewFilter
-  ): Promise<QueryResult> {
+  private buildWhere(opts: PreviewOptions): { where: string; params: unknown[] } {
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    if (opts.filter) {
+      params.push(opts.filter.value);
+      conds.push(`${qb(opts.filter.column)} = ?`);
+    }
+    for (const f of opts.columnFilters ?? []) {
+      if (!f.value) {
+        continue;
+      }
+      params.push(`%${f.value}%`);
+      conds.push(`${qb(f.column)} LIKE ?`);
+    }
+    return { where: conds.length ? ` WHERE ${conds.join(" AND ")}` : "", params };
+  }
+
+  async previewTable(path: string[], opts: PreviewOptions = {}): Promise<QueryResult> {
     const [db, table] = path;
-    const where = filter ? ` WHERE ${qb(filter.column)} = ?` : "";
-    const params = filter ? [filter.value] : [];
+    const offset = opts.offset ?? 0;
+    const limit = opts.limit ?? 100;
+    const { where, params } = this.buildWhere(opts);
+    const order = opts.sort
+      ? ` ORDER BY ${qb(opts.sort.column)} ${opts.sort.dir === "desc" ? "DESC" : "ASC"}`
+      : "";
     const [rows, fields] = await this.p.query(
-      `SELECT * FROM ${qb(db)}.${qb(table)}${where} LIMIT ${limit} OFFSET ${offset}`,
+      `SELECT * FROM ${qb(db)}.${qb(table)}${where}${order} LIMIT ${limit} OFFSET ${offset}`,
       params
     );
     const data = (rows as Array<Record<string, unknown>>) ?? [];
@@ -221,14 +237,13 @@ export class MySqlDriver implements Driver {
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
-    result.page = { offset, limit, total: await this.countRows(path, filter) };
+    result.page = { offset, limit, total: await this.countRows(path, opts) };
     return result;
   }
 
-  async countRows(path: string[], filter?: PreviewFilter): Promise<number> {
+  async countRows(path: string[], opts: PreviewOptions = {}): Promise<number> {
     const [db, table] = path;
-    const where = filter ? ` WHERE ${qb(filter.column)} = ?` : "";
-    const params = filter ? [filter.value] : [];
+    const { where, params } = this.buildWhere(opts);
     const [rows] = await this.p.query<mysql.RowDataPacket[]>(
       `SELECT count(*) AS n FROM ${qb(db)}.${qb(table)}${where}`,
       params

@@ -5,7 +5,7 @@ import {
   ColumnMeta,
   Driver,
   ForeignKey,
-  PreviewFilter,
+  PreviewOptions,
   QueryResult,
   TreeItemData,
 } from "./Driver";
@@ -185,18 +185,37 @@ export class SqliteDriver implements Driver {
     return { columns, rows, rowCount: rows.length };
   }
 
-  async previewTable(
-    path: string[],
-    offset = 0,
-    limit = 100,
-    filter?: PreviewFilter
-  ): Promise<QueryResult> {
-    const where = filter ? ` WHERE ${qi(filter.column)} = :v` : "";
-    const bind = filter ? { ":v": filter.value as never } : undefined;
+  private buildWhere(opts: PreviewOptions): { where: string; bind: Record<string, never> } {
+    const conds: string[] = [];
+    const bind: Record<string, never> = {};
+    let i = 0;
+    if (opts.filter) {
+      const k = `:f${i++}`;
+      bind[k] = opts.filter.value as never;
+      conds.push(`${qi(opts.filter.column)} = ${k}`);
+    }
+    for (const f of opts.columnFilters ?? []) {
+      if (!f.value) {
+        continue;
+      }
+      const k = `:f${i++}`;
+      bind[k] = `%${f.value}%` as never;
+      conds.push(`${qi(f.column)} LIKE ${k}`);
+    }
+    return { where: conds.length ? ` WHERE ${conds.join(" AND ")}` : "", bind };
+  }
+
+  async previewTable(path: string[], opts: PreviewOptions = {}): Promise<QueryResult> {
+    const offset = opts.offset ?? 0;
+    const limit = opts.limit ?? 100;
+    const { where, bind } = this.buildWhere(opts);
+    const order = opts.sort
+      ? ` ORDER BY ${qi(opts.sort.column)} ${opts.sort.dir === "desc" ? "DESC" : "ASC"}`
+      : "";
     const stmt = this.d.prepare(
-      `SELECT * FROM ${qi(path[0])}${where} LIMIT ${limit} OFFSET ${offset}`
+      `SELECT * FROM ${qi(path[0])}${where}${order} LIMIT ${limit} OFFSET ${offset}`
     );
-    if (bind) {
+    if (Object.keys(bind).length) {
       stmt.bind(bind);
     }
     const rows: Array<Record<string, unknown>> = [];
@@ -217,25 +236,22 @@ export class SqliteDriver implements Driver {
     if (pkColumns.length) {
       result.editable = { table: path, pkColumns };
     }
-    result.page = { offset, limit, total: await this.countRows(path, filter) };
+    result.page = { offset, limit, total: await this.countRows(path, opts) };
     return result;
   }
 
-  async countRows(path: string[], filter?: PreviewFilter): Promise<number> {
-    if (filter) {
-      const stmt = this.d.prepare(
-        `SELECT count(*) FROM ${qi(path[0])} WHERE ${qi(filter.column)} = :v`
-      );
-      stmt.bind({ ":v": filter.value as never });
-      let n = 0;
-      if (stmt.step()) {
-        n = Number(stmt.get()[0]);
-      }
-      stmt.free();
-      return n;
+  async countRows(path: string[], opts: PreviewOptions = {}): Promise<number> {
+    const { where, bind } = this.buildWhere(opts);
+    const stmt = this.d.prepare(`SELECT count(*) FROM ${qi(path[0])}${where}`);
+    if (Object.keys(bind).length) {
+      stmt.bind(bind);
     }
-    const res = this.d.exec(`SELECT count(*) FROM ${qi(path[0])}`);
-    return Number(res[0]?.values[0]?.[0] ?? 0);
+    let n = 0;
+    if (stmt.step()) {
+      n = Number(stmt.get()[0]);
+    }
+    stmt.free();
+    return n;
   }
 
   async foreignKeys(path: string[]): Promise<ForeignKey[]> {
