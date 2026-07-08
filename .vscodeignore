@@ -1,10 +1,14 @@
 .vscode/**
 .claude/**
 src/**
-docs/**
+out/**
 test/**
-shortcut-analysis/**
+docs/**
 samples/**
+scripts/**
+shortcut-analysis/**
+node_modules/**
+esbuild.js
 **/*.ts
 **/*.map
 **/*.vsix

@@ -12,8 +12,9 @@ import { initLog } from "./log";
 
 export function activate(ctx: vscode.ExtensionContext): void {
   initLog(ctx);
-  // sql.js needs to locate its .wasm file inside node_modules at runtime.
-  setSqliteWasmDir(vscode.Uri.joinPath(ctx.extensionUri, "node_modules", "sql.js", "dist").fsPath);
+  // sql.js needs to locate its .wasm file at runtime. It is bundled into dist/
+  // by esbuild.js; fall back to node_modules for unbundled (F5 without bundle).
+  setSqliteWasmDir(vscode.Uri.joinPath(ctx.extensionUri, "dist").fsPath);
 
   const store = new ConnectionStore(ctx);
   const manager = new ConnectionManager(store);

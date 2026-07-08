@@ -1,25 +1,12 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import { encodeKey, parseKey } from "./queryKey";
+
+export { parseKey };
 
 export interface QueryEntry {
   name: string;
   isDir: boolean;
-}
-
-/** Encode a connection + DB scope into one self-describing folder name. */
-function encodeKey(connId: string, scope: string[]): string {
-  return `${connId}@@${scope.join("@")}`;
-}
-
-/** Parse a scope-key folder name back into its connection id + scope. */
-export function parseKey(key: string): { connId: string; scope: string[] } {
-  const at = key.indexOf("@@");
-  if (at < 0) {
-    return { connId: key, scope: [] };
-  }
-  const connId = key.slice(0, at);
-  const rest = key.slice(at + 2);
-  return { connId, scope: rest ? rest.split("@") : [] };
 }
 
 /**

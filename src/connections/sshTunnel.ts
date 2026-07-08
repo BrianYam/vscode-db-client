@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { Client, ConnectConfig } from "ssh2";
 import { ConnectionConfig, DEFAULT_PORTS } from "./types";
+import { csTarget, csRewriteHostPort } from "./connString";
 
 function expandHome(p: string): string {
   return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
@@ -23,14 +24,13 @@ export async function openTunnelForConfig(
   let targetPort: number;
 
   if (usingCS) {
-    let u: URL;
     try {
-      u = new URL(config.connectionString!);
+      const t = csTarget(config.connectionString!, DEFAULT_PORTS[config.type]);
+      targetHost = t.host;
+      targetPort = t.port;
     } catch {
       throw new Error("Invalid connection string — cannot parse host for SSH tunnel");
     }
-    targetHost = u.hostname || "127.0.0.1";
-    targetPort = u.port ? Number(u.port) : DEFAULT_PORTS[config.type];
   } else {
     targetHost = config.host || "127.0.0.1";
     targetPort = config.port ?? DEFAULT_PORTS[config.type];
@@ -39,15 +39,9 @@ export async function openTunnelForConfig(
   const tunnel = new SshTunnel(config, secrets, targetHost, targetPort);
   const local = await tunnel.open();
 
-  let effectiveConfig: ConnectionConfig;
-  if (usingCS) {
-    const u = new URL(config.connectionString!);
-    u.hostname = local.host;
-    u.port = String(local.port);
-    effectiveConfig = { ...config, connectionString: u.toString() };
-  } else {
-    effectiveConfig = { ...config, host: local.host, port: local.port };
-  }
+  const effectiveConfig: ConnectionConfig = usingCS
+    ? { ...config, connectionString: csRewriteHostPort(config.connectionString!, local.host, local.port) }
+    : { ...config, host: local.host, port: local.port };
   return { tunnel, effectiveConfig };
 }
 

@@ -3,13 +3,13 @@
   "tasks": [
     {
       "type": "npm",
-      "script": "compile",
-      "problemMatcher": "$tsc",
+      "script": "bundle",
+      "problemMatcher": [],
       "group": {
         "kind": "build",
         "isDefault": true
       },
-      "label": "npm: compile"
+      "label": "npm: bundle"
     }
   ]
 }
