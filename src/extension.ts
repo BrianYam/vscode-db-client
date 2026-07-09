@@ -60,11 +60,26 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (choice !== "Remove Everything") {
       return;
     }
-    await manager.disposeAll();
-    await store.deleteAll();
-    await queries.deleteAll();
-    tree.refresh();
-    vscode.window.showInformationMessage("Open DB Client: all data removed.");
+    // Best-effort purge: attempt every step, always refresh the tree afterward,
+    // and report truthfully whether anything might remain.
+    try {
+      await manager.disposeAll();
+      const { secretsFailed } = await store.deleteAll();
+      await queries.deleteAll();
+      if (secretsFailed > 0) {
+        vscode.window.showWarningMessage(
+          `Open DB Client: connections and query files were removed, but ${secretsFailed} stored secret(s) may still remain in the OS keychain.`
+        );
+      } else {
+        vscode.window.showInformationMessage("Open DB Client: all data removed.");
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Open DB Client: reset failed — some data may remain. ${(err as Error).message}`
+      );
+    } finally {
+      tree.refresh();
+    }
   });
 
   reg("openDbClient.refreshNode", (node: DbNode) => tree.refresh(node));

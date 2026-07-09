@@ -75,14 +75,24 @@ export class ConnectionStore {
    * Delete every connection's secrets (password, SSH password, SSH passphrase)
    * from SecretStorage and clear the stored config array. Used by the
    * "Reset All Data" command so uninstall-leftover credentials can be purged.
+   *
+   * Best-effort: a single keychain delete rejecting must not abort the rest or
+   * prevent the config clear — for an irreversible "remove everything" action we
+   * always want to end in a consistent state (configs gone) and report honestly.
+   * Returns how many secret keys failed to delete so the caller can warn the
+   * user that credentials may still linger in the OS keychain.
    */
-  async deleteAll(): Promise<void> {
-    for (const c of this.all()) {
-      await this.ctx.secrets.delete(secretKey(c.id));
-      await this.ctx.secrets.delete(sshPwKey(c.id));
-      await this.ctx.secrets.delete(sshPassphraseKey(c.id));
-    }
+  async deleteAll(): Promise<{ secretsFailed: number }> {
+    const deletions = this.all().flatMap((c) => [
+      this.ctx.secrets.delete(secretKey(c.id)),
+      this.ctx.secrets.delete(sshPwKey(c.id)),
+      this.ctx.secrets.delete(sshPassphraseKey(c.id)),
+    ]);
+    const results = await Promise.allSettled(deletions);
+    const secretsFailed = results.filter((r) => r.status === "rejected").length;
+    // Always clear the configs, even if some secret deletes failed.
     await this.ctx.globalState.update(KEY, []);
+    return { secretsFailed };
   }
 
   getPassword(id: string): Promise<string | undefined> {

@@ -65,9 +65,20 @@ export class ConnectionManager {
   }
 
   async disposeAll(): Promise<void> {
-    await Promise.all([...this.live.values()].map((d) => d.dispose()));
+    // Best-effort teardown: attempt every dispose/close even if some reject, so
+    // one misbehaving driver or tunnel can't leave the rest live. Also called
+    // from deactivate() on shutdown, so this hardening protects that path too.
+    const drivers = [...this.live.values()];
     this.live.clear();
-    this.tunnels.forEach((t) => t.close());
+    await Promise.allSettled(drivers.map((d) => d.dispose()));
+    const tunnels = [...this.tunnels.values()];
     this.tunnels.clear();
+    for (const t of tunnels) {
+      try {
+        t.close();
+      } catch {
+        /* ignore: a failing close must not skip the remaining tunnels */
+      }
+    }
   }
 }
