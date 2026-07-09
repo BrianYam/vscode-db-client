@@ -30,9 +30,9 @@ number of connections.
   by primary key, add rows with `INSERT`, and delete selected rows. Preview a table
   with "Select Top 200", inspect its DDL and structure, and export results to CSV or
   JSON.
-- **Foreign-key navigation.** Foreign-key cells show a jump affordance; "View Related
+- **Foreign-key navigation.** Foreign-key cells show a jump icon; "View Related
   Row" opens the referenced table filtered to the matching value.
-- **Redis support.** Run raw Redis commands and preview keys by type.
+- **Redis commands.** Run raw Redis commands and preview keys by type.
 - **Connection form.** A guided webview with a server-type picker and fields that adapt
   per engine, a Test Connection action that reports timing, password show/hide, a file
   browser for SQLite, and a connection-string mode with a parser.

@@ -39,8 +39,8 @@ code --install-extension open-db-client-0.1.0.vsix
 ## Status & roadmap
 
 See [`docs/BLUEPRINT_DBCLIENT.md`](docs/BLUEPRINT_DBCLIENT.md) and
-[`docs/task.md`](docs/task.md). Browse + query works for all four engines today.
-Known open item: SQLite writes are in-memory only (SELECT works; write-back is on the list).
+[`docs/task.md`](docs/task.md). Browse, query, and edit work for all four engines
+today, including SQLite write-back (modifying statements persist to the `.db` file).
 
 ## Versioning
 
