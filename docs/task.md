@@ -114,9 +114,9 @@ Priority: 🔴 must-fix before public · 🟡 nice-to-have. Ordered within each 
 - [ ] `[SDD][M8.1]` Promote SQLite write-back caveat / keyboard shortcuts into the in-app guide (not just README footer)
 - [ ] `[SDD][M8.1]` Add `SECURITY.md` (handles DB credentials), `CONTRIBUTING.md`, issue templates
 
-### M8.2 — Versioning 🔴 (data-schema versioning via `CURRENT_SCHEMA_VERSION` already solid)
-- [ ] `[SDD][M8.2]` Add `CHANGELOG.md` (Keep-a-Changelog format; VS Code renders a changelog tab)  ← NOT STARTED
-- [ ] `[SDD][M8.2]` State a SemVer policy in README/CONTRIBUTING; adopt git tags + release process
+### M8.2 — Versioning 🔴 (data-schema versioning via `CURRENT_SCHEMA_VERSION` already solid)  ✅ CHANGELOG + SemVer DONE 2026-07-09 (e3afbd6, d96d060)
+- [x] `[SDD][M8.2]` Add `CHANGELOG.md` (Keep-a-Changelog format; VS Code renders a changelog tab)
+- [x] `[SDD][M8.2]` State a SemVer policy in README (CONTRIBUTING deferred); git tags + release process still to adopt
 - [ ] `[SDD][M8.2]` "What's New" on upgrade — compare `lastSeenVersion` → current (depends on M8.4)
 
 ### M8.3 — Uninstalling 🔴 (highest-value gap for a credential-handling tool)  ✅ IMPLEMENTED 2026-07-09 (554fcfa; code-quality review pending)
