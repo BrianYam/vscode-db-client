@@ -48,6 +48,25 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   reg("openDbClient.settings", () => SettingsPanel.open(ctx));
 
+  // Purge every trace of user data: live connections, stored secrets, saved
+  // connection configs, and all saved query files. VS Code keeps all of this
+  // after an uninstall, so this is the user's one-click "remove everything".
+  reg("openDbClient.resetAllData", async () => {
+    const choice = await vscode.window.showWarningMessage(
+      "Remove ALL Open DB Client data? This deletes every saved connection, all stored passwords/SSH secrets, and all saved query files. This cannot be undone.",
+      { modal: true },
+      "Remove Everything"
+    );
+    if (choice !== "Remove Everything") {
+      return;
+    }
+    await manager.disposeAll();
+    await store.deleteAll();
+    await queries.deleteAll();
+    tree.refresh();
+    vscode.window.showInformationMessage("Open DB Client: all data removed.");
+  });
+
   reg("openDbClient.refreshNode", (node: DbNode) => tree.refresh(node));
 
   reg("openDbClient.connect", async (node: DbNode) => {

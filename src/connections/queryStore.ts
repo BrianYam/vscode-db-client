@@ -100,6 +100,22 @@ export class QueryStore {
     await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
   }
 
+  /**
+   * Recursively remove the entire `queries` subdirectory (all saved query files
+   * for every connection). Used by the "Reset All Data" command. Does not throw
+   * if the directory was never created.
+   */
+  async deleteAll(): Promise<void> {
+    try {
+      await vscode.workspace.fs.delete(vscode.Uri.joinPath(this.root, "queries"), {
+        recursive: true,
+        useTrash: false,
+      });
+    } catch {
+      // Nothing to remove — the queries folder doesn't exist yet.
+    }
+  }
+
   async read(uri: vscode.Uri): Promise<string> {
     const bytes = await vscode.workspace.fs.readFile(uri);
     return Buffer.from(bytes).toString("utf8");

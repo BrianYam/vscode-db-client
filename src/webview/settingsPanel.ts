@@ -33,6 +33,12 @@ export class SettingsPanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
     this.panel.onDidDispose(() => (SettingsPanel.current = undefined));
+    // The Danger-zone button posts a message; the command owns the confirm modal.
+    this.panel.webview.onDidReceiveMessage((msg) => {
+      if (msg?.type === "resetAllData") {
+        vscode.commands.executeCommand("openDbClient.resetAllData");
+      }
+    });
     this.panel.webview.html = this.render();
   }
 
@@ -104,6 +110,15 @@ export class SettingsPanel {
   .tip { border-left: 3px solid var(--vscode-focusBorder); padding: 6px 10px; margin: 10px 0;
          background: var(--vscode-editorWidget-background); border-radius: 0 4px 4px 0; }
   #side .ver { margin-top: 18px; padding: 0 18px; font-size: 11px; opacity: .5; }
+  .danger-zone { margin-top: 34px; padding-top: 18px;
+         border-top: 1px solid var(--vscode-panel-border,#4443); }
+  .danger-zone h4 { color: var(--vscode-errorForeground); margin-top: 0; }
+  .danger-zone p { font-size: 13px; opacity: .85; margin: 6px 0 12px; }
+  .danger-btn { font-family: var(--vscode-font-family); font-size: 13px; cursor: pointer;
+         padding: 6px 12px; border-radius: 4px; background: transparent;
+         color: var(--vscode-errorForeground);
+         border: 1px solid var(--vscode-errorForeground); }
+  .danger-btn:hover { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
 </style>
 </head>
 <body>
@@ -114,8 +129,19 @@ export class SettingsPanel {
   </div>
   <div id="main">
     ${sections}
+    <div class="danger-zone">
+      <h4>Danger zone</h4>
+      <p>Permanently remove every saved connection, all stored passwords &amp; SSH secrets,
+         and all saved query files. This cannot be undone.</p>
+      <button id="resetBtn" class="danger-btn">🗑 Reset all data</button>
+    </div>
   </div>
   <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    const resetBtn = document.getElementById('resetBtn');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => vscode.postMessage({ type: 'resetAllData' }));
+    }
     document.querySelectorAll('.nav').forEach((n) => {
       n.addEventListener('click', () => {
         document.querySelectorAll('.nav').forEach((x) => x.classList.remove('active'));
@@ -211,5 +237,28 @@ const GUIDES: Guide[] = [
         <tr><td class="ic"><span class="glyph" style="color:#F14C4C">*</span></td><td>NOT NULL — required when inserting a row</td></tr>
         <tr><td class="ic"><span class="glyph">⇅ ▲ ▼</span></td><td>Sortable / currently sorted column</td></tr>
       </table>`,
+  },
+  {
+    id: "uninstalling",
+    title: "Uninstalling & your data",
+    body: () => `
+      <h4>Where your data lives</h4>
+      <ul>
+        <li><b>Connection details</b> (host, port, user, options) are stored in VS Code's <b>globalState</b>.</li>
+        <li><b>Passwords and SSH secrets</b> (DB password, SSH password, SSH passphrase) are stored in VS Code's <b>SecretStorage</b> — your OS keychain / credential vault, never in plain globalState.</li>
+        <li><b>Saved query files</b> (.sql) live as real files under the extension's <b>global storage folder</b>.</li>
+      </ul>
+
+      <div class="tip"><b>Uninstalling the extension does NOT remove any of this.</b>
+        VS Code leaves your globalState, SecretStorage secrets, and the storage folder on disk
+        even after you uninstall — so your saved connections, stored passwords, and query files persist.</div>
+
+      <h4>How to purge everything</h4>
+      <ul>
+        <li>Use the <b>🗑 Reset all data</b> button at the bottom of this page. It deletes every saved
+            connection, all stored passwords &amp; SSH secrets, and all saved query files in one step.</li>
+        <li>This is <b>irreversible</b> — there is no undo. Do it before uninstalling if you want to leave
+            nothing behind.</li>
+      </ul>`,
   },
 ];

@@ -71,6 +71,20 @@ export class ConnectionStore {
     await this.ctx.secrets.delete(sshPassphraseKey(id));
   }
 
+  /**
+   * Delete every connection's secrets (password, SSH password, SSH passphrase)
+   * from SecretStorage and clear the stored config array. Used by the
+   * "Reset All Data" command so uninstall-leftover credentials can be purged.
+   */
+  async deleteAll(): Promise<void> {
+    for (const c of this.all()) {
+      await this.ctx.secrets.delete(secretKey(c.id));
+      await this.ctx.secrets.delete(sshPwKey(c.id));
+      await this.ctx.secrets.delete(sshPassphraseKey(c.id));
+    }
+    await this.ctx.globalState.update(KEY, []);
+  }
+
   getPassword(id: string): Promise<string | undefined> {
     return Promise.resolve(this.ctx.secrets.get(secretKey(id)));
   }
