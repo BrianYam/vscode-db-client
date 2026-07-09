@@ -98,3 +98,40 @@ Checked = implemented in this repo. Unchecked = remaining work.
 ## Packaging / Adoption
 - [x] `[SDD][PKG]` Build installable `.vsix` → `open-db-client-0.1.0.vsix`
 - [ ] `[SDD][PKG]` Install into daily-driver VS Code (Extensions → Install from VSIX)
+
+## M8 — Public Launch Readiness (pre-publish gap analysis 2026-07-09)
+Lifecycle & listing surface a public user hits before/between/after use.
+Priority: 🔴 must-fix before public · 🟡 nice-to-have. Ordered within each block.
+
+### M8.0 — Distribution decision (drives M8.4/M8.5) 🔴
+- [ ] `[SDD][M8.0]` Decide channel: **VS Code Marketplace / Open VSX** (auto-update, preferred) vs. **`.vsix` sideload** (no auto-update)
+- [ ] `[SDD][M8.0]` Configure a git remote + confirm `open-db-client-0.1.0.vsix` is untracked (`.gitignore` already lists `*.vsix`; the root copy is a build artifact, not source)
+
+### M8.1 — User guides 🟡 (in-app guide + icon legend already ship)
+- [ ] `[SDD][M8.1]` Rewrite README for end-users: lead with install (not `npm`/F5), feature list, **screenshots/GIFs** in `media/`
+- [ ] `[SDD][M8.1]` README + in-app "Data & Privacy" section: passwords → SecretStorage, config → globalState, query files → globalStorageUri
+- [ ] `[SDD][M8.1]` New guide entry: "Uninstalling & removing your data" (pairs with M8.3)
+- [ ] `[SDD][M8.1]` Promote SQLite write-back caveat / keyboard shortcuts into the in-app guide (not just README footer)
+- [ ] `[SDD][M8.1]` Add `SECURITY.md` (handles DB credentials), `CONTRIBUTING.md`, issue templates
+
+### M8.2 — Versioning 🔴 (data-schema versioning via `CURRENT_SCHEMA_VERSION` already solid)
+- [ ] `[SDD][M8.2]` Add `CHANGELOG.md` (Keep-a-Changelog format; VS Code renders a changelog tab)  ← NOT STARTED
+- [ ] `[SDD][M8.2]` State a SemVer policy in README/CONTRIBUTING; adopt git tags + release process
+- [ ] `[SDD][M8.2]` "What's New" on upgrade — compare `lastSeenVersion` → current (depends on M8.4)
+
+### M8.3 — Uninstalling 🔴 (highest-value gap for a credential-handling tool)  ✅ IMPLEMENTED 2026-07-09 (554fcfa; code-quality review pending)
+- [x] `[SDD][M8.3]` `openDbClient.resetAllData` command: delete every SecretStorage key (password / sshPassword / sshPassphrase per connection), clear globalState `openDbClient.connections`, recursively remove `globalStorageUri` query files
+- [x] `[SDD][M8.3]` Surface Reset command in the Settings & Guides panel (with confirm)
+- [x] `[SDD][M8.3]` Document that data persists after uninstall + how to purge it
+
+### M8.4 — Version check 🟡 (easy win)  ✅ DONE 2026-07-09 (c9326cf; spec + quality reviewed)
+- [x] `[SDD][M8.4]` Read `ctx.extension.packageJSON.version`; show `v{version}` footer in Settings panel
+- [x] `[SDD][M8.4]` Store/compare `lastSeenVersion` in globalState on activate (enables M8.2 What's-New + one-time upgrade migrations)
+
+### M8.5 — Update check 🟡 (only if M8.0 = sideload; Marketplace auto-updates)
+- [ ] `[SDD][M8.5]` If sideloading: lightweight GitHub-releases version check with an "update available" notice
+- [ ] `[SDD][M8.5]` If Marketplace: no custom checker — rely on VS Code auto-update (close as N/A)
+
+### M8.6 — Marketplace metadata 🔴 (required/strongly-recommended manifest fields)
+- [ ] `[SDD][M8.6]` `package.json` top-level: `icon` (128×128 PNG), `repository`, `bugs`, `homepage`, `keywords`
+- [ ] `[SDD][M8.6]` Optional listing polish: `galleryBanner`; drop `--allow-missing-repository` from the `package` script once `repository` is set
