@@ -42,6 +42,12 @@ See [`docs/BLUEPRINT_DBCLIENT.md`](docs/BLUEPRINT_DBCLIENT.md) and
 [`docs/task.md`](docs/task.md). Browse + query works for all four engines today.
 Known open item: SQLite writes are in-memory only (SELECT works; write-back is on the list).
 
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org). Notable changes for each
+release are recorded in [`CHANGELOG.md`](CHANGELOG.md), which VS Code also surfaces on the
+extension's **Changelog** tab.
+
 ## Architecture
 
 One `Driver` interface, one file per engine (`src/drivers/`). The tree, query panel,
