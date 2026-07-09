@@ -58,6 +58,7 @@ export class SettingsPanel {
   private render(): string {
     const icon = (t: string) => this.iconSvg(t);
     const nonce = String(Date.now());
+    const version = this.ctx.extension.packageJSON.version;
     const nav = GUIDES.map(
       (g, i) =>
         `<div class="nav${i === 0 ? " active" : ""}" data-g="${g.id}">${g.title}</div>`
@@ -102,12 +103,14 @@ export class SettingsPanel {
   ol li, ul li { margin: 5px 0; }
   .tip { border-left: 3px solid var(--vscode-focusBorder); padding: 6px 10px; margin: 10px 0;
          background: var(--vscode-editorWidget-background); border-radius: 0 4px 4px 0; }
+  #side .ver { margin-top: 18px; padding: 0 18px; font-size: 11px; opacity: .5; }
 </style>
 </head>
 <body>
   <div id="side">
     <h3>Guides</h3>
     ${nav}
+    <div class="ver">Open DB Client v${version}</div>
   </div>
   <div id="main">
     ${sections}

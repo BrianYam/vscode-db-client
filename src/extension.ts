@@ -8,10 +8,22 @@ import { QueryStore } from "./connections/queryStore";
 import { registerSqlFeatures, bindQueryDoc } from "./sqlFeatures";
 import { QueryPanel } from "./webview/queryPanel";
 import { setSqliteWasmDir } from "./drivers/sqlite";
-import { initLog } from "./log";
+import { initLog, logInfo } from "./log";
+
+const LAST_SEEN_VERSION_KEY = "openDbClient.lastSeenVersion";
 
 export function activate(ctx: vscode.ExtensionContext): void {
   initLog(ctx);
+
+  // Track the version we last activated under, so future features (What's New,
+  // one-time upgrade migrations) can react to a fresh install or an upgrade.
+  const version = ctx.extension.packageJSON.version;
+  const lastSeen = ctx.globalState.get<string>(LAST_SEEN_VERSION_KEY);
+  if (lastSeen !== version) {
+    logInfo("activate", lastSeen ? `Upgraded ${lastSeen} → ${version}` : `First run at ${version}`);
+    void ctx.globalState.update(LAST_SEEN_VERSION_KEY, version);
+  }
+
   // sql.js needs to locate its .wasm file at runtime. It is bundled into dist/
   // by esbuild.js; fall back to node_modules for unbundled (F5 without bundle).
   setSqliteWasmDir(vscode.Uri.joinPath(ctx.extensionUri, "dist").fsPath);
