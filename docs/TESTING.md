@@ -132,6 +132,29 @@ docker exec -i odbc-redis redis-cli SET "bull:email-queue:1" v
 12. Right-click `mylist` → **View Value** → same grid as clicking it.
 13. Cancel the confirm dialog on another key → key is still there (no silent delete).
 
+### Editing values (M9.3)
+```bash
+docker exec -i odbc-redis redis-cli HSET user:1 name ana tier gold
+docker exec -i odbc-redis redis-cli ZADD board 10 ana 20 bo
+docker exec -i odbc-redis redis-cli SADD tags a b
+docker exec -i odbc-redis redis-cli SET session:1 abc EX 600
+```
+14. Click `greeting` → grid shows one **`value`** column. Double-click the cell →
+    type `hi there` → Enter → `redis-cli GET greeting` returns `hi there`.
+15. Click `session:1` → edit the value → `redis-cli TTL session:1` is **still > 0**
+    (the expiry must survive the edit — this is the one that silently breaks).
+16. Click `mylist` → columns `index` / `value`. Edit row 1's value → `LINDEX mylist 1`
+    reflects it. Editing the `index` cell is refused with a clear message.
+17. Click `user:1` → columns `field` / `value`. Edit `tier` → `gold` becomes the new
+    value; edit the **field** `tier` → `plan` → `HGETALL user:1` shows `plan`, no `tier`.
+18. Click `board` → columns `member` / `score`. Set ana's score to `99` → re-open →
+    ana sorts last. Typing `abc` as a score is refused.
+19. Click `tags` → single `member` column. Edit `a` → `z` → `SMEMBERS tags` = `b`, `z`.
+20. On `user:1`, check a row → **🗑 Delete** → confirm → only that field is gone and
+    **`EXISTS user:1` is still 1** (a grid delete must never drop the whole key).
+21. **+ Row** on `tags` → member `c` → appears; **+ Row** on `greeting` (a string) →
+    refused with "holds a single value" instead of a stack trace.
+
 Teardown: `docker rm -f odbc-redis`
 
 ---

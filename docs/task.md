@@ -156,7 +156,18 @@ above the key list (live filter), right-click key → Delete with confirm.
 - [x] `[SDD][M9.2]` Right-click key → **View Value** (same typed preview as click)
 - [x] `[SDD][M9.2]` Tree refreshes after delete; failures surface as an error toast, never a silent no-op
 
-### M9.3 — Follow-ups ▢
-- [ ] `[SDD][M9.3]` Multi-select delete of keys
-- [ ] `[SDD][M9.3]` Set/edit a key's value + TTL from the grid
-- [ ] `[SDD][M9.3]` Key-count-aware paging instead of the 500 cap
+### M9.3 — Edit key values 🔴  ✅ DONE 2026-07-20
+- [x] `[SDD][M9.3]` Type-aware preview shape so a single element is addressable:
+      string → `value`, list → `index`/`value`, hash → `field`/`value`, set → `member`, zset → `member`/`score`
+- [x] `[SDD][M9.3]` `RedisDriver.updateCell` — double-click a cell to edit:
+      `SET` / `LSET` / `HSET` / `SADD`+`SREM` / `ZADD`; hash fields and zset members can be renamed
+- [x] `[SDD][M9.3]` **TTL is preserved** on a string edit (`PTTL` → `SET` → `PEXPIRE`) — a rate-limit key must not become immortal because someone edited it
+- [x] `[SDD][M9.3]` `deleteRow` deletes the **element** when the grid passes a pk, the **whole key** only when the tree command passes none (no accidental key wipe from the grid)
+- [x] `[SDD][M9.3]` `insertRow` — `+ Row` appends to list/set/zset/hash; refused with a clear message on a string
+
+### M9.4 — Follow-ups ▢
+- [ ] `[SDD][M9.4]` Multi-select delete of keys from the tree
+- [ ] `[SDD][M9.4]` View/set a key's TTL explicitly (currently only preserved, never shown)
+- [ ] `[SDD][M9.4]` Create a new key from the tree (currently only via a command)
+- [ ] `[SDD][M9.4]` Key-count-aware paging instead of the 500-key cap
+- [ ] `[SDD][M9.4]` Streams: preview + edit (`XRANGE`) — today they fall back to a raw reply

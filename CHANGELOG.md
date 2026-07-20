@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Edit Redis values in the grid.** Click a key, then double-click a cell to edit it,
+  exactly like a SQL table. Each key type gets addressable columns — strings show
+  `value`, lists `index`/`value`, hashes `field`/`value`, sets `member`, sorted sets
+  `member`/`score` — and edits are written back with `SET`, `LSET`, `HSET`,
+  `SADD`/`SREM`, or `ZADD`. Hash fields and sorted-set members can be renamed.
+  `+ Row` appends an element to a list, set, sorted set, or hash.
+- **A string key's TTL survives an edit.** The remaining expiry is read before the
+  write and re-applied after it, so editing a rate-limit or session key does not turn
+  it into a permanent one.
+
+### Changed
+
+- Deleting rows in the grid now removes just those **elements** (`LREM`, `HDEL`,
+  `SREM`, `ZREM`). Deleting the whole key remains the tree's **Delete Key** command.
 
 ## [0.2.0] - 2026-07-20
 

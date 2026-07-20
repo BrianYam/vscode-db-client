@@ -9,6 +9,36 @@ const KEY_LIMIT = 500;
 /** Path segment identifying the synthetic "active filter" tree node. */
 export const KEY_FILTER_NODE = "@keyfilter";
 
+/** Max elements shown when previewing a list/zset. */
+const PREVIEW_LIMIT = 200;
+
+/**
+ * The column that addresses a single element, per key type. A type listed here
+ * is editable in the grid; anything else is read-only.
+ */
+const PK_COLUMN: Record<string, string | undefined> = {
+  string: "value",
+  list: "index",
+  hash: "field",
+  set: "member",
+  zset: "member",
+};
+
+function requireColumn(column: string, editable: string, type: string): void {
+  if (column !== editable) {
+    throw new Error(`Only the "${editable}" column is editable on a ${type} key`);
+  }
+}
+
+/** The list position a grid row addresses. */
+function listIndex(pkValues: Record<string, unknown>): number {
+  const idx = Number(pkValues.index);
+  if (!Number.isInteger(idx) || idx < 0) {
+    throw new Error("Could not locate this list element — refresh and try again");
+  }
+  return idx;
+}
+
 /**
  * Turn a user's search term into a Redis glob. A term that already contains
  * glob syntax is passed through untouched; anything else becomes a substring
@@ -198,10 +228,57 @@ export class RedisDriver implements Driver {
     const key = path[1];
     await this.c.select(db);
     const type = await this.c.type(key);
-    const cmd = previewCommandFor(type, key);
-    const result = await this.query(cmd);
-    result.sql = cmd;
+    const result = await this.readValue(type, key);
+    result.sql = previewCommandFor(type, key);
+    // Editable shapes get a pk column so the grid can address one element.
+    const pk = PK_COLUMN[type];
+    if (pk) {
+      result.editable = { table: [path[0], key], pkColumns: [pk] };
+    }
     return result;
+  }
+
+  /**
+   * Read a key into a grid shape whose columns can be addressed for editing:
+   * list → index/value, hash → field/value, zset → member/score, set → member,
+   * string → value. Anything else falls back to the raw reply.
+   */
+  private async readValue(type: string, key: string): Promise<QueryResult> {
+    switch (type) {
+      case "list": {
+        const items = await this.c.lrange(key, 0, PREVIEW_LIMIT - 1);
+        const rows = items.map((value, index) => ({ index, value }));
+        return { columns: ["index", "value"], rows, rowCount: rows.length };
+      }
+      case "hash": {
+        const map = await this.c.hgetall(key);
+        const rows = Object.entries(map).map(([field, value]) => ({ field, value }));
+        return { columns: ["field", "value"], rows, rowCount: rows.length };
+      }
+      case "set": {
+        const members = await this.c.smembers(key);
+        const rows = members.map((member) => ({ member }));
+        return { columns: ["member"], rows, rowCount: rows.length };
+      }
+      case "zset": {
+        const flat = await this.c.zrange(key, 0, PREVIEW_LIMIT - 1, "WITHSCORES");
+        const rows: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < flat.length; i += 2) {
+          rows.push({ member: flat[i], score: flat[i + 1] });
+        }
+        return { columns: ["member", "score"], rows, rowCount: rows.length };
+      }
+      case "string": {
+        const value = await this.c.get(key);
+        return {
+          columns: ["value"],
+          rows: value === null ? [] : [{ value }],
+          rowCount: value === null ? 0 : 1,
+        };
+      }
+      default:
+        return this.query(previewCommandFor(type, key));
+    }
   }
 
   // The following are table-oriented operations that don't apply to Redis.
@@ -225,18 +302,163 @@ export class RedisDriver implements Driver {
     throw new Error("DDL is not applicable to Redis");
   }
 
-  async updateCell(): Promise<void> {
-    throw new Error("Inline editing is not supported for Redis keys");
-  }
-
-  async deleteRow(table: string[]): Promise<void> {
-    // For Redis a "row" is a key. table is [dbIndex, key].
+  /**
+   * Edit one element of a key in place. `table` is [dbIndex, key]; `pkValues`
+   * addresses the element (list index, hash field, set/zset member).
+   */
+  async updateCell(
+    table: string[],
+    pkValues: Record<string, unknown>,
+    column: string,
+    value: unknown
+  ): Promise<void> {
+    const key = table[1];
     await this.c.select(Number(table[0]));
-    await this.c.del(table[1]);
+    const type = await this.c.type(key);
+    const next = value === null || value === undefined ? "" : String(value);
+
+    switch (type) {
+      case "string": {
+        requireColumn(column, "value", type);
+        // SET clears any expiry, so carry the remaining TTL across explicitly
+        // (works on every server version, unlike SET … KEEPTTL).
+        const pttl = await this.c.pttl(key);
+        await this.c.set(key, next);
+        if (pttl > 0) {
+          await this.c.pexpire(key, pttl);
+        }
+        return;
+      }
+      case "list": {
+        requireColumn(column, "value", type);
+        await this.c.lset(key, listIndex(pkValues), next);
+        return;
+      }
+      case "hash": {
+        const field = String(pkValues.field);
+        if (column === "value") {
+          await this.c.hset(key, field, next);
+        } else if (column === "field") {
+          // Rename the field, keeping its value.
+          if (next === field) {
+            return;
+          }
+          const current = await this.c.hget(key, field);
+          await this.c.hset(key, next, current ?? "");
+          await this.c.hdel(key, field);
+        } else {
+          requireColumn(column, "value", type);
+        }
+        return;
+      }
+      case "set": {
+        requireColumn(column, "member", type);
+        const old = String(pkValues.member);
+        if (old === next) {
+          return;
+        }
+        // A set has no in-place edit: add the new member, drop the old one.
+        await this.c.sadd(key, next);
+        await this.c.srem(key, old);
+        return;
+      }
+      case "zset": {
+        const member = String(pkValues.member);
+        if (column === "score") {
+          const score = Number(next);
+          if (!Number.isFinite(score)) {
+            throw new Error(`"${next}" is not a valid score — enter a number`);
+          }
+          await this.c.zadd(key, score, member);
+        } else if (column === "member") {
+          if (next === member) {
+            return;
+          }
+          const score = await this.c.zscore(key, member);
+          await this.c.zadd(key, Number(score ?? 0), next);
+          await this.c.zrem(key, member);
+        } else {
+          requireColumn(column, "score", type);
+        }
+        return;
+      }
+      default:
+        throw new Error(`Editing a "${type}" key is not supported`);
+    }
   }
 
-  async insertRow(): Promise<void> {
-    throw new Error("Add row is not supported for Redis keys");
+  /**
+   * Delete one element of a key — or, when `pkValues` is empty, the whole key.
+   * The tree's "Delete Key" command passes no pk values; the results grid
+   * always passes the element's pk, so a grid delete never drops the key.
+   */
+  async deleteRow(table: string[], pkValues?: Record<string, unknown>): Promise<void> {
+    const key = table[1];
+    await this.c.select(Number(table[0]));
+    if (!pkValues || Object.keys(pkValues).length === 0) {
+      await this.c.del(key);
+      return;
+    }
+    const type = await this.c.type(key);
+    switch (type) {
+      case "list": {
+        // Redis cannot delete by index: tombstone the slot, then remove it.
+        const tombstone = `__odbc_deleted__${Date.now()}`;
+        await this.c.lset(key, listIndex(pkValues), tombstone);
+        await this.c.lrem(key, 1, tombstone);
+        return;
+      }
+      case "hash":
+        await this.c.hdel(key, String(pkValues.field));
+        return;
+      case "set":
+        await this.c.srem(key, String(pkValues.member));
+        return;
+      case "zset":
+        await this.c.zrem(key, String(pkValues.member));
+        return;
+      default:
+        // A string holds a single value: deleting it means deleting the key.
+        await this.c.del(key);
+    }
+  }
+
+  /** Append an element to a collection key. `values` comes from the grid's
+   *  Add-Row form, keyed by column name. */
+  async insertRow(table: string[], values: Record<string, unknown>): Promise<void> {
+    const key = table[1];
+    await this.c.select(Number(table[0]));
+    const type = await this.c.type(key);
+    const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+    switch (type) {
+      case "list":
+        // Lists are ordered by position, so a new element is appended.
+        await this.c.rpush(key, str(values.value));
+        return;
+      case "hash": {
+        const field = str(values.field);
+        if (!field) {
+          throw new Error("A hash entry needs a field name");
+        }
+        await this.c.hset(key, field, str(values.value));
+        return;
+      }
+      case "set":
+        await this.c.sadd(key, str(values.member));
+        return;
+      case "zset": {
+        const score = Number(str(values.score) || 0);
+        if (!Number.isFinite(score)) {
+          throw new Error(`"${values.score}" is not a valid score — enter a number`);
+        }
+        await this.c.zadd(key, score, str(values.member));
+        return;
+      }
+      default:
+        throw new Error(
+          `A "${type}" key holds a single value — edit it in place instead of adding a row`
+        );
+    }
   }
 }
 
