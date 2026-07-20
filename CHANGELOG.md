@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Redis key search.** Hover a Redis `db*` node and click 🔍 to search its keys. The
+  tree filters as you type, matching server-side with `SCAN … MATCH` — plain text
+  matches anywhere in the key, and glob syntax (`bull:erp-queue:*`) is used as-is. The
+  active filter appears as a pinned row above the results; click it to clear.
+- **Delete a Redis key.** Right-click a key → **Delete Key** (with confirmation), or use
+  the inline 🗑. Right-click → **View Value** opens the same typed preview as clicking.
+
+### Changed
+
+- Redis keys are now listed alphabetically instead of in `SCAN` bucket order, and a
+  database with more keys than the 500-key display cap says so instead of cutting the
+  list off silently.
 
 ## [0.1.0] - 2026-07-09
 

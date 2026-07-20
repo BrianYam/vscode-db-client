@@ -121,8 +121,12 @@ export interface Driver {
   connect(password?: string): Promise<void>;
   dispose(): Promise<void>;
 
-  /** Children of the given tree path. Empty path = top level of the connection. */
-  children(path: string[]): Promise<TreeItemData[]>;
+  /**
+   * Children of the given tree path. Empty path = top level of the connection.
+   * `filter` is a user-typed narrowing term for engines that can filter
+   * server-side (Redis `SCAN MATCH`); engines that don't support it ignore it.
+   */
+  children(path: string[], filter?: string): Promise<TreeItemData[]>;
 
   /** Run a raw statement (SQL, or a Redis command line). `database` selects
    *  which database to run against on engines that support several per server. */

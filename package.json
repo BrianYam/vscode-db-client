@@ -66,6 +66,25 @@
         "title": "View DDL / Structure"
       },
       {
+        "command": "openDbClient.searchKeys",
+        "title": "Search Keys",
+        "icon": "$(search)"
+      },
+      {
+        "command": "openDbClient.clearKeyFilter",
+        "title": "Clear Key Filter",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "openDbClient.viewKey",
+        "title": "View Value"
+      },
+      {
+        "command": "openDbClient.deleteKey",
+        "title": "Delete Key",
+        "icon": "$(trash)"
+      },
+      {
         "command": "openDbClient.newQueryFile",
         "title": "New Query File",
         "icon": "$(new-file)"
@@ -177,6 +196,36 @@
           "command": "openDbClient.showDDL",
           "when": "view == openDbClient.connections && viewItem =~ /table|view/",
           "group": "1_query@2"
+        },
+        {
+          "command": "openDbClient.searchKeys",
+          "when": "view == openDbClient.connections && viewItem == database-redis",
+          "group": "inline@2"
+        },
+        {
+          "command": "openDbClient.searchKeys",
+          "when": "view == openDbClient.connections && viewItem == database-redis",
+          "group": "1_query@0"
+        },
+        {
+          "command": "openDbClient.clearKeyFilter",
+          "when": "view == openDbClient.connections && viewItem == keyfilter",
+          "group": "inline@0"
+        },
+        {
+          "command": "openDbClient.viewKey",
+          "when": "view == openDbClient.connections && viewItem == key",
+          "group": "1_query@1"
+        },
+        {
+          "command": "openDbClient.deleteKey",
+          "when": "view == openDbClient.connections && viewItem == key",
+          "group": "inline@0"
+        },
+        {
+          "command": "openDbClient.deleteKey",
+          "when": "view == openDbClient.connections && viewItem == key",
+          "group": "9_danger@1"
         },
         {
           "command": "openDbClient.newQueryFile",

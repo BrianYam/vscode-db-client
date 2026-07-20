@@ -3,6 +3,25 @@ import { ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
 import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
 import { buildTls } from "./ssl";
 
+/** Max keys listed under one db node before the list is marked truncated. */
+const KEY_LIMIT = 500;
+
+/** Path segment identifying the synthetic "active filter" tree node. */
+export const KEY_FILTER_NODE = "@keyfilter";
+
+/**
+ * Turn a user's search term into a Redis glob. A term that already contains
+ * glob syntax is passed through untouched; anything else becomes a substring
+ * match, which is what a search box is expected to do.
+ */
+export function scanPattern(filter?: string): string | undefined {
+  const term = filter?.trim();
+  if (!term) {
+    return undefined;
+  }
+  return /[*?[\]]/.test(term) ? term : `*${term}*`;
+}
+
 /** Redis driver backed by ioredis. Queries are raw command lines, e.g. "GET foo". */
 export class RedisDriver implements Driver {
   private client?: Redis;
@@ -47,20 +66,49 @@ export class RedisDriver implements Driver {
     return this.client;
   }
 
-  async children(path: string[]): Promise<TreeItemData[]> {
+  async children(path: string[], filter?: string): Promise<TreeItemData[]> {
     // Top level -> numbered databases (db0..dbN). Deeper -> keys in that db.
     if (path.length === 0) {
       return this.databaseNodes();
     }
     if (path.length === 1) {
       const db = Number(path[0]);
-      const keys = await this.scanKeys(db, 500);
-      return keys.map((k) => ({
+      const pattern = scanPattern(filter);
+      const { keys, truncated } = await this.scanKeys(db, KEY_LIMIT, pattern);
+      // SCAN returns keys in arbitrary (bucket) order — sort so the list reads.
+      keys.sort();
+      const nodes: TreeItemData[] = keys.map((k) => ({
         label: k,
         kind: "key" as const,
         expandable: false,
         path: [path[0], k],
       }));
+      if (pattern) {
+        // Pinned first child: shows the live filter and doubles as "clear".
+        nodes.unshift({
+          label: `Filter: ${filter}`,
+          description: `${keys.length}${truncated ? "+" : ""} ${
+            keys.length === 1 ? "match" : "matches"
+          }`,
+          kind: "info",
+          icon: "filter",
+          expandable: false,
+          path: [path[0], KEY_FILTER_NODE],
+          tooltip: `Matching ${pattern} — click to clear the filter`,
+        });
+      } else if (truncated) {
+        // Never silently cut the list off: say so, and point at the fix.
+        nodes.unshift({
+          label: `Showing first ${KEY_LIMIT} keys`,
+          description: "search to narrow",
+          kind: "info",
+          icon: "info",
+          expandable: false,
+          path: [path[0], "@keytruncated"],
+          tooltip: `This database has more than ${KEY_LIMIT} keys. Use Search Keys to filter them server-side.`,
+        });
+      }
+      return nodes;
     }
     return [];
   }
@@ -105,16 +153,30 @@ export class RedisDriver implements Driver {
     return nodes;
   }
 
-  private async scanKeys(db: number, limit: number): Promise<string[]> {
+  /**
+   * SCAN the keyspace, optionally narrowing server-side with MATCH. A filtered
+   * scan may walk many buckets before it fills `limit`, so it gets a larger
+   * round-trip budget; `truncated` reports whether we stopped early.
+   */
+  private async scanKeys(
+    db: number,
+    limit: number,
+    pattern?: string
+  ): Promise<{ keys: string[]; truncated: boolean }> {
     await this.c.select(db);
+    const maxRoundTrips = pattern ? 200 : 20;
     const found: string[] = [];
     let cursor = "0";
+    let trips = 0;
     do {
-      const [next, batch] = await this.c.scan(cursor, "COUNT", 200);
+      const [next, batch] = pattern
+        ? await this.c.scan(cursor, "MATCH", pattern, "COUNT", 500)
+        : await this.c.scan(cursor, "COUNT", 500);
       found.push(...batch);
       cursor = next;
-    } while (cursor !== "0" && found.length < limit);
-    return found.slice(0, limit);
+      trips++;
+    } while (cursor !== "0" && found.length < limit && trips < maxRoundTrips);
+    return { keys: found.slice(0, limit), truncated: found.length > limit || cursor !== "0" };
   }
 
   async query(sql: string, database?: string): Promise<QueryResult> {

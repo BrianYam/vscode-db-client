@@ -115,6 +115,23 @@ docker exec -i odbc-redis redis-cli RPUSH mylist a b c
 4. Click `mylist` → expect 3 rows (a, b, c).
 5. **New Query** → type `GET greeting` → Cmd+Enter → expect `hello world`.
 
+### Key search & delete (M9)
+Seed enough keys that the list is unusable by eye:
+```bash
+for i in $(seq 1 60); do docker exec -i odbc-redis redis-cli SET "bull:erp-queue:$i" v >/dev/null; done
+docker exec -i odbc-redis redis-cli SET "bull:email-queue:1" v
+```
+6. Expand `db0` → hover it → click **🔍 Search Keys**.
+7. Type `email` → within ~300 ms the tree shows only `bull:email-queue:1`, above it a
+   pinned **`Filter: email — 1 match`** row.
+8. Keep typing/deleting characters → the list re-filters live on each pause.
+9. Type a glob `bull:erp-queue:1*` → expect `1`, `10`–`19` only (11 matches).
+10. Click the pinned **Filter:** row → filter clears, full key list returns (sorted).
+11. Right-click `greeting` → **Delete Key** → confirm → key disappears from the tree;
+    `docker exec -i odbc-redis redis-cli EXISTS greeting` returns `0`.
+12. Right-click `mylist` → **View Value** → same grid as clicking it.
+13. Cancel the confirm dialog on another key → key is still there (no silent delete).
+
 Teardown: `docker rm -f odbc-redis`
 
 ---

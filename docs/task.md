@@ -135,3 +135,28 @@ Priority: 🔴 must-fix before public · 🟡 nice-to-have. Ordered within each 
 ### M8.6 — Marketplace metadata 🔴 (required/strongly-recommended manifest fields)
 - [ ] `[SDD][M8.6]` `package.json` top-level: `icon` (128×128 PNG), `repository`, `bugs`, `homepage`, `keywords`
 - [ ] `[SDD][M8.6]` Optional listing polish: `galleryBanner`; drop `--allow-missing-repository` from the `package` script once `repository` is set
+
+## M9 — Redis Key Explorer (requested 2026-07-20)
+**Why**: a real Redis db holds hundreds of keys (observed: `db0 · 304 keys`). A flat,
+unsorted, 500-key-capped list is unusable — the user cannot find a key, and cannot
+remove one without dropping to a `DEL` command line.
+**Copy-don't-innovate reference**: RedisInsight / Another Redis Desktop — key pattern box
+above the key list (live filter), right-click key → Delete with confirm.
+
+### M9.1 — Key search / auto-filter 🔴  ✅ DONE 2026-07-20
+- [x] `[SDD][M9.1]` `Driver.children(path, filter?)` — optional filter passed down per tree node (other engines ignore it)
+- [x] `[SDD][M9.1]` `RedisDriver.scanKeys` uses **server-side `SCAN … MATCH`** (bare text auto-wrapped to `*text*`; `*`/`?`/`[` used verbatim)
+- [x] `[SDD][M9.1]` Live search box on a Redis `db*` node (inline 🔍) — debounced 300 ms, tree re-filters **as you type**
+- [x] `[SDD][M9.1]` Active filter shown as a pinned first child (`Filter: … — N matches`); click it to clear
+- [x] `[SDD][M9.1]` Truncation is honest: "Showing first 500 of more" info node instead of silently cutting
+- [x] `[SDD][M9.1]` Keys sorted alphabetically (SCAN order is arbitrary and unreadable)
+
+### M9.2 — Delete key 🔴  ✅ DONE 2026-07-20
+- [x] `[SDD][M9.2]` Right-click key → **Delete Key** (modal confirm, names the key + db) → `DEL`
+- [x] `[SDD][M9.2]` Right-click key → **View Value** (same typed preview as click)
+- [x] `[SDD][M9.2]` Tree refreshes after delete; failures surface as an error toast, never a silent no-op
+
+### M9.3 — Follow-ups ▢
+- [ ] `[SDD][M9.3]` Multi-select delete of keys
+- [ ] `[SDD][M9.3]` Set/edit a key's value + TTL from the grid
+- [ ] `[SDD][M9.3]` Key-count-aware paging instead of the 500 cap

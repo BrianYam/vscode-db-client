@@ -39,6 +39,8 @@ Connection Form      ─┘         │
 | M5 Editing (inline row edit, DDL view, export CSV/JSON) | ▢ Next | Depth features |
 | M6 SSH tunnel | ▢ Later | `ssh2` port-forward before driver connect |
 | M7 ER diagrams / backup / restore | ▢ Later | Highest effort, lowest daily value |
+| M8 Public launch readiness | ⚠ Partial | Changelog/versioning/reset done; marketplace metadata open |
+| M9 Redis key explorer (search + delete) | ✅ Done | Server-side `SCAN MATCH` live filter; delete key with confirm |
 
 ## 2. Pillar II — Capacity
 

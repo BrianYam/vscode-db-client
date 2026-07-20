@@ -134,10 +134,66 @@ export function activate(ctx: vscode.ExtensionContext): void {
     });
   });
 
-  reg("openDbClient.previewTable", (node: DbNode) => {
+  const preview = (node: DbNode) =>
     QueryPanel.create(ctx, manager, store, node.connectionId, {
       previewPath: node.nodePath,
     });
+
+  reg("openDbClient.previewTable", preview);
+  // Same action, honest title for Redis keys ("Select Top 200" means nothing there).
+  reg("openDbClient.viewKey", preview);
+
+  // Live key search on a Redis db node. The tree re-filters as you type
+  // (debounced), so the box behaves like a search field, not a prompt.
+  reg("openDbClient.searchKeys", (node: DbNode) => {
+    const input = vscode.window.createInputBox();
+    input.title = `Search keys in ${node.label}`;
+    input.placeholder = "Type to filter — glob supported, e.g. bull:erp-queue:*";
+    input.prompt = "Matches server-side (SCAN MATCH). Plain text matches anywhere in the key.";
+    input.value = tree.getKeyFilter(node);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const apply = (value: string) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => tree.setKeyFilter(node, value), 300);
+    };
+    input.onDidChangeValue(apply);
+    input.onDidAccept(() => {
+      clearTimeout(timer);
+      tree.setKeyFilter(node, input.value);
+      input.hide();
+    });
+    input.onDidHide(() => {
+      clearTimeout(timer);
+      input.dispose();
+    });
+    input.show();
+  });
+
+  // The pinned "Filter: …" row: clicking it drops the filter. Its path is
+  // [db, "@keyfilter"], so the filter is keyed on the parent db path.
+  reg("openDbClient.clearKeyFilter", (node: DbNode) => {
+    tree.clearKeyFilter(node.connectionId, node.nodePath.slice(0, -1));
+  });
+
+  reg("openDbClient.deleteKey", async (node: DbNode) => {
+    const key = node.nodePath[node.nodePath.length - 1];
+    const ok = await vscode.window.showWarningMessage(
+      `Delete key "${key}" from db${node.nodePath[0]}? This cannot be undone.`,
+      { modal: true },
+      "Delete"
+    );
+    if (ok !== "Delete") {
+      return;
+    }
+    try {
+      const driver = await manager.getDriver(node.connectionId);
+      await driver.deleteRow(node.nodePath, {});
+      vscode.window.showInformationMessage(`Deleted key "${key}".`);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Delete key failed: ${(err as Error).message}`);
+    } finally {
+      tree.refresh();
+    }
   });
 
   reg("openDbClient.newQueryFile", async (node: DbNode) => {

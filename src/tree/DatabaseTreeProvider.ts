@@ -3,6 +3,7 @@ import { ConnectionStore } from "../connections/store";
 import { ConnectionManager } from "../connections/manager";
 import { QueryStore } from "../connections/queryStore";
 import { TreeItemData } from "../drivers/Driver";
+import { KEY_FILTER_NODE } from "../drivers/redis";
 
 /** A node in the connections tree. */
 export class DbNode extends vscode.TreeItem {
@@ -36,6 +37,35 @@ export class DatabaseTreeProvider
   private gen = new Map<string, number>();
   private genOf(id: string): number {
     return this.gen.get(id) ?? 0;
+  }
+
+  // Live per-node search terms (Redis key search). Keyed by connection + path.
+  private keyFilters = new Map<string, string>();
+  private static filterKey(connectionId: string, nodePath: string[]): string {
+    return `${connectionId}:${nodePath.join("/")}`;
+  }
+
+  /** The active search term for a node, if any. */
+  getKeyFilter(node: DbNode): string {
+    return this.keyFilters.get(DatabaseTreeProvider.filterKey(node.connectionId, node.nodePath)) ?? "";
+  }
+
+  /** Apply (or, with an empty value, drop) a node's search term and redraw it. */
+  setKeyFilter(node: DbNode, value: string): void {
+    const key = DatabaseTreeProvider.filterKey(node.connectionId, node.nodePath);
+    const term = value.trim();
+    if (term) {
+      this.keyFilters.set(key, term);
+    } else {
+      this.keyFilters.delete(key);
+    }
+    this._onDidChange.fire(node);
+  }
+
+  /** Drop a search term addressed by path (used by the pinned filter node). */
+  clearKeyFilter(connectionId: string, nodePath: string[]): void {
+    this.keyFilters.delete(DatabaseTreeProvider.filterKey(connectionId, nodePath));
+    this._onDidChange.fire(undefined);
   }
 
   constructor(
@@ -116,13 +146,14 @@ export class DatabaseTreeProvider
     try {
       const wasConnected = this.manager.isConnected(element.connectionId);
       const driver = await this.manager.getDriver(element.connectionId);
-      const kids = await driver.children(element.nodePath);
+      const kids = await driver.children(element.nodePath, this.getKeyFilter(element) || undefined);
       // If expanding a connection just brought it online, refresh so the root
       // node's icon/context reflect the live state.
       if (!wasConnected && element.nodePath.length === 0) {
         this._onDidChange.fire(undefined);
       }
-      const nodes = kids.map((k) => this.toNode(element.connectionId, k));
+      const isRedis = this.store.get(element.connectionId)?.type === "redis";
+      const nodes = kids.map((k) => this.toNode(element.connectionId, k, isRedis));
       // Give each database AND schema a "Query" folder for saved .sql files.
       if (element.contextValue === "database" || element.contextValue === "schema") {
         nodes.unshift(this.queryRootNode(element.connectionId, element.nodePath));
@@ -196,11 +227,16 @@ export class DatabaseTreeProvider
     });
   }
 
-  private toNode(connectionId: string, data: TreeItemData): DbNode {
+  private toNode(connectionId: string, data: TreeItemData, isRedis = false): DbNode {
     const collapsible = data.expandable
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None;
-    const node = new DbNode(connectionId, data.path, data.label, data.kind, collapsible);
+    // Redis db nodes get their own context value so key-search menus can target
+    // them without appearing on PostgreSQL/MySQL databases. It still contains
+    // "database", so the generic database menus keep matching.
+    const contextValue =
+      isRedis && data.kind === "database" ? "database-redis" : contextFor(data);
+    const node = new DbNode(connectionId, data.path, data.label, contextValue, collapsible);
     node.id = `${connectionId}#${this.genOf(connectionId)}:${data.path.join("/")}`;
     node.iconPath = data.icon
       ? new vscode.ThemeIcon(data.icon)
@@ -220,6 +256,13 @@ export class DatabaseTreeProvider
         arguments: [node],
       };
     }
+    if (contextValue === "keyfilter") {
+      node.command = {
+        command: "openDbClient.clearKeyFilter",
+        title: "Clear Filter",
+        arguments: [node],
+      };
+    }
     return node;
   }
 }
@@ -231,6 +274,15 @@ export function splitQueryPath(nodePath: string[]): { scope: string[]; relative:
     return { scope: nodePath, relative: [] };
   }
   return { scope: nodePath.slice(0, qi), relative: nodePath.slice(qi + 1) };
+}
+
+/** Context value for a driver-supplied node — its kind, unless it is one of the
+ *  synthetic marker nodes a driver emits (e.g. Redis's pinned filter row). */
+function contextFor(data: TreeItemData): string {
+  if (data.kind === "info" && data.path[data.path.length - 1] === KEY_FILTER_NODE) {
+    return "keyfilter";
+  }
+  return data.kind;
 }
 
 function describe(type: string): string {

@@ -175,6 +175,7 @@ const GUIDES: Guide[] = [
         <li>Expand a connection → databases → schemas → tables → columns. Everything is fetched live.</li>
         <li>Right-click a connection for <b>Connect</b> / <b>Close Connection</b>; a green dot on the icon means it's live.</li>
         <li>Hover any level and click <b>↻</b> to re-fetch just that subtree after schema changes.</li>
+        <li><b>Redis:</b> hover a <span class="glyph">db0</span> node and click <b>🔍</b> to search its keys — the tree filters as you type. Plain text matches anywhere in the key; globs like <span class="glyph">bull:erp-queue:*</span> work too. Click the pinned <b>Filter:</b> row to clear it. Right-click a key for <b>View Value</b> or <b>Delete Key</b>.</li>
       </ul>
 
       <h4>3 · Query &amp; edit data</h4>
