@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.0] - 2026-07-20
+
 ### Added
 
 - **Redis key search.** Hover a Redis `db*` node and click 🔍 to search its keys. The
