@@ -1,15 +1,15 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 import * as vscode from "vscode";
+import type { ConnectionManager } from "../connections/manager";
+import { openTunnelForConfig, type SshTunnel } from "../connections/sshTunnel";
+import { type ConnectionStore, newId, type Secrets } from "../connections/store";
 import {
-  ConnectionConfig,
-  DatabaseType,
+  type ConnectionConfig,
+  type DatabaseType,
   DEFAULT_PORTS,
-  SshAuth,
+  type SshAuth,
 } from "../connections/types";
-import { ConnectionStore, newId, Secrets } from "../connections/store";
-import { ConnectionManager } from "../connections/manager";
 import { createDriver } from "../drivers/registry";
-import { SshTunnel, openTunnelForConfig } from "../connections/sshTunnel";
 
 interface FormPayload {
   type: DatabaseType;
@@ -51,7 +51,7 @@ export class ConnectionFormPanel {
     store: ConnectionStore,
     manager: ConnectionManager,
     refresh: Refresh,
-    existing?: ConnectionConfig
+    existing?: ConnectionConfig,
   ): void {
     new ConnectionFormPanel(ctx, store, manager, refresh, existing);
   }
@@ -64,14 +64,14 @@ export class ConnectionFormPanel {
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager,
     private readonly refresh: Refresh,
-    private readonly existing?: ConnectionConfig
+    private readonly existing?: ConnectionConfig,
   ) {
     this.extensionUri = ctx.extensionUri;
     this.panel = vscode.window.createWebviewPanel(
       "openDbClient.connectionForm",
       existing ? `Edit: ${existing.name}` : "New Connection",
       vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true }
+      { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = this.render();
 
@@ -153,16 +153,30 @@ export class ConnectionFormPanel {
       }
       driver = createDriver(effective);
       await driver.connect(pw);
-      this.post({ type: "testResult", ok: true, message: "Connection successful", ms: Date.now() - start });
+      this.post({
+        type: "testResult",
+        ok: true,
+        message: "Connection successful",
+        ms: Date.now() - start,
+      });
     } catch (err) {
-      this.post({ type: "testResult", ok: false, message: (err as Error).message, ms: Date.now() - start });
+      this.post({
+        type: "testResult",
+        ok: false,
+        message: (err as Error).message,
+        ms: Date.now() - start,
+      });
     } finally {
       await driver?.dispose().catch(() => undefined);
       tunnel?.close();
     }
   }
 
-  private async save(payload: FormPayload, secrets: FormSecrets, thenConnect: boolean): Promise<void> {
+  private async save(
+    payload: FormPayload,
+    secrets: FormSecrets,
+    thenConnect: boolean,
+  ): Promise<void> {
     const config = this.toConfig(payload);
     if (!config.name) {
       this.post({ type: "testResult", ok: false, message: "Name is required", ms: 0 });
@@ -197,7 +211,7 @@ export class ConnectionFormPanel {
         ? { SQLite: ["db", "sqlite", "sqlite3", "db3"], "All files": ["*"] }
         : { Certificates: ["pem", "crt", "cert", "key", "ca"], "All files": ["*"] },
     });
-    if (picked && picked[0]) {
+    if (picked?.[0]) {
       this.post({ type: "browsed", field, path: picked[0].fsPath });
     }
   }
@@ -209,12 +223,7 @@ export class ConnectionFormPanel {
   /** Read a bundled engine icon and return inline-safe SVG markup. */
   private iconSvg(type: string): string {
     try {
-      const file = vscode.Uri.joinPath(
-        this.extensionUri,
-        "media",
-        "icons",
-        `${type}.svg`
-      ).fsPath;
+      const file = vscode.Uri.joinPath(this.extensionUri, "media", "icons", `${type}.svg`).fsPath;
       return fs
         .readFileSync(file, "utf8")
         .replace(/<\?xml[^>]*\?>/i, "")

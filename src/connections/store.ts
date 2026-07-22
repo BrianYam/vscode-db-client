@@ -1,5 +1,5 @@
-import * as vscode from "vscode";
-import { ConnectionConfig } from "./types";
+import type * as vscode from "vscode";
+import type { ConnectionConfig } from "./types";
 
 const KEY = "openDbClient.connections";
 const secretKey = (id: string) => `openDbClient.password.${id}`;
@@ -110,7 +110,7 @@ export class ConnectionStore {
 
 /** Small helper: unique-ish id without external deps. */
 export function newId(): string {
-  return "c_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  return `c_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
 
 export const CURRENT_SCHEMA_VERSION = 1;

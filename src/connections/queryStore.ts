@@ -1,4 +1,4 @@
-import * as path from "path";
+import * as path from "node:path";
 import * as vscode from "vscode";
 import { encodeKey, parseKey } from "./queryKey";
 
@@ -28,7 +28,12 @@ export class QueryStore {
     return vscode.Uri.joinPath(
       this.root,
       "queries",
-      this.san(encodeKey(connId, scope.map((s) => s || "default")))
+      this.san(
+        encodeKey(
+          connId,
+          scope.map((s) => s || "default"),
+        ),
+      ),
     );
   }
 
@@ -55,9 +60,7 @@ export class QueryStore {
   /** List sub-folders and .sql files at scope+relative (folders first). */
   async list(connId: string, scope: string[], relative: string[]): Promise<QueryEntry[]> {
     try {
-      const entries = await vscode.workspace.fs.readDirectory(
-        this.dirUri(connId, scope, relative)
-      );
+      const entries = await vscode.workspace.fs.readDirectory(this.dirUri(connId, scope, relative));
       const dirs = entries
         .filter(([, t]) => t === vscode.FileType.Directory)
         .map(([n]) => ({ name: n, isDir: true }));
@@ -76,7 +79,7 @@ export class QueryStore {
     connId: string,
     scope: string[],
     relative: string[],
-    name: string
+    name: string,
   ): Promise<vscode.Uri> {
     const uri = this.fileUri(connId, scope, relative, name);
     await vscode.workspace.fs.createDirectory(this.dirUri(connId, scope, relative));
@@ -89,10 +92,10 @@ export class QueryStore {
     connId: string,
     scope: string[],
     relative: string[],
-    name: string
+    name: string,
   ): Promise<void> {
     await vscode.workspace.fs.createDirectory(
-      vscode.Uri.joinPath(this.dirUri(connId, scope, relative), this.san(name))
+      vscode.Uri.joinPath(this.dirUri(connId, scope, relative), this.san(name)),
     );
   }
 

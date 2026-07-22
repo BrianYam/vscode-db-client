@@ -1,7 +1,7 @@
-import * as fs from "fs";
-import initSqlJs, { Database, SqlJsStatic } from "sql.js";
-import { ConnectionConfig } from "../connections/types";
-import {
+import * as fs from "node:fs";
+import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
+import type { ConnectionConfig } from "../connections/types";
+import type {
   ColumnMeta,
   Driver,
   ForeignKey,
@@ -9,8 +9,8 @@ import {
   QueryResult,
   TreeItemData,
 } from "./Driver";
-import { quoteIdent as qi, displayIdent as di } from "./ident";
-import { tableFolders, displaySql } from "./postgres";
+import { displayIdent as di, quoteIdent as qi } from "./ident";
+import { displaySql, tableFolders } from "./postgres";
 
 // sql.js is a WASM build — no native compilation needed. The .wasm file lives
 // in node_modules/sql.js/dist and is located via this directory, set once at
@@ -61,6 +61,9 @@ export class SqliteDriver implements Driver {
   }
 
   private persist(): void {
+    // connect() rejects configs without a filePath, and `this.d` throws until
+    // connect() has run — so filePath is always set by the time we persist.
+    // biome-ignore lint/style/noNonNullAssertion: guaranteed set by connect()
     fs.writeFileSync(this.config.filePath!, Buffer.from(this.d.export()));
   }
 
@@ -69,7 +72,7 @@ export class SqliteDriver implements Driver {
       const res = this.d.exec(
         `SELECT name, type FROM sqlite_master
          WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'
-         ORDER BY name`
+         ORDER BY name`,
       );
       if (res.length === 0) {
         return [];
@@ -150,7 +153,7 @@ export class SqliteDriver implements Driver {
 
   private async triggerNodes(tablePath: string[]): Promise<TreeItemData[]> {
     const stmt = this.d.prepare(
-      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`
+      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name`,
     );
     stmt.bind([tablePath[0]]);
     const out: TreeItemData[] = [];
@@ -179,7 +182,9 @@ export class SqliteDriver implements Driver {
     const { columns, values } = res[0];
     const rows = values.map((v) => {
       const obj: Record<string, unknown> = {};
-      columns.forEach((c, i) => (obj[c] = v[i]));
+      columns.forEach((c, i) => {
+        obj[c] = v[i];
+      });
       return obj;
     });
     return { columns, rows, rowCount: rows.length };
@@ -213,7 +218,7 @@ export class SqliteDriver implements Driver {
       ? ` ORDER BY ${qi(opts.sort.column)} ${opts.sort.dir === "desc" ? "DESC" : "ASC"}`
       : "";
     const stmt = this.d.prepare(
-      `SELECT * FROM ${qi(path[0])}${where}${order} LIMIT ${limit} OFFSET ${offset}`
+      `SELECT * FROM ${qi(path[0])}${where}${order} LIMIT ${limit} OFFSET ${offset}`,
     );
     if (Object.keys(bind).length) {
       stmt.bind(bind);
@@ -277,9 +282,7 @@ export class SqliteDriver implements Driver {
     // foreign_key_list columns: id, seq, table, from, to, ...
     const fromIdx = fkRes[0]?.columns.indexOf("from") ?? -1;
     const fkNames = new Set(
-      fkRes[0] && fromIdx >= 0
-        ? fkRes[0].values.map((r) => String(r[fromIdx]))
-        : []
+      fkRes[0] && fromIdx >= 0 ? fkRes[0].values.map((r) => String(r[fromIdx])) : [],
     );
     if (res.length === 0) {
       return [];
@@ -297,13 +300,15 @@ export class SqliteDriver implements Driver {
   async schemaHints(): Promise<{ tables: string[]; columns: string[] }> {
     const res = this.d.exec(
       `SELECT name FROM sqlite_master WHERE type IN ('table','view')
-       AND name NOT LIKE 'sqlite_%' ORDER BY name`
+       AND name NOT LIKE 'sqlite_%' ORDER BY name`,
     );
     const tables = res[0]?.values.map((r) => String(r[0])) ?? [];
     const columns = new Set<string>();
     for (const t of tables) {
       const info = this.d.exec(`PRAGMA table_info(${qi(t)})`);
-      info[0]?.values.forEach((r) => columns.add(String(r[1])));
+      info[0]?.values.forEach((r) => {
+        columns.add(String(r[1]));
+      });
     }
     return { tables, columns: [...columns] };
   }
@@ -323,7 +328,7 @@ export class SqliteDriver implements Driver {
     table: string[],
     pkValues: Record<string, unknown>,
     column: string,
-    value: unknown
+    value: unknown,
   ): Promise<void> {
     const pkCols = Object.keys(pkValues);
     const where = pkCols.map((c) => `${qi(c)} = ?`).join(" AND ");
@@ -337,7 +342,7 @@ export class SqliteDriver implements Driver {
     const where = pkCols.map((c) => `${qi(c)} = ?`).join(" AND ");
     this.d.run(
       `DELETE FROM ${qi(table[0])} WHERE ${where}`,
-      pkCols.map((c) => pkValues[c] as never)
+      pkCols.map((c) => pkValues[c] as never),
     );
     this.persist();
   }
@@ -351,7 +356,7 @@ export class SqliteDriver implements Driver {
     const placeholders = cols.map(() => "?").join(", ");
     this.d.run(
       `INSERT INTO ${qi(table[0])} (${colList}) VALUES (${placeholders})`,
-      cols.map((c) => values[c] as never)
+      cols.map((c) => values[c] as never),
     );
     this.persist();
   }

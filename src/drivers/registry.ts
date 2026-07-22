@@ -1,9 +1,9 @@
-import { ConnectionConfig } from "../connections/types";
-import { Driver } from "./Driver";
-import { PostgresDriver } from "./postgres";
+import type { ConnectionConfig } from "../connections/types";
+import type { Driver } from "./Driver";
 import { MySqlDriver } from "./mysql";
-import { SqliteDriver } from "./sqlite";
+import { PostgresDriver } from "./postgres";
 import { RedisDriver } from "./redis";
+import { SqliteDriver } from "./sqlite";
 
 /** Build the right driver for a connection config. */
 export function createDriver(config: ConnectionConfig): Driver {

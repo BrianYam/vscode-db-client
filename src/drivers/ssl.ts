@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import { ConnectionConfig } from "../connections/types";
+import * as fs from "node:fs";
+import type { ConnectionConfig } from "../connections/types";
 
 export interface TlsOptions {
   ca?: Buffer;

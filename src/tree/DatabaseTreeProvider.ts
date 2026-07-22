@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { ConnectionStore } from "../connections/store";
-import { ConnectionManager } from "../connections/manager";
-import { QueryStore } from "../connections/queryStore";
-import { TreeItemData } from "../drivers/Driver";
+import type { ConnectionManager } from "../connections/manager";
+import type { QueryStore } from "../connections/queryStore";
+import type { ConnectionStore } from "../connections/store";
+import type { TreeItemData } from "../drivers/Driver";
 import { KEY_FILTER_NODE } from "../drivers/redis";
 
 /** A node in the connections tree. */
@@ -12,7 +12,7 @@ export class DbNode extends vscode.TreeItem {
     public readonly nodePath: string[],
     label: string,
     contextValue: string,
-    collapsible: vscode.TreeItemCollapsibleState
+    collapsible: vscode.TreeItemCollapsibleState,
   ) {
     super(label, collapsible);
     this.contextValue = contextValue;
@@ -47,7 +47,9 @@ export class DatabaseTreeProvider
 
   /** The active search term for a node, if any. */
   getKeyFilter(node: DbNode): string {
-    return this.keyFilters.get(DatabaseTreeProvider.filterKey(node.connectionId, node.nodePath)) ?? "";
+    return (
+      this.keyFilters.get(DatabaseTreeProvider.filterKey(node.connectionId, node.nodePath)) ?? ""
+    );
   }
 
   /** Apply (or, with an empty value, drop) a node's search term and redraw it. */
@@ -72,7 +74,7 @@ export class DatabaseTreeProvider
     private readonly store: ConnectionStore,
     private readonly manager: ConnectionManager,
     private readonly extensionUri: vscode.Uri,
-    private readonly queries: QueryStore
+    private readonly queries: QueryStore,
   ) {}
 
   private engineIcon(type: string, connected: boolean): vscode.Uri {
@@ -87,9 +89,7 @@ export class DatabaseTreeProvider
   }
 
   handleDrag(source: DbNode[], dataTransfer: vscode.DataTransfer): void {
-    const ids = source
-      .filter((n) => n.contextValue === "connection")
-      .map((n) => n.connectionId);
+    const ids = source.filter((n) => n.contextValue === "connection").map((n) => n.connectionId);
     if (ids.length) {
       dataTransfer.set(DND_MIME, new vscode.DataTransferItem(JSON.stringify(ids)));
     }
@@ -128,7 +128,7 @@ export class DatabaseTreeProvider
           [],
           c.name,
           connected ? "connectionActive" : "connection",
-          vscode.TreeItemCollapsibleState.Collapsed
+          vscode.TreeItemCollapsibleState.Collapsed,
         );
         node.id = `${c.id}#${this.genOf(c.id)}`;
         node.description = describe(c.type);
@@ -165,7 +165,7 @@ export class DatabaseTreeProvider
         element.nodePath,
         `⚠ ${(err as Error).message}`,
         "error",
-        vscode.TreeItemCollapsibleState.None
+        vscode.TreeItemCollapsibleState.None,
       );
       node.iconPath = new vscode.ThemeIcon("error");
       return [node];
@@ -180,7 +180,7 @@ export class DatabaseTreeProvider
       nodePath,
       "Query",
       "queryroot",
-      vscode.TreeItemCollapsibleState.Collapsed
+      vscode.TreeItemCollapsibleState.Collapsed,
     );
     node.id = `${connectionId}#${this.genOf(connectionId)}:${nodePath.join("/")}`;
     node.iconPath = new vscode.ThemeIcon("save-all", new vscode.ThemeColor("charts.yellow"));
@@ -196,7 +196,7 @@ export class DatabaseTreeProvider
         [...folder.nodePath, "@empty"],
         "Empty — click + to add a file or folder",
         "queryempty",
-        vscode.TreeItemCollapsibleState.None
+        vscode.TreeItemCollapsibleState.None,
       );
       empty.iconPath = new vscode.ThemeIcon("info");
       return [empty];
@@ -208,14 +208,10 @@ export class DatabaseTreeProvider
         nodePath,
         e.name,
         e.isDir ? "queryfolder" : "queryfile",
-        e.isDir
-          ? vscode.TreeItemCollapsibleState.Collapsed
-          : vscode.TreeItemCollapsibleState.None
+        e.isDir ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
       );
       node.id = `${folder.connectionId}#${this.genOf(folder.connectionId)}:${nodePath.join("/")}`;
-      node.iconPath = e.isDir
-        ? new vscode.ThemeIcon("folder")
-        : new vscode.ThemeIcon("file-code");
+      node.iconPath = e.isDir ? new vscode.ThemeIcon("folder") : new vscode.ThemeIcon("file-code");
       if (!e.isDir) {
         node.command = {
           command: "openDbClient.openQueryFile",
@@ -234,8 +230,7 @@ export class DatabaseTreeProvider
     // Redis db nodes get their own context value so key-search menus can target
     // them without appearing on PostgreSQL/MySQL databases. It still contains
     // "database", so the generic database menus keep matching.
-    const contextValue =
-      isRedis && data.kind === "database" ? "database-redis" : contextFor(data);
+    const contextValue = isRedis && data.kind === "database" ? "database-redis" : contextFor(data);
     const node = new DbNode(connectionId, data.path, data.label, contextValue, collapsible);
     node.id = `${connectionId}#${this.genOf(connectionId)}:${data.path.join("/")}`;
     node.iconPath = data.icon
@@ -286,9 +281,7 @@ function contextFor(data: TreeItemData): string {
 }
 
 function describe(type: string): string {
-  return { postgres: "PostgreSQL", mysql: "MySQL", sqlite: "SQLite", redis: "Redis" }[
-    type
-  ] ?? type;
+  return { postgres: "PostgreSQL", mysql: "MySQL", sqlite: "SQLite", redis: "Redis" }[type] ?? type;
 }
 
 const color = (id: string) => new vscode.ThemeColor(id);

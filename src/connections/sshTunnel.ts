@@ -1,10 +1,10 @@
-import * as fs from "fs";
-import * as net from "net";
-import * as os from "os";
-import * as path from "path";
-import { Client, ConnectConfig } from "ssh2";
-import { ConnectionConfig, DEFAULT_PORTS } from "./types";
-import { csTarget, csRewriteHostPort } from "./connString";
+import * as fs from "node:fs";
+import * as net from "node:net";
+import * as os from "node:os";
+import * as path from "node:path";
+import { Client, type ConnectConfig } from "ssh2";
+import { csRewriteHostPort, csTarget } from "./connString";
+import { type ConnectionConfig, DEFAULT_PORTS } from "./types";
 
 function expandHome(p: string): string {
   return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
@@ -17,15 +17,15 @@ function expandHome(p: string): string {
  */
 export async function openTunnelForConfig(
   config: ConnectionConfig,
-  secrets: SshSecrets
+  secrets: SshSecrets,
 ): Promise<{ tunnel: SshTunnel; effectiveConfig: ConnectionConfig }> {
-  const usingCS = !!(config.useConnectionString && config.connectionString);
+  const connString = config.useConnectionString ? config.connectionString : undefined;
   let targetHost: string;
   let targetPort: number;
 
-  if (usingCS) {
+  if (connString) {
     try {
-      const t = csTarget(config.connectionString!, DEFAULT_PORTS[config.type]);
+      const t = csTarget(connString, DEFAULT_PORTS[config.type]);
       targetHost = t.host;
       targetPort = t.port;
     } catch {
@@ -39,8 +39,11 @@ export async function openTunnelForConfig(
   const tunnel = new SshTunnel(config, secrets, targetHost, targetPort);
   const local = await tunnel.open();
 
-  const effectiveConfig: ConnectionConfig = usingCS
-    ? { ...config, connectionString: csRewriteHostPort(config.connectionString!, local.host, local.port) }
+  const effectiveConfig: ConnectionConfig = connString
+    ? {
+        ...config,
+        connectionString: csRewriteHostPort(connString, local.host, local.port),
+      }
     : { ...config, host: local.host, port: local.port };
   return { tunnel, effectiveConfig };
 }
@@ -63,7 +66,7 @@ export class SshTunnel {
     private readonly config: ConnectionConfig,
     private readonly secrets: SshSecrets,
     private readonly targetHost: string,
-    private readonly targetPort: number
+    private readonly targetPort: number,
   ) {}
 
   async open(): Promise<{ host: string; port: number }> {
@@ -80,7 +83,7 @@ export class SshTunnel {
     });
 
     // Local forwarding server: each inbound socket is forwarded over SSH.
-    this.server = net.createServer((sock) => {
+    const server = net.createServer((sock) => {
       client.forwardOut(
         sock.remoteAddress ?? "127.0.0.1",
         sock.remotePort ?? 0,
@@ -92,16 +95,17 @@ export class SshTunnel {
             return;
           }
           sock.pipe(stream).pipe(sock);
-        }
+        },
       );
     });
+    this.server = server;
 
     await new Promise<void>((resolve, reject) => {
-      this.server!.on("error", reject);
-      this.server!.listen(0, "127.0.0.1", () => resolve());
+      server.on("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
     });
 
-    const addr = this.server.address();
+    const addr = server.address();
     if (!addr || typeof addr === "string") {
       throw new Error("Failed to allocate local tunnel port");
     }

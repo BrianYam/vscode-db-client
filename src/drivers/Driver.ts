@@ -1,4 +1,4 @@
-import { ConnectionConfig } from "../connections/types";
+import type { ConnectionConfig } from "../connections/types";
 
 /** Identifies a table that a result set can be edited against. */
 export interface EditTarget {
@@ -164,7 +164,7 @@ export interface Driver {
     table: string[],
     pkValues: Record<string, unknown>,
     column: string,
-    value: unknown
+    value: unknown,
   ): Promise<void>;
 
   /** Delete a single row, identified by its primary-key values. */

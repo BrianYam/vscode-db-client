@@ -7,12 +7,12 @@
 
 /** Double-quote style: PostgreSQL, SQLite. */
 export function quoteIdent(name: string): string {
-  return '"' + String(name).replace(/"/g, '""') + '"';
+  return `"${String(name).replace(/"/g, '""')}"`;
 }
 
 /** Backtick style: MySQL / MariaDB. */
 export function quoteBacktick(name: string): string {
-  return "`" + String(name).replace(/`/g, "``") + "`";
+  return `\`${String(name).replace(/`/g, "``")}\``;
 }
 
 const SIMPLE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -35,5 +35,5 @@ export function sqlLiteral(v: unknown): string {
   if (typeof v === "number") {
     return String(v);
   }
-  return "'" + String(v).replace(/'/g, "''") + "'";
+  return `'${String(v).replace(/'/g, "''")}'`;
 }

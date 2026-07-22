@@ -1,6 +1,6 @@
 import Redis from "ioredis";
-import { ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
-import { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
+import { type ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
+import type { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
 import { buildTls } from "./ssl";
 
 /** Max keys listed under one db node before the list is marked truncated. */
@@ -202,7 +202,7 @@ export class RedisDriver implements Driver {
   private async scanKeys(
     db: number,
     limit: number,
-    pattern?: string
+    pattern?: string,
   ): Promise<{ keys: string[]; truncated: boolean }> {
     await this.c.select(db);
     const maxRoundTrips = pattern ? 200 : 20;
@@ -343,7 +343,7 @@ export class RedisDriver implements Driver {
     table: string[],
     pkValues: Record<string, unknown>,
     column: string,
-    value: unknown
+    value: unknown,
   ): Promise<void> {
     const key = table[1];
     await this.c.select(Number(table[0]));
@@ -509,7 +509,7 @@ export class RedisDriver implements Driver {
       }
       default:
         throw new Error(
-          `A "${type}" key holds a single value — edit it in place instead of adding a row`
+          `A "${type}" key holds a single value — edit it in place instead of adding a row`,
         );
     }
   }
@@ -561,9 +561,10 @@ function previewCommandFor(type: string, key: string): string {
 function tokenize(line: string): string[] {
   const out: string[] = [];
   const re = /"([^"]*)"|(\S+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(line)) !== null) {
+  let m = re.exec(line);
+  while (m !== null) {
     out.push(m[1] ?? m[2]);
+    m = re.exec(line);
   }
   return out;
 }

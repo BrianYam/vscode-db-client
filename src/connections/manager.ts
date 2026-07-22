@@ -1,8 +1,8 @@
-import { ConnectionStore } from "./store";
+import type { Driver } from "../drivers/Driver";
 import { createDriver } from "../drivers/registry";
-import { Driver } from "../drivers/Driver";
-import { SshTunnel, openTunnelForConfig } from "./sshTunnel";
 import { logError } from "../log";
+import { openTunnelForConfig, type SshTunnel } from "./sshTunnel";
+import type { ConnectionStore } from "./store";
 
 /** Owns live driver instances (and their SSH tunnels) and connects on demand. */
 export class ConnectionManager {

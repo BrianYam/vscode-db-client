@@ -1,4 +1,4 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 import * as vscode from "vscode";
 
 interface Guide {
@@ -30,7 +30,7 @@ export class SettingsPanel {
       "openDbClient.settings",
       "Open DB Client — Settings & Guides",
       vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true }
+      { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.onDidDispose(() => (SettingsPanel.current = undefined));
     // The Danger-zone button posts a message; the command owns the confirm modal.
@@ -49,7 +49,7 @@ export class SettingsPanel {
         this.ctx.extensionUri,
         "media",
         "icons",
-        `${type}.svg`
+        `${type}.svg`,
       ).fsPath;
       return fs
         .readFileSync(file, "utf8")
@@ -66,13 +66,12 @@ export class SettingsPanel {
     const nonce = String(Date.now());
     const version = this.ctx.extension.packageJSON.version;
     const nav = GUIDES.map(
-      (g, i) =>
-        `<div class="nav${i === 0 ? " active" : ""}" data-g="${g.id}">${g.title}</div>`
+      (g, i) => `<div class="nav${i === 0 ? " active" : ""}" data-g="${g.id}">${g.title}</div>`,
     ).join("");
     const sections = GUIDES.map(
       (g, i) =>
         `<section id="g-${g.id}" class="guide${i === 0 ? " active" : ""}">
-           <h2>${g.title}</h2>${g.body(icon)}</section>`
+           <h2>${g.title}</h2>${g.body(icon)}</section>`,
     ).join("");
     return /* html */ `<!DOCTYPE html>
 <html lang="en">

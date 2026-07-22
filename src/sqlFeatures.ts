@@ -1,15 +1,55 @@
 import * as vscode from "vscode";
-import { QueryStore } from "./connections/queryStore";
-import { ConnectionManager } from "./connections/manager";
+import type { ConnectionManager } from "./connections/manager";
+import type { QueryStore } from "./connections/queryStore";
 import { logInfo } from "./log";
 
 const KEYWORDS = [
-  "SELECT", "FROM", "WHERE", "INSERT INTO", "UPDATE", "DELETE FROM", "VALUES",
-  "SET", "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "OUTER JOIN", "ON",
-  "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET", "DISTINCT", "AS", "AND",
-  "OR", "NOT", "NULL", "IS NULL", "IS NOT NULL", "IN", "LIKE", "BETWEEN",
-  "COUNT", "SUM", "AVG", "MIN", "MAX", "ASC", "DESC", "RETURNING", "WITH",
-  "CASE", "WHEN", "THEN", "ELSE", "END", "UNION", "EXISTS",
+  "SELECT",
+  "FROM",
+  "WHERE",
+  "INSERT INTO",
+  "UPDATE",
+  "DELETE FROM",
+  "VALUES",
+  "SET",
+  "JOIN",
+  "LEFT JOIN",
+  "RIGHT JOIN",
+  "INNER JOIN",
+  "OUTER JOIN",
+  "ON",
+  "GROUP BY",
+  "ORDER BY",
+  "HAVING",
+  "LIMIT",
+  "OFFSET",
+  "DISTINCT",
+  "AS",
+  "AND",
+  "OR",
+  "NOT",
+  "NULL",
+  "IS NULL",
+  "IS NOT NULL",
+  "IN",
+  "LIKE",
+  "BETWEEN",
+  "COUNT",
+  "SUM",
+  "AVG",
+  "MIN",
+  "MAX",
+  "ASC",
+  "DESC",
+  "RETURNING",
+  "WITH",
+  "CASE",
+  "WHEN",
+  "THEN",
+  "ELSE",
+  "END",
+  "UNION",
+  "EXISTS",
 ];
 
 interface Binding {
@@ -35,7 +75,7 @@ export function bindQueryDoc(uri: vscode.Uri, connId: string, database: string):
 export function registerSqlFeatures(
   ctx: vscode.ExtensionContext,
   queries: QueryStore,
-  manager: ConnectionManager
+  manager: ConnectionManager,
 ): void {
   const hintCache = new Map<string, { tables: string[]; columns: string[] }>();
 
@@ -76,24 +116,27 @@ export function registerSqlFeatures(
           for (const t of hints.tables) {
             const it = new vscode.CompletionItem(t, vscode.CompletionItemKind.Struct);
             it.detail = "table";
-            it.sortText = "0" + t;
+            it.sortText = `0${t}`;
             items.push(it);
           }
           for (const c of hints.columns) {
             const it = new vscode.CompletionItem(c, vscode.CompletionItemKind.Field);
             it.detail = "column";
-            it.sortText = "1" + c;
+            it.sortText = `1${c}`;
             items.push(it);
           }
           for (const k of KEYWORDS) {
             const it = new vscode.CompletionItem(k, vscode.CompletionItemKind.Keyword);
-            it.sortText = "2" + k;
+            it.sortText = `2${k}`;
             items.push(it);
           }
           return items;
         },
       },
-      " ", ".", ",", "(" // trigger characters (also Ctrl+Space)
+      " ",
+      ".",
+      ",",
+      "(", // trigger characters (also Ctrl+Space)
     ),
 
     vscode.languages.registerCodeLensProvider(selector, {
@@ -106,13 +149,21 @@ export function registerSqlFeatures(
         for (const stmt of splitStatements(document)) {
           const args = [b.connId, b.database, stmt.text];
           lenses.push(
-            new vscode.CodeLens(stmt.range, { title: "▶ Run", command: "openDbClient.runSql", arguments: args }),
-            new vscode.CodeLens(stmt.range, { title: "{ } JSON", command: "openDbClient.runSqlJson", arguments: args })
+            new vscode.CodeLens(stmt.range, {
+              title: "▶ Run",
+              command: "openDbClient.runSql",
+              arguments: args,
+            }),
+            new vscode.CodeLens(stmt.range, {
+              title: "{ } JSON",
+              command: "openDbClient.runSqlJson",
+              arguments: args,
+            }),
           );
         }
         return lenses;
       },
-    })
+    }),
   );
 
   // Clear cached hints when a connection is edited/closed elsewhere.

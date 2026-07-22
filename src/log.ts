@@ -18,6 +18,6 @@ export function logInfo(scope: string, message: string): void {
 
 /** Log an error with its stack trace for later diagnosis (never shown to user). */
 export function logError(scope: string, err: unknown): void {
-  const detail = err instanceof Error ? err.stack ?? err.message : String(err);
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
   channel?.appendLine(`${stamp()} [${scope}] ERROR: ${detail}`);
 }

@@ -19,7 +19,7 @@ test("csRewriteHostPort swaps host/port, keeps user/pass/db", () => {
   const out = csRewriteHostPort(
     "postgresql://user:s3cret@rds.aws.com:5432/shortcut",
     "127.0.0.1",
-    10958
+    10958,
   );
   const u = new URL(out);
   assert.strictEqual(u.hostname, "127.0.0.1");
@@ -33,7 +33,7 @@ test("csRewriteHostPort preserves query params (e.g. sslmode)", () => {
   const out = csRewriteHostPort(
     "postgresql://u:p@host:5432/db?sslmode=require",
     "127.0.0.1",
-    20000
+    20000,
   );
   assert.match(out, /sslmode=require/);
   assert.match(out, /127\.0\.0\.1:20000/);

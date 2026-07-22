@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
-import { ConnectionStore } from "./connections/store";
 import { ConnectionManager } from "./connections/manager";
-import { DatabaseTreeProvider, DbNode, splitQueryPath } from "./tree/DatabaseTreeProvider";
-import { ConnectionFormPanel } from "./webview/connectionFormPanel";
-import { SettingsPanel } from "./webview/settingsPanel";
 import { QueryStore } from "./connections/queryStore";
-import { registerSqlFeatures, bindQueryDoc } from "./sqlFeatures";
-import { QueryPanel } from "./webview/queryPanel";
+import { ConnectionStore } from "./connections/store";
 import { setSqliteWasmDir } from "./drivers/sqlite";
 import { initLog, logInfo } from "./log";
+import { bindQueryDoc, registerSqlFeatures } from "./sqlFeatures";
+import { DatabaseTreeProvider, type DbNode, splitQueryPath } from "./tree/DatabaseTreeProvider";
+import { ConnectionFormPanel } from "./webview/connectionFormPanel";
+import { QueryPanel } from "./webview/queryPanel";
+import { SettingsPanel } from "./webview/settingsPanel";
 
 const LAST_SEEN_VERSION_KEY = "openDbClient.lastSeenVersion";
 
@@ -38,9 +38,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.window.createTreeView("openDbClient.connections", {
       treeDataProvider: tree,
       dragAndDropController: tree,
-    })
+    }),
   );
 
+  // VS Code command handlers have heterogeneous, per-command signatures, so the
+  // wrapper mirrors registerCommand's own `(...args: any[]) => any` shape.
+  // biome-ignore lint/suspicious/noExplicitAny: matches vscode.commands.registerCommand
   const reg = (id: string, fn: (...a: any[]) => any) =>
     ctx.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
@@ -55,7 +58,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const choice = await vscode.window.showWarningMessage(
       "Remove ALL Open DB Client data? This deletes every saved connection, all stored passwords/SSH secrets, and all saved query files. This cannot be undone.",
       { modal: true },
-      "Remove Everything"
+      "Remove Everything",
     );
     if (choice !== "Remove Everything") {
       return;
@@ -68,14 +71,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
       await queries.deleteAll();
       if (secretsFailed > 0) {
         vscode.window.showWarningMessage(
-          `Open DB Client: connections and query files were removed, but ${secretsFailed} stored secret(s) may still remain in the OS keychain.`
+          `Open DB Client: connections and query files were removed, but ${secretsFailed} stored secret(s) may still remain in the OS keychain.`,
         );
       } else {
         vscode.window.showInformationMessage("Open DB Client: all data removed.");
       }
     } catch (err) {
       vscode.window.showErrorMessage(
-        `Open DB Client: reset failed — some data may remain. ${(err as Error).message}`
+        `Open DB Client: reset failed — some data may remain. ${(err as Error).message}`,
       );
     } finally {
       tree.refresh();
@@ -119,7 +122,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const ok = await vscode.window.showWarningMessage(
       `Delete connection "${existing.name}"?`,
       { modal: true },
-      "Delete"
+      "Delete",
     );
     if (ok === "Delete") {
       await manager.disconnect(existing.id);
@@ -180,7 +183,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const ok = await vscode.window.showWarningMessage(
       `Delete key "${key}" from db${node.nodePath[0]}? This cannot be undone.`,
       { modal: true },
-      "Delete"
+      "Delete",
     );
     if (ok !== "Delete") {
       return;
@@ -224,7 +227,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       const seconds = Number(answer.trim() || "0");
       await driver.setTtl(node.nodePath, seconds > 0 ? seconds * 1000 : null);
       vscode.window.showInformationMessage(
-        seconds > 0 ? `"${key}" expires in ${seconds}s.` : `"${key}" will no longer expire.`
+        seconds > 0 ? `"${key}" expires in ${seconds}s.` : `"${key}" will no longer expire.`,
       );
     } catch (err) {
       vscode.window.showErrorMessage(`Set TTL failed: ${(err as Error).message}`);
@@ -310,7 +313,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const ok = await vscode.window.showWarningMessage(
       `Delete query file "${name}"?`,
       { modal: true },
-      "Delete"
+      "Delete",
     );
     if (ok === "Delete") {
       await queries.delete(queries.fileUri(node.connectionId, scope, parent, name));
@@ -323,7 +326,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const ok = await vscode.window.showWarningMessage(
       `Delete folder "${relative[relative.length - 1]}" and everything in it?`,
       { modal: true },
-      "Delete"
+      "Delete",
     );
     if (ok === "Delete") {
       await queries.delete(queries.dirUri(node.connectionId, scope, relative));

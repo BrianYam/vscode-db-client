@@ -1,6 +1,6 @@
 import * as mysql from "mysql2/promise";
-import { ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
-import {
+import { type ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
+import type {
   ColumnMeta,
   Driver,
   ForeignKey,
@@ -8,9 +8,9 @@ import {
   QueryResult,
   TreeItemData,
 } from "./Driver";
+import { displayBacktick as db2, quoteBacktick as qb } from "./ident";
+import { displaySql, tableFolders } from "./postgres";
 import { buildTls } from "./ssl";
-import { quoteBacktick as qb, displayBacktick as db2 } from "./ident";
-import { tableFolders, displaySql } from "./postgres";
 
 /** MySQL / MariaDB driver backed by the pure-JS `mysql2` pool. */
 export class MySqlDriver implements Driver {
@@ -31,7 +31,9 @@ export class MySqlDriver implements Driver {
         database: this.config.database || undefined,
         connectionLimit: 4,
         connectTimeout: 10_000,
-        ssl: ssl ? { ca: ssl.ca, cert: ssl.cert, key: ssl.key, rejectUnauthorized: ssl.rejectUnauthorized } : undefined,
+        ssl: ssl
+          ? { ca: ssl.ca, cert: ssl.cert, key: ssl.key, rejectUnauthorized: ssl.rejectUnauthorized }
+          : undefined,
       });
     }
     const conn = await this.pool.getConnection();
@@ -56,7 +58,7 @@ export class MySqlDriver implements Driver {
         `SELECT schema_name FROM information_schema.schemata
          WHERE schema_name NOT IN
            ('information_schema','performance_schema','mysql','sys')
-         ORDER BY schema_name`
+         ORDER BY schema_name`,
       );
       return rows.map((r) => {
         const name = String(r.schema_name ?? r.SCHEMA_NAME);
@@ -68,7 +70,7 @@ export class MySqlDriver implements Driver {
       const [rows] = await this.p.query<mysql.RowDataPacket[]>(
         `SELECT table_name, table_type FROM information_schema.tables
          WHERE table_schema = ? ORDER BY table_name`,
-        [db]
+        [db],
       );
       return rows.map((r) => {
         const name = String(r.table_name ?? r.TABLE_NAME);
@@ -121,7 +123,7 @@ export class MySqlDriver implements Driver {
        FROM information_schema.statistics
        WHERE table_schema = ? AND table_name = ?
        GROUP BY index_name, non_unique ORDER BY index_name`,
-      [db, table]
+      [db, table],
     );
     return rows.map((r) => {
       const name = String(r.index_name ?? r.INDEX_NAME);
@@ -157,7 +159,7 @@ export class MySqlDriver implements Driver {
        FROM information_schema.triggers
        WHERE event_object_schema = ? AND event_object_table = ?
        ORDER BY trigger_name`,
-      [db, table]
+      [db, table],
     );
     return rows.map((r) => {
       const name = String(r.trigger_name ?? r.TRIGGER_NAME);
@@ -179,7 +181,8 @@ export class MySqlDriver implements Driver {
     if (Array.isArray(result)) {
       const rows = result as Array<Record<string, unknown>>;
       return {
-        columns: (fields as mysql.FieldPacket[] | undefined)?.map((f) => f.name) ??
+        columns:
+          (fields as mysql.FieldPacket[] | undefined)?.map((f) => f.name) ??
           (rows[0] ? Object.keys(rows[0]) : []),
         rows,
         rowCount: rows.length,
@@ -221,11 +224,12 @@ export class MySqlDriver implements Driver {
       : "";
     const [rows, fields] = await this.p.query(
       `SELECT * FROM ${qb(db)}.${qb(table)}${where}${order} LIMIT ${limit} OFFSET ${offset}`,
-      params
+      params,
     );
     const data = (rows as Array<Record<string, unknown>>) ?? [];
     const result: QueryResult = {
-      columns: (fields as mysql.FieldPacket[] | undefined)?.map((f) => f.name) ??
+      columns:
+        (fields as mysql.FieldPacket[] | undefined)?.map((f) => f.name) ??
         (data[0] ? Object.keys(data[0]) : []),
       rows: data,
       rowCount: data.length,
@@ -247,7 +251,7 @@ export class MySqlDriver implements Driver {
     const { where, params } = this.buildWhere(opts);
     const [rows] = await this.p.query<mysql.RowDataPacket[]>(
       `SELECT count(*) AS n FROM ${qb(db)}.${qb(table)}${where}`,
-      params
+      params,
     );
     return Number(rows[0]?.n ?? 0);
   }
@@ -259,14 +263,11 @@ export class MySqlDriver implements Driver {
               referenced_table_name AS ref_table, referenced_column_name AS ref_col
        FROM information_schema.key_column_usage
        WHERE table_schema = ? AND table_name = ? AND referenced_table_name IS NOT NULL`,
-      [db, table]
+      [db, table],
     );
     return rows.map((r) => ({
       column: String(r.col ?? r.COL),
-      refTable: [
-        String(r.ref_schema ?? r.REF_SCHEMA),
-        String(r.ref_table ?? r.REF_TABLE),
-      ],
+      refTable: [String(r.ref_schema ?? r.REF_SCHEMA), String(r.ref_table ?? r.REF_TABLE)],
       refColumn: String(r.ref_col ?? r.REF_COL),
     }));
   }
@@ -278,16 +279,14 @@ export class MySqlDriver implements Driver {
        FROM information_schema.columns
        WHERE table_schema = ? AND table_name = ?
        ORDER BY ordinal_position`,
-      [db, table]
+      [db, table],
     );
     const [fkRows] = await this.p.query<mysql.RowDataPacket[]>(
       `SELECT column_name FROM information_schema.key_column_usage
        WHERE table_schema = ? AND table_name = ? AND referenced_table_name IS NOT NULL`,
-      [db, table]
+      [db, table],
     );
-    const fkNames = new Set(
-      fkRows.map((r) => String(r.column_name ?? r.COLUMN_NAME))
-    );
+    const fkNames = new Set(fkRows.map((r) => String(r.column_name ?? r.COLUMN_NAME)));
     return rows.map((c) => {
       const name = String(c.column_name ?? c.COLUMN_NAME);
       return {
@@ -308,12 +307,12 @@ export class MySqlDriver implements Driver {
     const [t] = await this.p.query<mysql.RowDataPacket[]>(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = ? ORDER BY table_name LIMIT 2000`,
-      [db]
+      [db],
     );
     const [c] = await this.p.query<mysql.RowDataPacket[]>(
       `SELECT DISTINCT column_name FROM information_schema.columns
        WHERE table_schema = ? ORDER BY column_name LIMIT 4000`,
-      [db]
+      [db],
     );
     return {
       tables: t.map((r) => String(r.table_name ?? r.TABLE_NAME)),
@@ -324,7 +323,7 @@ export class MySqlDriver implements Driver {
   async getDDL(path: string[]): Promise<string> {
     const [db, table] = path;
     const [rows] = await this.p.query<mysql.RowDataPacket[]>(
-      `SHOW CREATE TABLE ${qb(db)}.${qb(table)}`
+      `SHOW CREATE TABLE ${qb(db)}.${qb(table)}`,
     );
     const row = rows[0] ?? {};
     return String(row["Create Table"] ?? row["Create View"] ?? "-- unavailable");
@@ -334,7 +333,7 @@ export class MySqlDriver implements Driver {
     table: string[],
     pkValues: Record<string, unknown>,
     column: string,
-    value: unknown
+    value: unknown,
   ): Promise<void> {
     const [db, tbl] = table;
     const pkCols = Object.keys(pkValues);
@@ -349,7 +348,7 @@ export class MySqlDriver implements Driver {
     const where = pkCols.map((c) => `${qb(c)} = ?`).join(" AND ");
     await this.p.query(
       `DELETE FROM ${qb(db)}.${qb(tbl)} WHERE ${where}`,
-      pkCols.map((c) => pkValues[c])
+      pkCols.map((c) => pkValues[c]),
     );
   }
 
@@ -363,7 +362,7 @@ export class MySqlDriver implements Driver {
     const placeholders = cols.map(() => "?").join(", ");
     await this.p.query(
       `INSERT INTO ${qb(db)}.${qb(tbl)} (${colList}) VALUES (${placeholders})`,
-      cols.map((c) => values[c])
+      cols.map((c) => values[c]),
     );
   }
 }

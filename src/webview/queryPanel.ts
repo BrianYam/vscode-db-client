@@ -1,8 +1,8 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 import * as vscode from "vscode";
-import { ConnectionManager } from "../connections/manager";
-import { ConnectionStore } from "../connections/store";
-import {
+import type { ConnectionManager } from "../connections/manager";
+import type { ConnectionStore } from "../connections/store";
+import type {
   ColumnFilter,
   EditTarget,
   PreviewFilter,
@@ -37,7 +37,7 @@ export class QueryPanel {
     manager: ConnectionManager,
     store: ConnectionStore,
     connectionId: string,
-    options: PanelOptions = {}
+    options: PanelOptions = {},
   ): QueryPanel {
     return new QueryPanel(ctx, manager, store, connectionId, options);
   }
@@ -51,7 +51,7 @@ export class QueryPanel {
     store: ConnectionStore,
     connectionId: string,
     database: string | undefined,
-    sql: string
+    sql: string,
   ): void {
     const existing = QueryPanel.results.get(connectionId);
     if (existing && !existing.disposed) {
@@ -92,7 +92,7 @@ export class QueryPanel {
     private readonly manager: ConnectionManager,
     private readonly store: ConnectionStore,
     private readonly connectionId: string,
-    options: PanelOptions
+    options: PanelOptions,
   ) {
     const config = this.store.get(connectionId);
     this.database = options.database;
@@ -106,12 +106,12 @@ export class QueryPanel {
       "openDbClient.query",
       title,
       vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true }
+      { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = this.render(
       options.initialSql ?? "",
       config?.type ?? "postgres",
-      !!options.filePath
+      !!options.filePath,
     );
     this.panel.onDidDispose(() => (this.disposed = true));
 
@@ -258,7 +258,7 @@ export class QueryPanel {
     const ok = await vscode.window.showWarningMessage(
       `Delete ${pks.length} row(s)? This cannot be undone.`,
       { modal: true },
-      "Delete"
+      "Delete",
     );
     if (ok !== "Delete") {
       return;
@@ -350,7 +350,7 @@ export class QueryPanel {
         const seconds = Number(answer.trim() || "0");
         await driver.setTtl(table, seconds > 0 ? seconds * 1000 : null);
         vscode.window.showInformationMessage(
-          seconds > 0 ? `"${key}" expires in ${seconds}s.` : `"${key}" will no longer expire.`
+          seconds > 0 ? `"${key}" expires in ${seconds}s.` : `"${key}" will no longer expire.`,
         );
       }
       if (this.previewPath) {
@@ -362,7 +362,7 @@ export class QueryPanel {
   }
 
   private async handleExport(format: "csv" | "json"): Promise<void> {
-    if (!this.lastResult || !this.lastResult.columns.length) {
+    if (!this.lastResult?.columns.length) {
       vscode.window.showWarningMessage("Nothing to export — run a query first.");
       return;
     }
@@ -374,12 +374,10 @@ export class QueryPanel {
       return;
     }
     const content =
-      format === "csv"
-        ? toCsv(this.lastResult)
-        : JSON.stringify(this.lastResult.rows, null, 2);
+      format === "csv" ? toCsv(this.lastResult) : JSON.stringify(this.lastResult.rows, null, 2);
     fs.writeFileSync(uri.fsPath, content, "utf8");
     vscode.window.showInformationMessage(
-      `Exported ${this.lastResult.rowCount} row(s) to ${uri.fsPath}`
+      `Exported ${this.lastResult.rowCount} row(s) to ${uri.fsPath}`,
     );
   }
 
@@ -874,7 +872,7 @@ function toCsv(result: QueryResult): string {
       return "";
     }
     const s = typeof v === "object" ? JSON.stringify(v) : String(v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const header = result.columns.map(esc).join(",");
   const lines = result.rows.map((row) => result.columns.map((c) => esc(row[c])).join(","));
