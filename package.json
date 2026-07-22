@@ -2,7 +2,7 @@
   "name": "open-db-client",
   "displayName": "Open DB Client",
   "description": "Lightweight database client for VS Code with unlimited connections (PostgreSQL, MySQL/MariaDB, SQLite, Redis).",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "brianlab",
   "license": "MIT",
   "engines": {
@@ -287,6 +287,11 @@
     "typecheck": "tsc -p ./ --noEmit",
     "watch": "node esbuild.js --watch",
     "test": "npm run compile && node --test test/*.test.js",
+    "preversion": "npm test",
+    "version": "node scripts/stamp-changelog.mjs && git add CHANGELOG.md",
+    "release:patch": "npm version patch && npm run package",
+    "release:minor": "npm version minor && npm run package",
+    "release:major": "npm version major && npm run package",
     "fetch-icons": "node scripts/fetch-icons.mjs",
     "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl https://localhost/ --baseImagesUrl https://localhost/"
   },

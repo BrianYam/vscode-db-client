@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-22
+
 ### Added
 
 - **Edit Redis values in the grid.** Click a key, then double-click a cell to edit it,
