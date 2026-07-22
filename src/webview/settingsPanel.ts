@@ -186,6 +186,7 @@ const GUIDES: Guide[] = [
         <li>Click the <b>↗</b> on a foreign-key cell to jump to the referenced row in the other table.</li>
         <li><b>Export CSV / JSON</b> saves the current grid. Right-click a table for <b>View DDL / Structure</b>.</li>
         <li><b>Redis values are editable too:</b> click a key, then double-click a cell. Strings edit in place (the TTL is kept), lists edit by <span class="glyph">index</span>, hashes by <span class="glyph">field</span>, sorted sets by <span class="glyph">score</span>. <b>🗑 Delete</b> in the grid removes only the checked elements — deleting the whole key is the tree's <b>Delete Key</b>.</li>
+        <li><b>Redis TTL:</b> a key's remaining life shows next to volatile keys in the tree and in the grid toolbar. Use <b>Set TTL…</b> to set an expiry (in seconds) or <b>Persist</b> to make a key permanent — also on a key's right-click menu.</li>
         <li>Right-click a connection or database → <b>New Query</b> for raw SQL (<kbd>Cmd/Ctrl</kbd>+<kbd>Enter</kbd> to run). For Redis, type commands like <span class="glyph">GET mykey</span>.</li>
       </ul>
 

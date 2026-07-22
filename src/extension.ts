@@ -196,6 +196,43 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   });
 
+  reg("openDbClient.setTtl", async (node: DbNode) => {
+    const key = node.nodePath[node.nodePath.length - 1];
+    try {
+      const driver = await manager.getDriver(node.connectionId);
+      if (!driver.setTtl) {
+        vscode.window.showWarningMessage("This connection does not support TTL.");
+        return;
+      }
+      const answer = await vscode.window.showInputBox({
+        title: `Set TTL for "${key}"`,
+        prompt: "Seconds until the key expires. Leave blank or 0 to keep it forever.",
+        validateInput: (v) => {
+          const t = v.trim();
+          if (t === "") {
+            return undefined;
+          }
+          const n = Number(t);
+          return Number.isFinite(n) && n >= 0 && Number.isInteger(n)
+            ? undefined
+            : "Enter a whole number of seconds (0 = no expiry)";
+        },
+      });
+      if (answer === undefined) {
+        return;
+      }
+      const seconds = Number(answer.trim() || "0");
+      await driver.setTtl(node.nodePath, seconds > 0 ? seconds * 1000 : null);
+      vscode.window.showInformationMessage(
+        seconds > 0 ? `"${key}" expires in ${seconds}s.` : `"${key}" will no longer expire.`
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(`Set TTL failed: ${(err as Error).message}`);
+    } finally {
+      tree.refresh();
+    }
+  });
+
   reg("openDbClient.newQueryFile", async (node: DbNode) => {
     const { scope, relative } = splitQueryPath(node.nodePath);
     const name = await vscode.window.showInputBox({

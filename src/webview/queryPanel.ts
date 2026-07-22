@@ -157,6 +157,9 @@ export class QueryPanel {
         case "insert":
           await this.handleInsert(msg.values);
           break;
+        case "setTtl":
+          await this.handleSetTtl(msg.action);
+          break;
         case "openRelated":
           this.openRelated(msg.column, msg.value);
           break;
@@ -304,6 +307,60 @@ export class QueryPanel {
     }
   }
 
+  /**
+   * Set or clear the previewed key's TTL. `action` is "persist" to remove the
+   * expiry, or "edit" to prompt for a new one (in seconds). Only reachable for
+   * a Redis key preview, where `lastEditable.table` is the key's path.
+   */
+  private async handleSetTtl(action: "edit" | "persist"): Promise<void> {
+    const table = this.lastEditable?.table;
+    if (!table) {
+      return;
+    }
+    const key = table[table.length - 1];
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      if (!driver.setTtl) {
+        return;
+      }
+      if (action === "persist") {
+        await driver.setTtl(table, null);
+        vscode.window.showInformationMessage(`"${key}" will no longer expire.`);
+      } else {
+        const current = this.lastResult?.ttl;
+        const prefill = current && current > 0 ? String(Math.round(current / 1000)) : "";
+        const answer = await vscode.window.showInputBox({
+          title: `Set TTL for "${key}"`,
+          prompt: "Seconds until the key expires. Leave blank or 0 to keep it forever.",
+          value: prefill,
+          validateInput: (v) => {
+            const t = v.trim();
+            if (t === "") {
+              return undefined;
+            }
+            const n = Number(t);
+            return Number.isFinite(n) && n >= 0 && Number.isInteger(n)
+              ? undefined
+              : "Enter a whole number of seconds (0 = no expiry)";
+          },
+        });
+        if (answer === undefined) {
+          return; // cancelled
+        }
+        const seconds = Number(answer.trim() || "0");
+        await driver.setTtl(table, seconds > 0 ? seconds * 1000 : null);
+        vscode.window.showInformationMessage(
+          seconds > 0 ? `"${key}" expires in ${seconds}s.` : `"${key}" will no longer expire.`
+        );
+      }
+      if (this.previewPath) {
+        await this.runPreview(this.previewPath, this.offset);
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage(`Set TTL failed: ${(err as Error).message}`);
+    }
+  }
+
   private async handleExport(format: "csv" | "json"): Promise<void> {
     if (!this.lastResult || !this.lastResult.columns.length) {
       vscode.window.showWarningMessage("Nothing to export — run a query first.");
@@ -416,6 +473,11 @@ export class QueryPanel {
     <button id="csvBtn" class="secondary">Export CSV</button>
     <button id="jsonBtn" class="secondary">Export JSON</button>
     <input id="search" class="search" placeholder="Search results…" />
+    <span id="ttlWrap" style="display:none; align-items:center; gap:6px;">
+      <span id="ttl" title="Remaining time-to-live"></span>
+      <button id="ttlEdit" class="secondary" title="Set this key's expiry">Set TTL…</button>
+      <button id="ttlPersist" class="secondary" title="Remove this key's expiry">Persist</button>
+    </span>
     <span class="spacer"></span>
     <span id="cost"></span>
     <button id="prevBtn" class="secondary" disabled>‹</button>
@@ -499,6 +561,32 @@ export class QueryPanel {
     $('prevBtn').addEventListener('click', () => pageBy(-1));
     $('nextBtn').addEventListener('click', () => pageBy(1));
     $('delBtn').addEventListener('click', deleteSelected);
+    $('ttlEdit').addEventListener('click', () => vscode.postMessage({ type:'setTtl', action:'edit' }));
+    $('ttlPersist').addEventListener('click', () => vscode.postMessage({ type:'setTtl', action:'persist' }));
+
+    // Human-readable TTL from ms; -1 = no expiry, -2 = key gone.
+    function fmtTtl(ms){
+      if (ms === -1) return 'no expiry';
+      if (ms == null || ms === -2) return '';
+      const total = Math.max(0, Math.round(ms/1000));
+      if (total < 60) return total + 's';
+      const d = Math.floor(total/86400), h = Math.floor((total%86400)/3600),
+            m = Math.floor((total%3600)/60), s = total%60;
+      const parts = [['d',d],['h',h],['m',m],['s',s]];
+      const first = parts.findIndex(([,v]) => v>0);
+      return parts.slice(first, first+2).filter(([,v]) => v>0).map(([u,v]) => v+u).join(' ');
+    }
+    function updateTtl(){
+      const wrap = $('ttlWrap');
+      const has = raw && typeof raw.ttl === 'number';
+      wrap.style.display = has ? 'inline-flex' : 'none';
+      if (!has) return;
+      const persistable = raw.ttl > 0;
+      $('ttl').textContent = 'TTL: ' + (fmtTtl(raw.ttl) || '—');
+      $('ttlPersist').disabled = !persistable;
+      // Editing only makes sense while the key still exists.
+      $('ttlEdit').disabled = raw.ttl === -2;
+    }
 
     function pageBy(dir) {
       if (!raw || !raw.page) return;
@@ -755,6 +843,7 @@ export class QueryPanel {
         // Show the equivalent SQL for table previews so it can be seen/edited.
         if (raw.sql != null) sqlEl.value = raw.sql;
         $('addBtn').disabled = !raw.editable;
+        updateTtl();
         const p = raw.page;
         $('cost').textContent = raw.elapsedMs != null ? ('Cost: ' + (raw.elapsedMs/1000).toFixed(2) + 's') : '';
         if (p) {

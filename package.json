@@ -85,6 +85,11 @@
         "icon": "$(trash)"
       },
       {
+        "command": "openDbClient.setTtl",
+        "title": "Set TTL / Expiry…",
+        "icon": "$(watch)"
+      },
+      {
         "command": "openDbClient.newQueryFile",
         "title": "New Query File",
         "icon": "$(new-file)"
@@ -216,6 +221,11 @@
           "command": "openDbClient.viewKey",
           "when": "view == openDbClient.connections && viewItem == key",
           "group": "1_query@1"
+        },
+        {
+          "command": "openDbClient.setTtl",
+          "when": "view == openDbClient.connections && viewItem == key",
+          "group": "1_query@2"
         },
         {
           "command": "openDbClient.deleteKey",

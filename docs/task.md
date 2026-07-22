@@ -167,7 +167,13 @@ above the key list (live filter), right-click key → Delete with confirm.
 
 ### M9.4 — Follow-ups ▢
 - [ ] `[SDD][M9.4]` Multi-select delete of keys from the tree
-- [ ] `[SDD][M9.4]` View/set a key's TTL explicitly (currently only preserved, never shown)
+- [x] `[SDD][M9.4]` View/set a key's TTL explicitly (currently only preserved, never shown) ✅ DONE 2026-07-22
+  - [x] `[SDD][M9.4]` `QueryResult.ttl` field carries a key's remaining TTL (ms) from driver to grid
+  - [x] `[SDD][M9.4]` `RedisDriver.previewTable` attaches `PTTL`; `setTtl(table, ms|null)` runs `PEXPIRE` (or `PERSIST` when null)
+  - [x] `[SDD][M9.4]` Tree: keys **with** an expiry show it in the node description (e.g. `· 42s`); non-volatile keys stay blank so the eye finds the volatile ones. One pipelined `PTTL` batch, no extra round-trips per key
+  - [x] `[SDD][M9.4]` Grid: TTL shown in the toolbar with **Set TTL…** / **Persist** controls; edit routes through a native input box, refreshes on save
+  - [x] `[SDD][M9.4]` `openDbClient.setTtl` right-click command on a key node (mirrors Delete Key)
+  - [x] `[SDD][M9.4]` `formatTtl` unit tests (`test/formatTtl.test.js`)
 - [ ] `[SDD][M9.4]` Create a new key from the tree (currently only via a command)
 - [ ] `[SDD][M9.4]` Key-count-aware paging instead of the 500-key cap
 - [ ] `[SDD][M9.4]` Streams: preview + edit (`XRANGE`) — today they fall back to a raw reply

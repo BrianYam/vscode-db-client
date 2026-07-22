@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A string key's TTL survives an edit.** The remaining expiry is read before the
   write and re-applied after it, so editing a rate-limit or session key does not turn
   it into a permanent one.
+- **View and edit a key's TTL.** Volatile keys show their remaining life in the tree
+  (e.g. `· 42s`) and in the grid toolbar. **Set TTL…** sets an expiry (in seconds),
+  **Persist** removes it — from the grid or a key's right-click menu. Backed by
+  `PTTL` / `PEXPIRE` / `PERSIST`.
 
 ### Changed
 

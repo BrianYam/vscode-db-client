@@ -79,6 +79,12 @@ export interface QueryResult {
   elapsedMs?: number;
   /** The equivalent SQL for a table preview (shown, editable, in the editor). */
   sql?: string;
+  /**
+   * Remaining time-to-live in milliseconds for a previewed key (Redis).
+   * `-1` = the key exists but has no expiry; `-2` = the key is gone. Absent for
+   * engines/results that have no notion of TTL.
+   */
+  ttl?: number;
 }
 
 /** One child in the connection tree (schema, table, column, key, etc.). */
@@ -166,4 +172,11 @@ export interface Driver {
 
   /** Insert a row. Only the provided columns are set; the rest use defaults. */
   insertRow(table: string[], values: Record<string, unknown>): Promise<void>;
+
+  /**
+   * Set (or clear) a key's expiry. `table` is the key's path; `ms` is the new
+   * TTL in milliseconds, or `null` to remove the expiry (make the key permanent).
+   * Only engines with a notion of TTL (Redis) implement this.
+   */
+  setTtl?(table: string[], ms: number | null): Promise<void>;
 }

@@ -107,12 +107,23 @@ export class RedisDriver implements Driver {
       const { keys, truncated } = await this.scanKeys(db, KEY_LIMIT, pattern);
       // SCAN returns keys in arbitrary (bucket) order — sort so the list reads.
       keys.sort();
-      const nodes: TreeItemData[] = keys.map((k) => ({
-        label: k,
-        kind: "key" as const,
-        expandable: false,
-        path: [path[0], k],
-      }));
+      // One pipelined PTTL round-trip for the whole (already-capped) list, so
+      // volatile keys can show their remaining life without N extra calls.
+      const ttls = await this.keyTtls(keys);
+      const nodes: TreeItemData[] = keys.map((k, i) => {
+        const ms = ttls[i];
+        // Only annotate keys that actually expire — a "no expiry" on every key
+        // is noise; a bare description draws the eye to the volatile ones.
+        const ttl = ms > 0 ? formatTtl(ms) : undefined;
+        return {
+          label: k,
+          kind: "key" as const,
+          expandable: false,
+          path: [path[0], k],
+          description: ttl,
+          tooltip: ttl ? `Expires in ${ttl}` : undefined,
+        };
+      });
       if (pattern) {
         // Pinned first child: shows the live filter and doubles as "clear".
         nodes.unshift({
@@ -209,6 +220,26 @@ export class RedisDriver implements Driver {
     return { keys: found.slice(0, limit), truncated: found.length > limit || cursor !== "0" };
   }
 
+  /**
+   * Remaining TTL (ms) for each key, in one pipelined round-trip. Assumes the
+   * right db is already selected (the caller SCANned it). A failed reply for a
+   * key degrades to `-1` (treated as "no expiry") rather than breaking the list.
+   */
+  private async keyTtls(keys: string[]): Promise<number[]> {
+    if (keys.length === 0) {
+      return [];
+    }
+    const pipe = this.c.pipeline();
+    for (const k of keys) {
+      pipe.pttl(k);
+    }
+    const replies = await pipe.exec();
+    return keys.map((_, i) => {
+      const [err, value] = replies?.[i] ?? [];
+      return err ? -1 : Number(value);
+    });
+  }
+
   async query(sql: string, database?: string): Promise<QueryResult> {
     const parts = tokenize(sql.trim());
     if (parts.length === 0) {
@@ -230,6 +261,8 @@ export class RedisDriver implements Driver {
     const type = await this.c.type(key);
     const result = await this.readValue(type, key);
     result.sql = previewCommandFor(type, key);
+    // Surface the remaining TTL so the grid can show/edit it (-1 = no expiry).
+    result.ttl = await this.c.pttl(key);
     // Editable shapes get a pk column so the grid can address one element.
     const pk = PK_COLUMN[type];
     if (pk) {
@@ -423,6 +456,26 @@ export class RedisDriver implements Driver {
     }
   }
 
+  /**
+   * Set or clear a key's expiry. `table` is [dbIndex, key]; `ms` is the new TTL
+   * in milliseconds, or `null` to make the key permanent (`PERSIST`).
+   */
+  async setTtl(table: string[], ms: number | null): Promise<void> {
+    const key = table[1];
+    await this.c.select(Number(table[0]));
+    if ((await this.c.exists(key)) === 0) {
+      throw new Error(`Key "${key}" no longer exists`);
+    }
+    if (ms === null) {
+      await this.c.persist(key);
+      return;
+    }
+    if (!Number.isFinite(ms) || ms <= 0) {
+      throw new Error("TTL must be a positive number of seconds");
+    }
+    await this.c.pexpire(key, Math.round(ms));
+  }
+
   /** Append an element to a collection key. `values` comes from the grid's
    *  Add-Row form, keyed by column name. */
   async insertRow(table: string[], values: Record<string, unknown>): Promise<void> {
@@ -460,6 +513,33 @@ export class RedisDriver implements Driver {
         );
     }
   }
+}
+
+/**
+ * Human-readable remaining TTL from milliseconds, e.g. 45000 → "45s",
+ * 3_723_000 → "1h 2m". Shows at most the two most-significant units.
+ */
+export function formatTtl(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  if (totalSec < 60) {
+    return `${totalSec}s`;
+  }
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const parts = [
+    ["d", d],
+    ["h", h],
+    ["m", m],
+    ["s", s],
+  ] as const;
+  const first = parts.findIndex(([, v]) => v > 0);
+  return parts
+    .slice(first, first + 2)
+    .filter(([, v]) => v > 0)
+    .map(([u, v]) => `${v}${u}`)
+    .join(" ");
 }
 
 function previewCommandFor(type: string, key: string): string {
