@@ -506,6 +506,13 @@ export class ConnectionFormPanel {
     const vscode = acquireVsCodeApi();
     const state = ${initial};
     const PORTS = ${ports};
+    // Sample connection string shown as the input placeholder, per engine.
+    const CS_PLACEHOLDER = {
+      postgres: 'postgresql://user:pass@host:5432/dbname',
+      mysql: 'mysql://user:pass@host:3306/dbname',
+      redis: 'redis://user:pass@host:6379/0',
+      sqlite: '/path/to/database.db',
+    };
     const $ = (id) => document.getElementById(id);
 
     // hydrate
@@ -598,6 +605,7 @@ export class ConnectionFormPanel {
       $('fileFields').classList.toggle('hidden', !isSqlite);
       $('dbField').classList.toggle('hidden', isRedis || isSqlite);
       $('redisDbField').classList.toggle('hidden', !isRedis);
+      $('connectionString').placeholder = CS_PLACEHOLDER[t] || CS_PLACEHOLDER.postgres;
       if (!isSqlite && (!$('port').value || Number($('port').value) === 0)) $('port').value = PORTS[t];
     }
     document.querySelectorAll('.type').forEach((el) =>

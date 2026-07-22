@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Connection-string sample matches the selected engine.** The greyed-out
+  placeholder in the *Use Connection String* field now updates as you switch server
+  type — `postgresql://…`, `mysql://…`, `redis://…`, or a SQLite file path — instead
+  of always showing the Postgres example.
+
 ## [0.3.1] - 2026-07-22
 
 ### Added
