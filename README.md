@@ -17,6 +17,28 @@ npm run compile
 Then open this folder in VS Code and press **F5** ("Run Extension"). A second VS Code
 window opens with the extension loaded. Click the **database icon** in the activity bar.
 
+## Scripts
+
+Everyday commands and when to reach for each:
+
+| Command | When to run it |
+| --- | --- |
+| `npm run compile` | One-off TypeScript build to `out/` (used by tests). |
+| `npm run watch` | Leave running while developing — rebuilds `dist/` on save. |
+| `npm run bundle` | Produce the shipped `dist/extension.js` (esbuild). |
+| `npm run typecheck` | Type-check only (`tsc --noEmit`), no output — run before committing. |
+| `npm run lint` | Report Biome lint problems in `src/` and `test/` (read-only). |
+| `npm run format` | Auto-format `src/` and `test/` in place (whitespace, quotes, etc.). |
+| `npm run check` | Biome lint **+** format **+** import-sort, applying every safe fix. Run this to clean a file up before committing. |
+| `npm test` | Compile, then run the `node:test` suite in `test/`. |
+
+**You rarely run the linters by hand.** A [Husky](https://typicode.github.io/husky)
+`pre-commit` hook runs [`lint-staged`](https://github.com/lint-staged/lint-staged) on
+every commit, which applies `biome check --write` to just the files you staged — so
+formatting and safe lint fixes happen automatically. Use `npm run check`/`npm run lint`
+when you want to sweep the whole project or see problems before staging. The hook is
+installed automatically by the `prepare` script on `npm install`.
+
 ## Use it
 
 1. Click **＋ Add Connection** in the panel title bar.

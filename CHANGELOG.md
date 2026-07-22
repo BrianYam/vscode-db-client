@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+
+- **Dev tooling: Biome + Husky.** Added [Biome](https://biomejs.dev) for linting and
+  formatting (`npm run lint`, `npm run format`, `npm run check`) configured to the repo
+  style (2-space indent, double quotes). A Husky `pre-commit` hook runs `lint-staged`,
+  which formats and lints only staged files. No change to the shipped extension.
+
 ## [0.3.2] - 2026-07-22
 
 ### Changed

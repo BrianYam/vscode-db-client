@@ -285,6 +285,9 @@
     "bundle": "node esbuild.js",
     "compile": "tsc -p ./",
     "typecheck": "tsc -p ./ --noEmit",
+    "lint": "biome lint ./src ./test",
+    "format": "biome format --write ./src ./test",
+    "check": "biome check --write ./src ./test",
     "watch": "node esbuild.js --watch",
     "test": "npm run compile && node --test test/*.test.js",
     "preversion": "npm test",
@@ -293,7 +296,11 @@
     "release:minor": "npm version minor && npm run package",
     "release:major": "npm version major && npm run package",
     "fetch-icons": "node scripts/fetch-icons.mjs",
-    "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl https://localhost/ --baseImagesUrl https://localhost/"
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl https://localhost/ --baseImagesUrl https://localhost/",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,js,mjs,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
     "ioredis": "^5.4.1",
@@ -303,12 +310,15 @@
     "ssh2": "^1.15.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.5",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.11.6",
     "@types/sql.js": "^1.4.9",
     "@types/ssh2": "^1.15.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.28.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
     "typescript": "^5.5.0"
   }
 }
