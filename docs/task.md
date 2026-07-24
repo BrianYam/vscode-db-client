@@ -189,3 +189,15 @@ connect lived in no map (`ConnectionManager`), so `disposeAll()` could not reach
       SSH tunnel open (15s) and tree children/expansion queries (20s) → fail to an error node
 - [x] `[SDD][M10]` `disposeAll()` (also the `deactivate()` path) now tears down pending
       connects and tunnels too, best-effort, guarded against double dispose/close
+
+## M11 — Table search 🟢  ✅ DONE 2026-07-24
+Goal: a schema with dozens of tables should be filterable, the way Redis keyspaces
+already are. Reuse the existing per-node filter mechanism (`keyFilters` map +
+`getKeyFilter`/`setKeyFilter`/`clearKeyFilter` + the `keyfilter` pinned row).
+- [x] `[SDD][M11]` `openDbClient.searchTables` command: shared `liveFilterInput` helper
+      (extracted from `searchKeys`) drives a debounced input box wired to the node's filter
+- [x] `[SDD][M11]` `$(search)` inline + context action on `schema` (PostgreSQL) and
+      `database` (MySQL) nodes; anchored `when` regex keeps it off `database-redis`
+- [x] `[SDD][M11]` Tree narrows structural rows (table/view/schema/db) by label client-side
+      and pins a `Filter: … · N matches` row (context value `keyfilter`, so the existing
+      `clearKeyFilter` command + menu clear it) — no driver changes, works for every SQL engine

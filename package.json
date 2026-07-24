@@ -76,6 +76,11 @@
         "icon": "$(search)"
       },
       {
+        "command": "openDbClient.searchTables",
+        "title": "Search Tables",
+        "icon": "$(search)"
+      },
+      {
         "command": "openDbClient.clearKeyFilter",
         "title": "Clear Key Filter",
         "icon": "$(clear-all)"
@@ -220,6 +225,16 @@
         {
           "command": "openDbClient.searchKeys",
           "when": "view == openDbClient.connections && viewItem == database-redis",
+          "group": "1_query@0"
+        },
+        {
+          "command": "openDbClient.searchTables",
+          "when": "view == openDbClient.connections && viewItem =~ /^(database|schema)$/",
+          "group": "inline@3"
+        },
+        {
+          "command": "openDbClient.searchTables",
+          "when": "view == openDbClient.connections && viewItem =~ /^(database|schema)$/",
           "group": "1_query@0"
         },
         {

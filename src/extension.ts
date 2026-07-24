@@ -155,20 +155,22 @@ export function activate(ctx: vscode.ExtensionContext): void {
   // Same action, honest title for Redis keys ("Select Top 200" means nothing there).
   reg("openDbClient.viewKey", preview);
 
-  // Live key search on a Redis db node. The tree re-filters as you type
-  // (debounced), so the box behaves like a search field, not a prompt.
-  reg("openDbClient.searchKeys", (node: DbNode) => {
+  // A live search box wired to a tree node's filter term. The tree re-filters as
+  // you type (debounced), so the box behaves like a search field, not a prompt.
+  const liveFilterInput = (
+    node: DbNode,
+    opts: { title: string; placeholder: string; prompt?: string; debounceMs: number },
+  ) => {
     const input = vscode.window.createInputBox();
-    input.title = `Search keys in ${node.label}`;
-    input.placeholder = "Type to filter — glob supported, e.g. bull:erp-queue:*";
-    input.prompt = "Matches server-side (SCAN MATCH). Plain text matches anywhere in the key.";
+    input.title = opts.title;
+    input.placeholder = opts.placeholder;
+    if (opts.prompt) input.prompt = opts.prompt;
     input.value = tree.getKeyFilter(node);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const apply = (value: string) => {
+    input.onDidChangeValue((value) => {
       clearTimeout(timer);
-      timer = setTimeout(() => tree.setKeyFilter(node, value), 300);
-    };
-    input.onDidChangeValue(apply);
+      timer = setTimeout(() => tree.setKeyFilter(node, value), opts.debounceMs);
+    });
     input.onDidAccept(() => {
       clearTimeout(timer);
       tree.setKeyFilter(node, input.value);
@@ -179,7 +181,26 @@ export function activate(ctx: vscode.ExtensionContext): void {
       input.dispose();
     });
     input.show();
-  });
+  };
+
+  // Redis key search: matches server-side (SCAN MATCH), so debounce a little more.
+  reg("openDbClient.searchKeys", (node: DbNode) =>
+    liveFilterInput(node, {
+      title: `Search keys in ${node.label}`,
+      placeholder: "Type to filter — glob supported, e.g. bull:erp-queue:*",
+      prompt: "Matches server-side (SCAN MATCH). Plain text matches anywhere in the key.",
+      debounceMs: 300,
+    }),
+  );
+
+  // SQL table search: matches table/view names in the tree, client-side and instant.
+  reg("openDbClient.searchTables", (node: DbNode) =>
+    liveFilterInput(node, {
+      title: `Search tables in ${node.label}`,
+      placeholder: "Type to filter tables by name",
+      debounceMs: 150,
+    }),
+  );
 
   // The pinned "Filter: …" row: clicking it drops the filter. Its path is
   // [db, "@keyfilter"], so the filter is keyed on the parent db path.

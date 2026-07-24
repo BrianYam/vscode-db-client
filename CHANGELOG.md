@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Search tables.** Schemas (PostgreSQL) and databases (MySQL) now carry a
+  `$(search)` action (also `Open DB Client: Search Tables` via right-click) that opens a
+  live, debounced filter box — the table/view list narrows as you type, with a pinned
+  `Filter: …` row on top that clears the filter when clicked. Mirrors the existing Redis
+  key search; filtering is client-side (table lists are small) so it stays instant.
+
 ## [0.3.4] - 2026-07-24
 
 ### Added

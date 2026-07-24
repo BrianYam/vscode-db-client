@@ -22,6 +22,11 @@ export class DbNode extends vscode.TreeItem {
 
 const DND_MIME = "application/vnd.code.tree.opendbclient.connections";
 
+// Node kinds the table-search box narrows by label. Everything else in a list
+// (the "Query" folder, error rows) is always kept. "database-redis" is absent:
+// Redis has its own server-side key search.
+const STRUCTURAL = new Set(["database", "schema", "table", "view"]);
+
 // A node expansion (children query) that never returns leaves the tree spinning
 // with no way out. Cap it so it fails to a visible error node instead.
 const CHILDREN_TIMEOUT_MS = 20_000;
@@ -175,10 +180,29 @@ export class DatabaseTreeProvider
         this._onDidChange.fire(undefined);
       }
       const isRedis = this.store.get(element.connectionId)?.type === "redis";
-      const nodes = kids.map((k) => this.toNode(element.connectionId, k, isRedis));
+      let nodes = kids.map((k) => this.toNode(element.connectionId, k, isRedis));
       // Give each database AND schema a "Query" folder for saved .sql files.
       if (element.contextValue === "database" || element.contextValue === "schema") {
         nodes.unshift(this.queryRootNode(element.connectionId, element.nodePath));
+      }
+      // Table search (SQL engines). Redis filters keys server-side and pins its
+      // own filter row, so it is left untouched. SQL drivers ignore the term, so
+      // narrow the structural rows (tables/views/schemas/dbs) here — the lists
+      // are small enough that a client-side match beats a per-keystroke re-query
+      // — and pin a "Filter: …" row that doubles as clear.
+      const term = this.getKeyFilter(element);
+      if (!isRedis && term) {
+        const needle = term.toLowerCase();
+        let matches = 0;
+        nodes = nodes.filter((n) => {
+          if (!STRUCTURAL.has(n.contextValue ?? "")) return true; // keep Query, etc.
+          const hit = String(n.label ?? "")
+            .toLowerCase()
+            .includes(needle);
+          if (hit) matches++;
+          return hit;
+        });
+        nodes.unshift(this.listFilterNode(element.connectionId, element.nodePath, term, matches));
       }
       return nodes;
     } catch (err) {
@@ -206,6 +230,35 @@ export class DatabaseTreeProvider
     );
     node.id = `${connectionId}#${this.genOf(connectionId)}:${nodePath.join("/")}`;
     node.iconPath = new vscode.ThemeIcon("save-all", new vscode.ThemeColor("charts.yellow"));
+    return node;
+  }
+
+  /** Pinned "Filter: …" row shown atop a filtered SQL list. Same context value
+   *  ("keyfilter") and clear-on-click command as the Redis filter row, so the
+   *  existing clearKeyFilter command and its menu apply unchanged. */
+  private listFilterNode(
+    connectionId: string,
+    scopePath: string[],
+    term: string,
+    matches: number,
+  ): DbNode {
+    const nodePath = [...scopePath, KEY_FILTER_NODE];
+    const node = new DbNode(
+      connectionId,
+      nodePath,
+      `Filter: ${term}`,
+      "keyfilter",
+      vscode.TreeItemCollapsibleState.None,
+    );
+    node.id = `${connectionId}#${this.genOf(connectionId)}:${nodePath.join("/")}`;
+    node.iconPath = new vscode.ThemeIcon("filter");
+    node.description = `${matches} match${matches === 1 ? "" : "es"}`;
+    node.tooltip = `Showing items matching "${term}" — click to clear`;
+    node.command = {
+      command: "openDbClient.clearKeyFilter",
+      title: "Clear Filter",
+      arguments: [node],
+    };
     return node;
   }
 
