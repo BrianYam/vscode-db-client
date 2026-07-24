@@ -177,3 +177,15 @@ above the key list (live filter), right-click key → Delete with confirm.
 - [ ] `[SDD][M9.4]` Create a new key from the tree (currently only via a command)
 - [ ] `[SDD][M9.4]` Key-count-aware paging instead of the 500-key cap
 - [ ] `[SDD][M9.4]` Streams: preview + edit (`XRANGE`) — today they fall back to a raw reply
+
+## M10 — Connection resilience 🟢  ✅ DONE 2026-07-24
+Goal: a stuck connection must never force a VS Code restart. Root cause — an in-flight
+connect lived in no map (`ConnectionManager`), so `disposeAll()` could not reach it.
+- [x] `[SDD][M10]` Track in-flight connects (`pending` map): the half-built driver/tunnel
+      is registered *before* `connect()`, so `disposeAll()` tears down a mid-connect node
+- [x] `[SDD][M10]` **Stop All Connections** command + view-title button (`$(stop-circle)`):
+      `disposeAll()` → `markAllDisconnected()` (bump every generation, drop key filters, collapse)
+- [x] `[SDD][M10]` `withTimeout` helper; hard caps on the previously-unbounded hang paths —
+      SSH tunnel open (15s) and tree children/expansion queries (20s) → fail to an error node
+- [x] `[SDD][M10]` `disposeAll()` (also the `deactivate()` path) now tears down pending
+      connects and tunnels too, best-effort, guarded against double dispose/close

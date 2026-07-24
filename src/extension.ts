@@ -85,6 +85,15 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   });
 
+  // Stop All: force-tear-down every connection — live AND in-flight — and
+  // collapse the tree back to a clean state. The escape hatch for a wedged
+  // spinner so the user never has to restart VS Code.
+  reg("openDbClient.stopAll", async () => {
+    await manager.disposeAll();
+    tree.markAllDisconnected();
+    vscode.window.setStatusBarMessage("Open DB Client: all connections stopped.", 3000);
+  });
+
   reg("openDbClient.refreshNode", (node: DbNode) => tree.refresh(node));
 
   reg("openDbClient.connect", async (node: DbNode) => {

@@ -43,6 +43,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "openDbClient.stopAll",
+        "title": "Stop All Connections",
+        "icon": "$(stop-circle)"
+      },
+      {
         "command": "openDbClient.editConnection",
         "title": "Edit Connection",
         "icon": "$(edit)"
@@ -159,6 +164,11 @@
           "command": "openDbClient.refresh",
           "when": "view == openDbClient.connections",
           "group": "navigation@2"
+        },
+        {
+          "command": "openDbClient.stopAll",
+          "when": "view == openDbClient.connections",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [

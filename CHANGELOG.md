@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stop All Connections.** A new stop-circle button in the CONNECTIONS view title
+  (and `Open DB Client: Stop All Connections` in the palette) force-tears-down every
+  connection and collapses the tree to a clean state — the escape hatch for a stuck
+  connection so you never have to restart VS Code.
+
+### Fixed
+
+- **A wedged spinner is now recoverable.** In-flight connects are tracked, so
+  `disposeAll()` / Stop All can tear down a connection that hangs *mid-connect* (it
+  previously lived in no map and was unreachable). The SSH-tunnel open (15s) and tree
+  node-expansion / children queries (20s) also gained hard timeouts, so a dead SSH host
+  or slow metadata read fails to a visible error node instead of spinning forever.
+
 ## [0.3.3] - 2026-07-22
 
 ### Internal

@@ -4,6 +4,7 @@ import type { QueryStore } from "../connections/queryStore";
 import type { ConnectionStore } from "../connections/store";
 import type { TreeItemData } from "../drivers/Driver";
 import { KEY_FILTER_NODE } from "../drivers/redis";
+import { withTimeout } from "../timeout";
 
 /** A node in the connections tree. */
 export class DbNode extends vscode.TreeItem {
@@ -20,6 +21,10 @@ export class DbNode extends vscode.TreeItem {
 }
 
 const DND_MIME = "application/vnd.code.tree.opendbclient.connections";
+
+// A node expansion (children query) that never returns leaves the tree spinning
+// with no way out. Cap it so it fails to a visible error node instead.
+const CHILDREN_TIMEOUT_MS = 20_000;
 
 export class DatabaseTreeProvider
   implements vscode.TreeDataProvider<DbNode>, vscode.TreeDragAndDropController<DbNode>
@@ -88,6 +93,17 @@ export class DatabaseTreeProvider
     this._onDidChange.fire(undefined);
   }
 
+  /** Stop All: collapse every connection back to a fresh, disconnected state.
+   *  Bumps every generation so no subtree silently re-queries (and reconnects),
+   *  and drops all live key filters (their match counts are now meaningless). */
+  markAllDisconnected(): void {
+    for (const c of this.store.all()) {
+      this.gen.set(c.id, this.genOf(c.id) + 1);
+    }
+    this.keyFilters.clear();
+    this._onDidChange.fire(undefined);
+  }
+
   handleDrag(source: DbNode[], dataTransfer: vscode.DataTransfer): void {
     const ids = source.filter((n) => n.contextValue === "connection").map((n) => n.connectionId);
     if (ids.length) {
@@ -146,7 +162,13 @@ export class DatabaseTreeProvider
     try {
       const wasConnected = this.manager.isConnected(element.connectionId);
       const driver = await this.manager.getDriver(element.connectionId);
-      const kids = await driver.children(element.nodePath, this.getKeyFilter(element) || undefined);
+      // Cap the children query too: a slow SCAN / metadata read shouldn't spin
+      // forever. On timeout this throws and renders the error node below.
+      const kids = await withTimeout(
+        driver.children(element.nodePath, this.getKeyFilter(element) || undefined),
+        CHILDREN_TIMEOUT_MS,
+        "Loading",
+      );
       // If expanding a connection just brought it online, refresh so the root
       // node's icon/context reflect the live state.
       if (!wasConnected && element.nodePath.length === 0) {
