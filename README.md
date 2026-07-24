@@ -50,13 +50,34 @@ installed automatically by the `prepare` script on `npm install`.
 Add as many connections as you want. Passwords are stored in VS Code SecretStorage;
 connection metadata in globalState.
 
-## Package as an installable `.vsix` (optional)
+### Search a long table list
+
+On a schema (PostgreSQL) or database (MySQL) node, click the **🔍 Search Tables** icon
+(or right-click → **Search Tables**). A search box opens and the table/view list narrows
+live as you type. A pinned **`Filter: … · N matches`** row sits on top — click it to clear
+the filter. (Redis databases have the equivalent **Search Keys** action, which filters
+server-side.)
+
+## Install the built extension into your VS Code
+
+You don't need to uninstall the old version first — `--force` overwrites it in place.
 
 ```bash
-npm install -g @vscode/vsce
-vsce package
-code --install-extension open-db-client-0.1.0.vsix
+npm run package             # builds open-db-client-<version>.vsix in the repo root
+./scripts/install-local.sh  # installs that .vsix with --force
 ```
+
+Then reload the window: **Cmd/Ctrl+Shift+P → "Developer: Reload Window"**.
+
+`install-local.sh` targets the VSIX matching the current `package.json` version
+automatically, so after a `npm run release:*` (which bumps the version and builds the
+`.vsix`) you can go straight to `./scripts/install-local.sh`. It needs the **`code` CLI on
+your PATH** — if it's missing, run **"Shell Command: Install 'code' command in PATH"** from
+the Command Palette once (the script prints this hint if `code` isn't found).
+
+> **Tip:** for day-to-day development you don't need a `.vsix` at all — just press **F5**
+> to launch the Extension Development Host against your live `dist/`. Build and install a
+> VSIX only when you want to dogfood the actual shipped package.
 
 ## Status & roadmap
 
