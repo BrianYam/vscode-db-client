@@ -201,3 +201,12 @@ already are. Reuse the existing per-node filter mechanism (`keyFilters` map +
 - [x] `[SDD][M11]` Tree narrows structural rows (table/view/schema/db) by label client-side
       and pins a `Filter: … · N matches` row (context value `keyfilter`, so the existing
       `clearKeyFilter` command + menu clear it) — no driver changes, works for every SQL engine
+
+## M12 — SSH "Auto" default-key fallback 🟢  ✅ DONE 2026-07-28
+Bug: a connection that works in another client / the terminal failed here with SSH
+**Auth = Auto** and no key path. Root cause — `ssh2` never reads `~/.ssh/id_*` on its own
+(the `ssh` CLI does), so "Auto" only tried the empty agent and gave up.
+- [x] `[SDD][M12]` `SshTunnel.resolvePrivateKey()`: explicit path wins; otherwise fall back
+      to the first default identity file that parses (`id_ed25519` → `id_rsa` → `id_ecdsa`)
+- [x] `[SDD][M12]` Validate with `ssh2.utils.parseKey` before offering a default key, so an
+      encrypted key with no passphrase is skipped instead of throwing before agent/password run

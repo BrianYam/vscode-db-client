@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Client, type ConnectConfig } from "ssh2";
+import { Client, type ConnectConfig, utils as sshUtils } from "ssh2";
 import { csRewriteHostPort, csTarget } from "./connString";
 import { type ConnectionConfig, DEFAULT_PORTS } from "./types";
 
@@ -125,16 +125,49 @@ export class SshTunnel {
     if ((auth === "agent" || auth === "auto") && agentSock) {
       cfg.agent = agentSock;
     }
-    if ((auth === "key" || auth === "auto") && this.config.sshPrivateKeyPath) {
-      cfg.privateKey = fs.readFileSync(expandHome(this.config.sshPrivateKeyPath));
-      if (this.secrets.sshPassphrase) {
-        cfg.passphrase = this.secrets.sshPassphrase;
+    if (auth === "key" || auth === "auto") {
+      const key = this.resolvePrivateKey();
+      if (key) {
+        cfg.privateKey = key;
+        if (this.secrets.sshPassphrase) {
+          cfg.passphrase = this.secrets.sshPassphrase;
+        }
       }
     }
     if ((auth === "password" || auth === "auto") && this.secrets.sshPassword) {
       cfg.password = this.secrets.sshPassword;
     }
     return cfg;
+  }
+
+  /**
+   * The private key to authenticate with. An explicit path always wins; with none
+   * given (the common "Auto" case), fall back to the first default identity file
+   * that parses — `ssh2`, unlike the `ssh` CLI, never reads `~/.ssh/id_*` on its
+   * own, so "Auto" would otherwise only ever try the agent and fail on machines
+   * whose key isn't loaded (`ssh-add`). A default key is only offered if it parses
+   * with the given passphrase, so an encrypted key with no passphrase is skipped
+   * (rather than making ssh2 throw before it can try the agent or password).
+   */
+  private resolvePrivateKey(): Buffer | undefined {
+    const explicit = this.config.sshPrivateKeyPath;
+    if (explicit) {
+      return fs.readFileSync(expandHome(explicit));
+    }
+    const passphrase = this.secrets.sshPassphrase;
+    for (const name of ["id_ed25519", "id_rsa", "id_ecdsa"]) {
+      const p = path.join(os.homedir(), ".ssh", name);
+      let data: Buffer;
+      try {
+        data = fs.readFileSync(p);
+      } catch {
+        continue; // no such default key on this machine
+      }
+      if (!(sshUtils.parseKey(data, passphrase) instanceof Error)) {
+        return data;
+      }
+    }
+    return undefined;
   }
 
   close(): void {

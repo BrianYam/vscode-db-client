@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SSH tunnel "Auto" auth now reads your default key.** `ssh2` (unlike the `ssh` CLI)
+  never loads `~/.ssh/id_*` on its own, so with **Auth = Auto** and an empty key path we
+  only ever tried the SSH agent — a connection that works in a terminal (or another
+  client) failed here whenever the key wasn't `ssh-add`-ed into the agent. "Auto" and
+  "Key" now fall back to the first default identity file that parses
+  (`id_ed25519` → `id_rsa` → `id_ecdsa`); an encrypted key with no passphrase is skipped
+  so the agent/password paths still get their turn.
+
 ## [0.3.5] - 2026-07-24
 
 ### Added
