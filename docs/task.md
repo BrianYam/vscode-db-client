@@ -210,3 +210,18 @@ Bug: a connection that works in another client / the terminal failed here with S
       to the first default identity file that parses (`id_ed25519` → `id_rsa` → `id_ecdsa`)
 - [x] `[SDD][M12]` Validate with `ssh2.utils.parseKey` before offering a default key, so an
       encrypted key with no passphrase is skipped instead of throwing before agent/password run
+
+## M13 — Copy as JSON 🟢  ✅ DONE 2026-07-29
+Goal: get rows out of the grid and into an editor/ticket/API payload without a round-trip
+through a saved file. Export CSV/JSON both force a save dialog; the common case is "give me
+*these two rows* as JSON". Cheap by construction — `raw.rows` is already in webview memory,
+so this only allocates the output string (see the size gate below for the real ceiling).
+- [x] `[SDD][M13]` **Copy as JSON** toolbar button next to Export CSV/JSON; builds the payload
+      in the webview and reuses the existing `copy` message → `vscode.env.clipboard`
+- [x] `[SDD][M13]` Shape: exactly 1 checked row → bare object; 2+ → array. Nothing checked
+      (or a non-editable result, which renders no checkboxes) → every row **in view**, array-wrapped
+- [x] `[SDD][M13]` Order/contents follow `computeView()` — current sort, per-column filters and
+      search — so the clipboard matches what's on screen, not `raw.rows` order
+- [x] `[SDD][M13]` Honest limits: payloads over 5 MB raise a modal "Copy anyway" confirm
+      (`COPY_WARN_CHARS`) — the cost lands on the paste target, not on us; the toast reports
+      the row count actually copied, and an empty view says so instead of copying `[]`

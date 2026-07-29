@@ -30,6 +30,9 @@ function basename(p: string): string {
 
 const PAGE_SIZE = 100;
 
+/** Past this the OS clipboard — and whatever you paste into — is what stalls, so we ask first. */
+const COPY_WARN_CHARS = 5 * 1024 * 1024;
+
 /** A SQL/command editor + a rich results grid, one webview per invocation. */
 export class QueryPanel {
   static create(
@@ -167,8 +170,7 @@ export class QueryPanel {
           await this.handleExport(msg.format);
           break;
         case "copy":
-          await vscode.env.clipboard.writeText(String(msg.text ?? ""));
-          vscode.window.showInformationMessage("Copied to clipboard.");
+          await this.handleCopy(String(msg.text ?? ""), msg.rows);
           break;
         case "saveFile":
           if (this.filePath) {
@@ -361,6 +363,28 @@ export class QueryPanel {
     }
   }
 
+  /**
+   * Clipboard writes from the grid. The rows are already in webview memory, so the copy
+   * itself is cheap — the cost lands on the paste target, hence the size gate below.
+   */
+  private async handleCopy(text: string, rows?: number): Promise<void> {
+    if (text.length > COPY_WARN_CHARS) {
+      const mb = (text.length / 1024 / 1024).toFixed(1);
+      const go = await vscode.window.showWarningMessage(
+        `That's about ${mb} MB${rows ? ` of JSON (${rows} rows)` : ""}. A payload this big can stall whatever you paste it into.`,
+        { modal: true },
+        "Copy anyway",
+      );
+      if (go !== "Copy anyway") {
+        return;
+      }
+    }
+    await vscode.env.clipboard.writeText(text);
+    vscode.window.showInformationMessage(
+      rows ? `Copied ${rows} row(s) as JSON.` : "Copied to clipboard.",
+    );
+  }
+
   private async handleExport(format: "csv" | "json"): Promise<void> {
     if (!this.lastResult?.columns.length) {
       vscode.window.showWarningMessage("Nothing to export — run a query first.");
@@ -470,6 +494,7 @@ export class QueryPanel {
     <button id="delBtn" class="secondary" title="Delete selected rows" disabled>🗑 Delete</button>
     <button id="csvBtn" class="secondary">Export CSV</button>
     <button id="jsonBtn" class="secondary">Export JSON</button>
+    <button id="copyJsonBtn" class="secondary" title="Copy checked rows as JSON — all rows in view if none are checked">Copy as JSON</button>
     <input id="search" class="search" placeholder="Search results…" />
     <span id="ttlWrap" style="display:none; align-items:center; gap:6px;">
       <span id="ttl" title="Remaining time-to-live"></span>
@@ -551,6 +576,7 @@ export class QueryPanel {
     $('refreshBtn').addEventListener('click', () => vscode.postMessage({ type:'refresh' }));
     $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv' }));
     $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json' }));
+    $('copyJsonBtn').addEventListener('click', copyAsJson);
     $('search').addEventListener('input', (e) => { search = e.target.value.toLowerCase(); renderGrid(); });
     sqlEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
@@ -598,6 +624,21 @@ export class QueryPanel {
         const pk = {}; for (const k of raw.editable.pkColumns) pk[k] = raw.rows[ri][k]; return pk;
       });
       vscode.postMessage({ type:'delete', pks });
+    }
+
+    // Checkboxes only exist on editable results, so "nothing checked" is both "user checked
+    // nothing" and "this result can't be checked at all" — both fall back to the whole view.
+    // Order follows the grid (sort/filter/search applied), not raw.rows, so what lands on the
+    // clipboard is what you were looking at.
+    function copyAsJson(){
+      if (!raw || !raw.columns.length) { statusEl.textContent = 'Nothing to copy — run a query first.'; return; }
+      const view = computeView();
+      const picked = selected.size ? view.filter(({ri}) => selected.has(ri)) : view;
+      if (!picked.length) { statusEl.textContent = 'Nothing to copy — no rows in view.'; return; }
+      // One checked row copies as a bare object; anything else stays an array so the
+      // shape is predictable for whatever you paste it into.
+      const payload = selected.size === 1 ? picked[0].row : picked.map(({row}) => row);
+      vscode.postMessage({ type:'copy', text: JSON.stringify(payload, null, 2), rows: picked.length });
     }
 
     function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }

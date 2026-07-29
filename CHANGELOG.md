@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Copy as JSON.** A new results-grid button copies rows straight to the clipboard, no save
+  dialog. Check one row and you get a bare object; check several and you get an array. With
+  nothing checked — including results that aren't editable and so have no checkboxes — it
+  copies every row currently in view. What you copy respects the grid's sort, column filters
+  and search, so it matches what you're looking at. Payloads over ~5 MB ask for confirmation
+  first, since a clipboard that large is a problem for whatever you paste into.
+
 ## [0.3.6] - 2026-07-28
 
 ### Fixed
