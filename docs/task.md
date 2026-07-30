@@ -225,3 +225,46 @@ so this only allocates the output string (see the size gate below for the real c
 - [x] `[SDD][M13]` Honest limits: payloads over 5 MB raise a modal "Copy anyway" confirm
       (`COPY_WARN_CHARS`) — the cost lands on the paste target, not on us; the toast reports
       the row count actually copied, and an empty view says so instead of copying `[]`
+
+## M14 — Grid search & filter reliability 🟢  ✅ DONE 2026-07-30
+Bugs: (a) focus jumped out of a column-filter box mid-typing, (b) the global search found
+nothing for values that are demonstrably in the table.
+- [x] `[SDD][M14]` **Focus loss, cause 1** — every re-render does `gridEl.innerHTML = h` and the
+      filter inputs live *inside* the grid header, so the box being typed in is destroyed. On
+      non-paginated results the client-side branch re-rendered on **every keystroke** with no
+      focus repair at all (`restoreFilterFocus` only ran on a `result` message)
+- [x] `[SDD][M14]` **Focus loss, cause 2** — `pendingFilterFocus` was a single slot consumed by
+      the first response to land; two overlapping round-trips (350ms debounce vs. a ~0.4s query)
+      left the second re-render with an empty slot and nothing restored focus
+- [x] `[SDD][M14]` Fix: `renderGrid()` captures `document.activeElement` + `selectionStart/End`
+      before the wipe and restores both after — covers keystroke, filter, sort, page and refresh
+      re-renders on both the client-side and server-backed paths, and keeps the caret where it
+      was instead of forcing it to end-of-text. `pendingFilterFocus`/`lastFilterCol`/
+      `restoreFilterFocus` all deleted
+- [x] `[SDD][M14]` **Stale responses**: filter/sort/page messages now carry `seq: ++reqSeq`,
+      threaded through `runPreview` → `show` → the `result` message; the webview drops any
+      response older than the newest it has rendered. Fixes the grid briefly showing rows that
+      don't match what's in the filter boxes. Seq-less results (fresh runs, post-edit refreshes)
+      always render
+- [x] `[SDD][M14]` **Global search is page-local, and now says so.** It filters `raw.rows` —
+      the loaded page — and is never sent to the DB, so on a 223-row table paged at 100 it
+      silently missed ~55% of rows. Placeholder switches to "Search this page…" when a preview
+      is paginated, and a new `#scope` line reports `N of 100 rows on this page match · page 1
+      of 3 — Total 223 (search covers the loaded page only)`. Per-column filters are unaffected
+      — those do hit the database and cover the whole table
+- [x] `[SDD][M14]` **JSON/`jsonb` columns were unsearchable.** `pg` returns `jsonb` as a parsed
+      object; `display()` stringified it for the grid but search/filter/sort used `String(v)`,
+      i.e. `"[object Object]"` — so no term could ever match a JSON cell, and sorting by one
+      compared every row as equal. Same class of bug on `Date` columns (grid showed quoted ISO,
+      search compared `"Tue Jul 29 2026 …"`)
+- [x] `[SDD][M14]` Fix: one `cellText()` helper is now the single place a cell becomes text —
+      used by `display()`, the client-side column filter, the global search, the sort
+      comparator and the inline double-click editor (which previously seeded the input with
+      `[object Object]` for a `jsonb` cell)
+- [ ] `[SDD][M14]` Known gap: on a **server-backed** preview a per-column filter on `jsonb`
+      runs as `col::text ILIKE`, and Postgres renders `jsonb::text` with spaces
+      (`{"a": 1}`) while the grid displays compact `JSON.stringify` (`{"a":1}`). Filtering on a
+      pasted `"key":"value"` fragment therefore matches client-side but not server-side; plain
+      values (`DGS-00374`) match in both
+- [ ] `[SDD][M14]` Deferred: true server-side global search (OR across all columns per driver) —
+      rejected for now on unindexed-`ILIKE` cost; revisit if page-local proves too limiting

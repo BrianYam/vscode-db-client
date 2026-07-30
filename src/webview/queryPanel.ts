@@ -129,7 +129,7 @@ export class QueryPanel {
         case "page":
           if (this.previewPath) {
             this.offset = Math.max(0, msg.offset);
-            await this.runPreview(this.previewPath, this.offset);
+            await this.runPreview(this.previewPath, this.offset, false, msg.seq);
           }
           break;
         case "refresh":
@@ -141,14 +141,14 @@ export class QueryPanel {
           if (this.previewPath) {
             this.sort = msg.column ? { column: msg.column, dir: msg.dir } : undefined;
             this.offset = 0;
-            await this.runPreview(this.previewPath, 0);
+            await this.runPreview(this.previewPath, 0, false, msg.seq);
           }
           break;
         case "filter":
           if (this.previewPath) {
             this.columnFilters = (msg.filters ?? []).filter((f: ColumnFilter) => f.value);
             this.offset = 0;
-            await this.runPreview(this.previewPath, 0);
+            await this.runPreview(this.previewPath, 0, false, msg.seq);
           }
           break;
         case "update":
@@ -190,7 +190,12 @@ export class QueryPanel {
     }
   }
 
-  private async runPreview(path: string[], offset: number, fresh = false): Promise<void> {
+  private async runPreview(
+    path: string[],
+    offset: number,
+    fresh = false,
+    seq?: number,
+  ): Promise<void> {
     try {
       const driver = await this.manager.getDriver(this.connectionId);
       const start = Date.now();
@@ -202,7 +207,7 @@ export class QueryPanel {
         columnFilters: this.columnFilters,
       });
       result.elapsedMs = Date.now() - start;
-      this.show(result, fresh);
+      this.show(result, fresh, seq);
     } catch (err) {
       logError("previewTable", err);
       this.post({ type: "error", message: (err as Error).message });
@@ -226,10 +231,11 @@ export class QueryPanel {
     }
   }
 
-  private show(result: QueryResult, fresh = false): void {
+  /** `seq` echoes the webview's request counter so it can drop an out-of-order response. */
+  private show(result: QueryResult, fresh = false, seq?: number): void {
     this.lastResult = result;
     this.lastEditable = result.editable;
-    this.post({ type: "result", result, fresh });
+    this.post({ type: "result", result, fresh, seq });
   }
 
   private async handleUpdate(msg: {
@@ -439,6 +445,9 @@ export class QueryPanel {
            padding: 2px 6px; border-radius: 3px; }
   input.search { width: 160px; }
   #status, #cost, #total { opacity: .8; }
+  #scope { opacity: .8; margin-bottom: 4px; }
+  #scope:empty { display: none; }
+  #scope .warn { color: var(--vscode-editorWarning-foreground); }
   #grid { overflow: auto; max-height: 66vh; border: 1px solid var(--border); }
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid var(--border); padding: 3px 8px; text-align: left;
@@ -509,6 +518,7 @@ export class QueryPanel {
     <span id="total"></span>
   </div>
   <div id="status">Ctrl/Cmd+Enter to run</div>
+  <div id="scope"></div>
   <div id="grid"></div>
 
   <div id="overlay">
@@ -550,15 +560,15 @@ export class QueryPanel {
     let selected = new Set();       // original row indices
     let modalCtx = null;            // { ri, col }
     let filterTimer = null;         // debounce for server-side filtering
-    let lastFilterCol = null;       // which column filter is being typed in
-    let pendingFilterFocus = null;  // set only when a filter request is in flight
+    // Filter/sort/page round-trips can overlap, and a slow one landing last would
+    // otherwise repaint the grid with rows that no longer match the boxes.
+    let reqSeq = 0, renderedSeq = 0;
     const serverBacked = () => !!(raw && raw.page);
     function scheduleServerFilter(){
       clearTimeout(filterTimer);
       filterTimer = setTimeout(() => {
-        pendingFilterFocus = lastFilterCol;
         const arr = Object.entries(filters).filter(([,v]) => v).map(([column,value]) => ({ column, value }));
-        vscode.postMessage({ type:'filter', filters: arr });
+        vscode.postMessage({ type:'filter', filters: arr, seq: ++reqSeq });
       }, 350);
     }
 
@@ -616,7 +626,7 @@ export class QueryPanel {
       if (!raw || !raw.page) return;
       const next = raw.page.offset + dir * raw.page.limit;
       if (next < 0 || next >= raw.page.total) return;
-      vscode.postMessage({ type:'page', offset: next });
+      vscode.postMessage({ type:'page', offset: next, seq: ++reqSeq });
     }
     function deleteSelected() {
       if (!raw || !raw.editable || !selected.size) return;
@@ -642,10 +652,17 @@ export class QueryPanel {
     }
 
     function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+    // The one place a cell becomes text. Search, filters and sort all go through it so
+    // they match what's on screen — a jsonb column arrives as a parsed object, and
+    // String(obj) is "[object Object]", which no search term will ever match.
+    function cellText(v){
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'object') { try { return JSON.stringify(v); } catch (_) { return String(v); } }
+      return String(v);
+    }
     function display(v){
       if (v === null || v === undefined) return '<span class="null">null</span>';
-      if (typeof v === 'object') v = JSON.stringify(v);
-      return esc(v);
+      return esc(cellText(v));
     }
     function metaFor(name){ return (raw.columnsMeta || []).find((m) => m.name === name); }
 
@@ -655,10 +672,10 @@ export class QueryPanel {
       // Per-column filter + sort are done by the DB when server-backed.
       if (!server) for (const [col, txt] of Object.entries(filters)) {
         if (!txt) continue; const t = txt.toLowerCase();
-        rows = rows.filter(({row}) => String(row[col] ?? '').toLowerCase().includes(t));
+        rows = rows.filter(({row}) => cellText(row[col]).toLowerCase().includes(t));
       }
       if (search) rows = rows.filter(({row}) =>
-        raw.columns.some((c) => String(row[c] ?? '').toLowerCase().includes(search)));
+        raw.columns.some((c) => cellText(row[c]).toLowerCase().includes(search)));
       if (!server && sort.col) {
         rows.sort((a, b) => {
           let x = a.row[sort.col], y = b.row[sort.col];
@@ -667,14 +684,30 @@ export class QueryPanel {
           if (y === null || y === undefined) return -1;
           const nx = Number(x), ny = Number(y);
           if (!isNaN(nx) && !isNaN(ny)) return (nx - ny) * sort.dir;
-          return String(x).localeCompare(String(y)) * sort.dir;
+          return cellText(x).localeCompare(cellText(y)) * sort.dir;
         });
       }
       return rows;
     }
 
+    // The global search runs over raw.rows, which for a paginated preview is only the
+    // page in hand — so an empty result means "not on this page", not "not in the table".
+    // Say which, rather than letting it read as a broken search.
+    function pageLocal(){ return serverBacked() && raw.page.total > raw.rows.length; }
+    function updateScope(matched){
+      const el = $('scope');
+      if (!raw || !search) { el.textContent = ''; return; }
+      const loaded = raw.rows.length;
+      if (!pageLocal()) { el.textContent = matched + ' of ' + loaded + ' row(s) match'; return; }
+      const p = raw.page;
+      const page = Math.floor(p.offset / p.limit) + 1, pages = Math.ceil(p.total / p.limit);
+      el.innerHTML = matched + ' of ' + loaded + ' rows on this page match · page ' + page +
+        ' of ' + pages + ' — Total ' + p.total +
+        ' <span class="warn">(search covers the loaded page only)</span>';
+    }
+
     function renderGrid(){
-      if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; return; }
+      if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; updateScope(0); return; }
       const editable = !!raw.editable;
       const view = computeView();
       const allSel = editable && view.length > 0 && view.every(({ri}) => selected.has(ri));
@@ -714,18 +747,31 @@ export class QueryPanel {
         h += '</tr>';
       }
       h += '</tbody></table>';
+      // The filter boxes live inside the grid, so this wipes out the one being typed in.
+      // Whatever had focus goes back afterwards, caret included — re-render can be driven
+      // by a keystroke, a filter response, a sort, a page or a refresh, and every one of
+      // them used to be able to drop the user out of the box mid-word.
+      const keep = focusedFilter();
       gridEl.innerHTML = h;
       wireGrid(editable);
+      if (keep) {
+        const inp = filterBox(keep.col);
+        if (inp) {
+          inp.focus();
+          try { inp.setSelectionRange(keep.start, keep.end); } catch (_) {}
+        }
+      }
       $('delBtn').disabled = !editable || selected.size === 0;
+      updateScope(view.length);
     }
 
-    // Restore focus to a per-column filter box, but ONLY right after a
-    // server-side column-filter response (never on a global-search re-render).
-    function restoreFilterFocus(){
-      if (!pendingFilterFocus) return;
-      const col = pendingFilterFocus; pendingFilterFocus = null;
-      const inp = gridEl.querySelector('input.filter[data-col="' + col.replace(/"/g,'\\\\"') + '"]');
-      if (inp) { inp.focus(); const v = inp.value; inp.value = ''; inp.value = v; }
+    function filterBox(col){
+      return gridEl.querySelector('input.filter[data-col="' + col.replace(/"/g,'\\\\"') + '"]');
+    }
+    function focusedFilter(){
+      const el = document.activeElement;
+      if (!el || !el.classList || !el.classList.contains('filter')) return null;
+      return { col: el.getAttribute('data-col'), start: el.selectionStart, end: el.selectionEnd };
     }
 
     function wireGrid(editable){
@@ -735,7 +781,7 @@ export class QueryPanel {
           const c = th.getAttribute('data-col');
           if (sort.col === c) sort.dir = -sort.dir; else { sort.col = c; sort.dir = 1; }
           if (serverBacked()) {
-            vscode.postMessage({ type:'sort', column: sort.col, dir: sort.dir > 0 ? 'asc' : 'desc' });
+            vscode.postMessage({ type:'sort', column: sort.col, dir: sort.dir > 0 ? 'asc' : 'desc', seq: ++reqSeq });
           } else {
             renderGrid();
           }
@@ -746,7 +792,6 @@ export class QueryPanel {
         inp.addEventListener('input', (e) => {
           const col = inp.getAttribute('data-col');
           filters[col] = e.target.value;
-          lastFilterCol = col;
           if (serverBacked()) { scheduleServerFilter(); } else { renderGrid(); }
         });
       });
@@ -789,13 +834,13 @@ export class QueryPanel {
       const original = raw.rows[ri][col];
       const input = document.createElement('input');
       input.className = 'cell';
-      input.value = (original === null || original === undefined) ? '' : String(original);
+      input.value = cellText(original);
       td.textContent = ''; td.appendChild(input); input.focus(); input.select();
       let done = false;
       const commit = () => {
         if (done) return; done = true;
         const val = input.value;
-        if (String(original ?? '') === val) { td.innerHTML = display(original); return; }
+        if (cellText(original) === val) { td.innerHTML = display(original); return; }
         saveCell(ri, col, val);
       };
       input.addEventListener('keydown', (ev) => {
@@ -876,9 +921,15 @@ export class QueryPanel {
       if (m.type === 'saved') { statusEl.textContent = 'Saved ✓'; return; }
       if (m.type === 'setSql') { sqlEl.value = m.sql; return; }
       if (m.type === 'result') {
+        // Drop a response that a newer request has already overtaken. Results with no
+        // seq (fresh runs, post-edit refreshes) are never stale — always render those.
+        if (m.seq != null) {
+          if (m.seq < renderedSeq) return;
+          renderedSeq = m.seq;
+        }
         raw = m.result; selected.clear();
         // Only reset sort/filters for a brand-new table/query, not sort/filter/page re-runs.
-        if (m.fresh) { sort = { col:null, dir:1 }; filters = {}; search = ''; $('search').value = ''; lastFilterCol = null; }
+        if (m.fresh) { sort = { col:null, dir:1 }; filters = {}; search = ''; $('search').value = ''; }
         // Show the equivalent SQL for table previews so it can be seen/edited.
         if (raw.sql != null) sqlEl.value = raw.sql;
         $('addBtn').disabled = !raw.editable;
@@ -897,8 +948,10 @@ export class QueryPanel {
         }
         statusEl.textContent = (raw.message || (raw.rowCount + ' row(s)')) +
           (raw.editable ? ' · double-click or 🔍 to edit, check rows to delete' : '');
+        // Don't promise more reach than the box has: on a paginated preview it only
+        // sees the loaded page. Column filters (which do hit the DB) still cover the table.
+        $('search').placeholder = pageLocal() ? 'Search this page…' : 'Search results…';
         renderGrid();
-        restoreFilterFocus();
       }
     });
   </script>

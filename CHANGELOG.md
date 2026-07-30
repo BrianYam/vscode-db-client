@@ -16,6 +16,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and search, so it matches what you're looking at. Payloads over ~5 MB ask for confirmation
   first, since a clipboard that large is a problem for whatever you paste into.
 
+### Fixed
+
+- **Typing in a column filter no longer loses focus.** The filter boxes live inside the
+  results grid, so every redraw destroyed the one you were typing in. The old repair only
+  covered a single case and used one slot that the first arriving response consumed — so
+  on plain queries focus died after *every* character, and on table previews it died
+  whenever two filter round-trips overlapped. Focus and caret position are now saved and
+  restored across every redraw, whatever triggered it.
+- **The grid no longer flashes rows that don't match the filters.** A slow response
+  arriving after a newer one would repaint with stale rows; requests are now sequenced and
+  overtaken responses are discarded.
+- **Search and filter now work on JSON columns.** A `jsonb` column arrives as a parsed
+  object, and while the grid rendered it as JSON, search compared against the useless
+  `[object Object]` — so nothing inside a JSON payload was ever findable, and sorting by
+  such a column did nothing. Date columns had the same mismatch. Search, per-column
+  filters, sorting and the inline editor now all read a cell exactly as the grid shows it.
+
+### Changed
+
+- **"Search results…" is now labelled "Search this page…" on paginated previews.** It only
+  ever filtered the rows already loaded, so on a table paged at 100 rows it quietly ignored
+  everything past the first page — which looked like a broken search. The box now says what
+  it covers, and while a search is active a line under the toolbar reports how many of the
+  loaded rows matched, which page you're on and the true total. Per-column filters are
+  unchanged: those run in the database and cover the whole table.
+
 ## [0.3.6] - 2026-07-28
 
 ### Fixed
