@@ -307,3 +307,27 @@ you lose the filters on any result taller than the grid.
       hit-tests to `div.cname` rather than a `td`
 - [ ] `[SDD][M16]` Remaining human check: exercise in the Extension Development Host against
       a live table taller than the grid
+
+## M17 — Clear all filters 🟢  ✅ DONE 2026-07-30
+Goal: one control that drops every active filter. The grid has two independent filtering
+mechanisms (page-local global search + per-column filters, the latter server-side on a
+paginated preview), so clearing them one box at a time was tedious.
+- [x] `[SDD][M17]` `Clear filters` button in the results bar, next to the search box it
+      complements. Resets `filters = {}` and `search = ''` and empties the visible boxes
+- [x] `[SDD][M17]` Both filtering paths reset, not just the inputs: a client-side result
+      just redraws, while a **server-backed** preview also posts
+      `{ type:'filter', filters: [] }` so the database returns the unfiltered page
+- [x] `[SDD][M17]` `clearTimeout(filterTimer)` — clearing mid-debounce would otherwise let
+      the pending 350ms round-trip fire and re-query with the terms just cleared
+- [x] `[SDD][M17]` Disabled when nothing is filtered (`hasAnyFilter()`), so it never looks
+      actionable when it would be a no-op. Synced from `renderGrid()`, plus explicitly in
+      the server-backed filter-input branch — that path debounces instead of redrawing, so
+      the button would otherwise stay stale until the response landed
+- [x] `[SDD][M17]` Sort is deliberately **not** reset — the ask was filters, and losing
+      column order on a "clear filters" click would be a surprise
+- [x] `[SDD][M17]` Verified by running the panel's **real** script body in a browser harness
+      with a stubbed `acquireVsCodeApi`. Client-side: 40 rows → 13 (column filter) → 5
+      (+ search) → 40 after Clear, button re-disabled, all boxes and the scope line empty,
+      zero messages posted. Server-backed: exactly one `filters: []` post, and no stale
+      second round-trip 600ms later
+- [ ] `[SDD][M17]` Remaining human check: exercise in the Extension Development Host

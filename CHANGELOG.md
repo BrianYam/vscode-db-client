@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   everything; closing just one meant right-clicking the node. Stop All is unchanged for
   when you do want the bulk action.
 
+- **Clear filters.** A new results-bar button drops every active filter at once — the search
+  box and all per-column filters — instead of emptying each box by hand. On a paginated
+  preview, where column filters run in the database, it also re-fetches the unfiltered page.
+  It stays disabled while nothing is filtered, so it never looks actionable when it would do
+  nothing. Sort order is left alone.
+
 - **Copy as JSON.** A new results-grid button copies rows straight to the clipboard, no save
   dialog. Check one row and you get a bare object; check several and you get an array. With
   nothing checked — including results that aren't editable and so have no checkboxes — it

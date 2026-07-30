@@ -515,6 +515,7 @@ export class QueryPanel {
     <button id="jsonBtn" class="secondary">Export JSON</button>
     <button id="copyJsonBtn" class="secondary" title="Copy checked rows as JSON — all rows in view if none are checked">Copy as JSON</button>
     <input id="search" class="search" placeholder="Search results…" />
+    <button id="clearFiltersBtn" class="secondary" title="Clear the search box and every column filter" disabled>Clear filters</button>
     <span id="ttlWrap" style="display:none; align-items:center; gap:6px;">
       <span id="ttl" title="Remaining time-to-live"></span>
       <button id="ttlEdit" class="secondary" title="Set this key's expiry">Set TTL…</button>
@@ -598,6 +599,27 @@ export class QueryPanel {
     $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json' }));
     $('copyJsonBtn').addEventListener('click', copyAsJson);
     $('search').addEventListener('input', (e) => { search = e.target.value.toLowerCase(); renderGrid(); });
+
+    const hasAnyFilter = () => !!search || Object.values(filters).some((v) => v);
+    function syncClearBtn(){ $('clearFiltersBtn').disabled = !hasAnyFilter(); }
+
+    // Drop the search term and every column filter in one go. The two are
+    // applied in different places — search is always client-side, while column
+    // filters hit the database on a paginated preview — so both paths have to be
+    // reset, not just the boxes.
+    function clearFilters(){
+      if (!hasAnyFilter()) return;
+      filters = {}; search = '';
+      $('search').value = '';
+      // Cancel a debounced filter still in flight, or it would re-query with the
+      // terms we just cleared.
+      clearTimeout(filterTimer);
+      // Redraw first so the boxes empty immediately; a server-backed preview then
+      // needs a round-trip to get the unfiltered rows back.
+      renderGrid();
+      if (serverBacked()) vscode.postMessage({ type:'filter', filters: [], seq: ++reqSeq });
+    }
+    $('clearFiltersBtn').addEventListener('click', clearFilters);
     sqlEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
     });
@@ -772,6 +794,7 @@ export class QueryPanel {
         }
       }
       syncHeaderOffset();
+      syncClearBtn();
       $('delBtn').disabled = !editable || selected.size === 0;
       updateScope(view.length);
     }
@@ -815,7 +838,9 @@ export class QueryPanel {
         inp.addEventListener('input', (e) => {
           const col = inp.getAttribute('data-col');
           filters[col] = e.target.value;
-          if (serverBacked()) { scheduleServerFilter(); } else { renderGrid(); }
+          // The server-backed path debounces instead of redrawing, so the Clear
+          // button would stay stale until the response landed.
+          if (serverBacked()) { syncClearBtn(); scheduleServerFilter(); } else { renderGrid(); }
         });
       });
       gridEl.querySelectorAll('.relbtn').forEach((b) => {
