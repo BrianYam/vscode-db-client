@@ -452,8 +452,11 @@ export class QueryPanel {
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid var(--border); padding: 3px 8px; text-align: left;
            white-space: pre; vertical-align: top; }
+  /* z-index keeps the header above the body cells, which are positioned
+     (td.editable / td.fkcell are relative) and would otherwise paint over it as
+     they scroll underneath. See .filterRow th for the second header row. */
   th { background: var(--vscode-editorWidget-background); position: sticky; top: 0;
-       cursor: pointer; }
+       cursor: pointer; z-index: 3; }
   th .cname { font-weight: 600; }
   th .ctype { opacity: .6; font-weight: 400; font-size: 11px; }
   th .sort { opacity: .5; font-size: 10px; }
@@ -474,7 +477,14 @@ export class QueryPanel {
   .null { opacity: .5; font-style: italic; }
   .chk { width: 22px; text-align: center; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
-  .filterRow th { position: static; padding: 2px; }
+  /* Second sticky header row, pinned directly below the name row. This was
+     position:static, which — being more specific than the th rule above —
+     silently opted the filter boxes out of the sticky header, so they scrolled
+     away with the body and you lost the filters on any result taller than the
+     grid. The top offset must be the name row's real height, which varies with
+     the type sub-label and the user's font, so syncHeaderOffset() measures it
+     into --hdr-h after every render. */
+  .filterRow th { position: sticky; top: var(--hdr-h, 0px); z-index: 2; padding: 2px; }
   .filterRow input { width: 100%; box-sizing: border-box; }
   /* cell-detail modal */
   #overlay { position: fixed; inset: 0; background: #0008; display: none;
@@ -761,9 +771,22 @@ export class QueryPanel {
           try { inp.setSelectionRange(keep.start, keep.end); } catch (_) {}
         }
       }
+      syncHeaderOffset();
       $('delBtn').disabled = !editable || selected.size === 0;
       updateScope(view.length);
     }
+
+    // Pin the filter row directly under the name row. Measured, not hard-coded:
+    // the name row grows when columns carry a type sub-label, and the font is
+    // the user's. Runs after every render, and again on resize because a column
+    // name wrapping onto a second line changes the row's height.
+    function syncHeaderOffset(){
+      const nameRow = gridEl.querySelector('thead tr');
+      if (!nameRow) return;
+      const h = nameRow.getBoundingClientRect().height;
+      if (h) gridEl.style.setProperty('--hdr-h', h + 'px');
+    }
+    window.addEventListener('resize', syncHeaderOffset);
 
     function filterBox(col){
       return gridEl.querySelector('input.filter[data-col="' + col.replace(/"/g,'\\\\"') + '"]');

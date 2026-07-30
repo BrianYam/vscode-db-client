@@ -280,3 +280,30 @@ right-click the node. With many saved connections open at once, that's the commo
 - [x] `[SDD][M15]` Gated on `viewItem == connectionActive`, so the icon appears only on
       connections that are actually live and vanishes the moment one is closed. The
       right-click entry stays for discoverability; **Stop All** stays as the bulk action
+
+## M16 — Sticky grid filter row 🟢  ✅ DONE 2026-07-30
+Bug: scroll a long result set and the per-column filter boxes scroll away with the body, so
+you lose the filters on any result taller than the grid.
+- [x] `[SDD][M16]` Root cause: `.filterRow th { position: static }` — a single declaration
+      that opted the second header row out of the sticky header entirely. It outranks the
+      generic `th { position: sticky; top: 0 }` on specificity (0,1,1 vs 0,0,1), so the name
+      row stuck and the filter row did not
+- [x] `[SDD][M16]` Fix: `.filterRow th { position: sticky; top: var(--hdr-h, 0px);
+      z-index: 2; padding: 2px }` — one rule now owns the filter row's stickiness, so there
+      is no second place to override it from
+- [x] `[SDD][M16]` `--hdr-h` is **measured** in `syncHeaderOffset()` after every render, not
+      hard-coded: the name row's height varies with the optional type sub-label and the
+      user's editor font. Re-run on `window.resize` (a wrapping column name changes it).
+      A constant here would either overlap the names or leave a gap
+- [x] `[SDD][M16]` Second bug fixed in the same pass: `th` had no `z-index`, while
+      `td.editable` / `td.fkcell` are `position: relative`. Both at auto z-index → body
+      cells painted *over* the sticky header as they scrolled under it. `th` is now
+      `z-index: 3`, the filter row `2`
+- [x] `[SDD][M16]` Verified against the **real** stylesheet extracted from `queryPanel.ts`
+      (a hand-written repro missed the `position: static` rule and mis-diagnosed the cause
+      first time round). At `scrollTop 800`: filter row `position=sticky`, `top=35px` =
+      measured name-row height, `elementFromPoint` on the filter box returns that input
+      (so it is clickable, not merely visible), focus + typing work, and the name row
+      hit-tests to `div.cname` rather than a `td`
+- [ ] `[SDD][M16]` Remaining human check: exercise in the Extension Development Host against
+      a live table taller than the grid

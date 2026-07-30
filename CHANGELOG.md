@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The results-grid filter row now stays pinned while you scroll.** The grid has two header
+  rows — the column names and the per-column filter boxes — but only the names row was
+  actually pinned; the filter row scrolled away with the rows, so on any result taller than
+  the grid you lost the filters until you scrolled back to the top. The filter row now stays
+  put directly below the column names. Body rows also no longer paint over the header as they
+  scroll past it.
 - **Typing in a column filter no longer loses focus.** The filter boxes live inside the
   results grid, so every redraw destroyed the one you were typing in. The old repair only
   covered a single case and used one slot that the first arriving response consumed — so
