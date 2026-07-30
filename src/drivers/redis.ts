@@ -1,6 +1,6 @@
 import Redis from "ioredis";
 import { type ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
-import type { ColumnMeta, Driver, QueryResult, TreeItemData } from "./Driver";
+import type { ColumnMeta, Driver, QueryResult, SchemaHints, TreeItemData } from "./Driver";
 import { buildTls } from "./ssl";
 
 /** Max keys listed under one db node before the list is marked truncated. */
@@ -323,7 +323,9 @@ export class RedisDriver implements Driver {
     return [];
   }
 
-  async schemaHints(): Promise<{ tables: string[]; columns: string[] }> {
+  /** Redis has no tables or columns. Its completion vocabulary is the command
+   *  set, which comes from `sqlDialect.ts` and needs no round-trip. */
+  async schemaHints(): Promise<SchemaHints> {
     return { tables: [], columns: [] };
   }
 

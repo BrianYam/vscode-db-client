@@ -1,56 +1,26 @@
 import * as vscode from "vscode";
 import type { ConnectionManager } from "./connections/manager";
 import type { QueryStore } from "./connections/queryStore";
+import type { ConnectionStore } from "./connections/store";
+import type { SchemaHints } from "./drivers/Driver";
 import { logInfo } from "./log";
+import { type Candidate, suggest } from "./sqlComplete";
+import { canFormat, formatSql, vocabularyFor } from "./sqlDialect";
 
-const KEYWORDS = [
-  "SELECT",
-  "FROM",
-  "WHERE",
-  "INSERT INTO",
-  "UPDATE",
-  "DELETE FROM",
-  "VALUES",
-  "SET",
-  "JOIN",
-  "LEFT JOIN",
-  "RIGHT JOIN",
-  "INNER JOIN",
-  "OUTER JOIN",
-  "ON",
-  "GROUP BY",
-  "ORDER BY",
-  "HAVING",
-  "LIMIT",
-  "OFFSET",
-  "DISTINCT",
-  "AS",
-  "AND",
-  "OR",
-  "NOT",
-  "NULL",
-  "IS NULL",
-  "IS NOT NULL",
-  "IN",
-  "LIKE",
-  "BETWEEN",
-  "COUNT",
-  "SUM",
-  "AVG",
-  "MIN",
-  "MAX",
-  "ASC",
-  "DESC",
-  "RETURNING",
-  "WITH",
-  "CASE",
-  "WHEN",
-  "THEN",
-  "ELSE",
-  "END",
-  "UNION",
-  "EXISTS",
-];
+/**
+ * Cap on items handed to VS Code. It applies its own prefix filtering on top, so
+ * this only keeps the payload sane on a wide schema.
+ */
+const MAX_NATIVE_ITEMS = 400;
+
+/** Our candidate kinds → the icons VS Code draws in its completion list. */
+const NATIVE_KIND: Record<Candidate["kind"], vscode.CompletionItemKind> = {
+  column: vscode.CompletionItemKind.Field,
+  table: vscode.CompletionItemKind.Struct,
+  keyword: vscode.CompletionItemKind.Keyword,
+  function: vscode.CompletionItemKind.Function,
+  dataType: vscode.CompletionItemKind.TypeParameter,
+};
 
 interface Binding {
   connId: string;
@@ -76,8 +46,9 @@ export function registerSqlFeatures(
   ctx: vscode.ExtensionContext,
   queries: QueryStore,
   manager: ConnectionManager,
+  store: ConnectionStore,
 ): void {
-  const hintCache = new Map<string, { tables: string[]; columns: string[] }>();
+  const hintCache = new Map<string, SchemaHints>();
 
   const bindingFor = (uri: vscode.Uri): Binding | undefined => {
     return bindings.get(uri.toString()) ?? queries.resolveUri(uri);
@@ -101,36 +72,45 @@ export function registerSqlFeatures(
     vscode.languages.registerCompletionItemProvider(
       selector,
       {
-        async provideCompletionItems(document) {
+        async provideCompletionItems(document, position) {
           const b = bindingFor(document.uri);
           if (!b) {
             return undefined;
           }
-          let hints: { tables: string[]; columns: string[] };
+          let hints: SchemaHints;
           try {
             hints = await hintsFor(b);
           } catch {
             hints = { tables: [], columns: [] };
           }
-          const items: vscode.CompletionItem[] = [];
-          for (const t of hints.tables) {
-            const it = new vscode.CompletionItem(t, vscode.CompletionItemKind.Struct);
-            it.detail = "table";
-            it.sortText = `0${t}`;
-            items.push(it);
-          }
-          for (const c of hints.columns) {
-            const it = new vscode.CompletionItem(c, vscode.CompletionItemKind.Field);
-            it.detail = "column";
-            it.sortText = `1${c}`;
-            items.push(it);
-          }
-          for (const k of KEYWORDS) {
-            const it = new vscode.CompletionItem(k, vscode.CompletionItemKind.Keyword);
-            it.sortText = `2${k}`;
-            items.push(it);
-          }
-          return items;
+          // Same engine the query panel uses, so both surfaces are dialect-aware,
+          // table-aware and context-aware from one implementation.
+          const type = store.get(b.connId)?.type ?? "postgres";
+          const vocab = vocabularyFor(type);
+          const textBeforeCaret = document.getText(
+            new vscode.Range(new vscode.Position(0, 0), position),
+          );
+          const { items } = suggest(
+            textBeforeCaret,
+            {
+              tables: hints.tables,
+              columns: hints.columns,
+              columnsByTable: hints.columnsByTable,
+              keywords: vocab.keywords,
+              functions: vocab.functions,
+              dataTypes: vocab.dataTypes,
+            },
+            // Generous: VS Code does its own prefix filtering on top, so the cap
+            // only needs to keep the payload sane.
+            MAX_NATIVE_ITEMS,
+          );
+          return items.map((c, i) => {
+            const it = new vscode.CompletionItem(c.label, NATIVE_KIND[c.kind]);
+            it.detail = c.detail ?? c.kind;
+            // Preserve our ranking; VS Code sorts lexicographically on sortText.
+            it.sortText = String(i).padStart(4, "0");
+            return it;
+          });
         },
       },
       " ",
@@ -138,6 +118,36 @@ export function registerSqlFeatures(
       ",",
       "(", // trigger characters (also Ctrl+Space)
     ),
+
+    // Shift+Alt+F on a query file. Uses the connection's type for the dialect —
+    // read from the store, not the driver, so formatting never forces a connect.
+    vscode.languages.registerDocumentFormattingEditProvider(selector, {
+      provideDocumentFormattingEdits(document, options) {
+        const b = bindingFor(document.uri);
+        const type = b && store.get(b.connId)?.type;
+        if (!type || !canFormat(type)) {
+          return undefined;
+        }
+        const original = document.getText();
+        let formatted: string;
+        try {
+          formatted = formatSql(original, type, { tabWidth: options.tabSize });
+        } catch (err) {
+          // Returning no edits leaves the document untouched, which is the whole
+          // point — a parse error must never mangle the user's query.
+          void vscode.window.showErrorMessage(`Format failed: ${(err as Error).message}`);
+          return undefined;
+        }
+        if (formatted === original) {
+          return undefined;
+        }
+        const whole = new vscode.Range(
+          document.positionAt(0),
+          document.positionAt(original.length),
+        );
+        return [vscode.TextEdit.replace(whole, formatted)];
+      },
+    }),
 
     vscode.languages.registerCodeLensProvider(selector, {
       provideCodeLenses(document) {

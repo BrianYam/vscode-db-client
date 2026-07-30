@@ -32,7 +32,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const manager = new ConnectionManager(store);
   const queries = new QueryStore(ctx.globalStorageUri);
   const tree = new DatabaseTreeProvider(store, manager, ctx.extensionUri, queries);
-  registerSqlFeatures(ctx, queries, manager);
+  registerSqlFeatures(ctx, queries, manager, store);
 
   ctx.subscriptions.push(
     vscode.window.createTreeView("openDbClient.connections", {

@@ -7,8 +7,10 @@ import type {
   ForeignKey,
   PreviewOptions,
   QueryResult,
+  SchemaHints,
   TreeItemData,
 } from "./Driver";
+import { groupColumns } from "./hints";
 import { displayIdent as di, quoteIdent as qi } from "./ident";
 import { displaySql, tableFolders } from "./postgres";
 
@@ -297,20 +299,23 @@ export class SqliteDriver implements Driver {
     }));
   }
 
-  async schemaHints(): Promise<{ tables: string[]; columns: string[] }> {
+  async schemaHints(): Promise<SchemaHints> {
     const res = this.d.exec(
       `SELECT name FROM sqlite_master WHERE type IN ('table','view')
        AND name NOT LIKE 'sqlite_%' ORDER BY name`,
     );
     const tables = res[0]?.values.map((r) => String(r[0])) ?? [];
-    const columns = new Set<string>();
+    // This already walked table_info per table — it just discarded which table
+    // each column came from. Keep the pairs so they can be grouped.
+    const pairs: Array<{ table: string; column: string }> = [];
     for (const t of tables) {
       const info = this.d.exec(`PRAGMA table_info(${qi(t)})`);
       info[0]?.values.forEach((r) => {
-        columns.add(String(r[1]));
+        pairs.push({ table: t, column: String(r[1]) });
       });
     }
-    return { tables, columns: [...columns] };
+    // A local file is fully enumerated, so nothing is ever truncated here.
+    return { tables, ...groupColumns(pairs) };
   }
 
   async getDDL(path: string[]): Promise<string> {

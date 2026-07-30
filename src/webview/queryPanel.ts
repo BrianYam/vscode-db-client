@@ -2,14 +2,18 @@ import * as fs from "node:fs";
 import * as vscode from "vscode";
 import type { ConnectionManager } from "../connections/manager";
 import type { ConnectionStore } from "../connections/store";
+import type { DatabaseType } from "../connections/types";
 import type {
   ColumnFilter,
   EditTarget,
   PreviewFilter,
   QueryResult,
+  SchemaHints,
   SortSpec,
 } from "../drivers/Driver";
 import { logError } from "../log";
+import { suggest } from "../sqlComplete";
+import { canFormat, formatSql, vocabularyFor } from "../sqlDialect";
 
 interface PanelOptions {
   initialSql?: string;
@@ -81,13 +85,46 @@ export class QueryPanel {
   private offset = 0;
   private sort?: SortSpec;
   private columnFilters?: ColumnFilter[];
+  private hints?: SchemaHints;
+  private hintsDb?: string;
+  private hintsPending = false;
   private disposed = false;
 
   private rerun(sql: string, database?: string): void {
     this.previewPath = undefined;
     this.database = database;
     this.post({ type: "setSql", sql });
+    // The panel may now target a different database — keep the badge honest.
+    this.post({ type: "context", label: this.contextLabel(), tooltip: this.contextTooltip() });
     void this.run(sql);
+  }
+
+  /**
+   * What this panel's queries actually run against. The database is a hard
+   * binding (`driver.query(sql, database)`); the SCHEMA deliberately is not
+   * shown — a session isn't pinned to one, unqualified names resolve through
+   * search_path, and suggestions already cover every schema's tables.
+   */
+  private contextLabel(): string {
+    const config = this.store.get(this.connectionId);
+    if (!config) {
+      return "";
+    }
+    if (config.type === "sqlite") {
+      return basename(config.filePath ?? "");
+    }
+    if (config.type === "redis") {
+      return `db${this.database ?? config.redisDb ?? 0}`;
+    }
+    return this.database ?? config.database ?? "default DB";
+  }
+
+  private contextTooltip(): string {
+    const name = this.store.get(this.connectionId)?.name ?? "this connection";
+    return (
+      `Queries in this panel run against "${this.contextLabel()}" on ${name}. ` +
+      `To target another database, use New Query on that database in the tree.`
+    );
   }
 
   private constructor(
@@ -99,6 +136,16 @@ export class QueryPanel {
   ) {
     const config = this.store.get(connectionId);
     this.database = options.database;
+    // A preview's path starts with the database on multi-database engines
+    // (postgres/mysql: db name, redis: db number). Bind the panel to it, so that
+    // Run on the shown SQL and completion hints target the database the preview
+    // came from — not the connection's entry database. Previewing
+    // drizzle.__drizzle_migrations and hitting Run used to fail with
+    // "relation does not exist" precisely because of this gap. SQLite is
+    // excluded: its path[0] is a table name, and it has one database anyway.
+    if (this.database === undefined && options.previewPath?.length && config?.type !== "sqlite") {
+      this.database = options.previewPath[0];
+    }
     this.filePath = options.filePath;
     const title = options.filePath
       ? basename(options.filePath)
@@ -115,6 +162,7 @@ export class QueryPanel {
       options.initialSql ?? "",
       config?.type ?? "postgres",
       !!options.filePath,
+      this.contextLabel(),
     );
     this.panel.onDidDispose(() => (this.disposed = true));
 
@@ -177,6 +225,12 @@ export class QueryPanel {
             fs.writeFileSync(this.filePath, String(msg.sql ?? ""), "utf8");
             this.post({ type: "saved" });
           }
+          break;
+        case "format":
+          this.handleFormat(String(msg.sql ?? ""));
+          break;
+        case "complete":
+          await this.handleComplete(String(msg.text ?? ""), Number(msg.seq ?? 0));
           break;
       }
     });
@@ -411,12 +465,100 @@ export class QueryPanel {
     );
   }
 
+  /**
+   * Schema names for completion, fetched lazily and cached.
+   *
+   * Only ever loaded when the connection is ALREADY live: typing in the editor
+   * must never trigger a connect (and a password prompt) as a side effect.
+   * Until then completion still works off the dialect vocabulary, which needs no
+   * connection at all.
+   */
+  private async ensureHints(): Promise<void> {
+    // Keyed by database: a panel can be re-pointed (rerun, preview) at another
+    // database on the same server, and serving the old database's tables is
+    // exactly the "suggestions stopped working" failure mode.
+    if (
+      (this.hints && this.hintsDb === this.database) ||
+      !this.manager.isConnected(this.connectionId)
+    ) {
+      return;
+    }
+    // One fetch at a time — completion fires per keystroke, and a slow catalog
+    // read shouldn't be issued five times in parallel.
+    if (this.hintsPending) {
+      return;
+    }
+    this.hintsPending = true;
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      const forDb = this.database;
+      this.hints = await driver.schemaHints(forDb);
+      this.hintsDb = forDb;
+    } catch (err) {
+      // Completion is an assist, never an error path — fall back to vocabulary.
+      logError("schemaHints", err);
+    } finally {
+      this.hintsPending = false;
+    }
+  }
+
+  /**
+   * Answer a completion request. The reasoning lives in `sqlComplete.ts` (pure
+   * and unit-tested) rather than in the webview, so this is the bridge: text in,
+   * ranked items out. `seq` guards against an older reply landing last, the same
+   * way the results grid does.
+   */
+  private async handleComplete(textBeforeCaret: string, seq: number): Promise<void> {
+    await this.ensureHints();
+    const type = this.store.get(this.connectionId)?.type ?? "postgres";
+    const vocab = vocabularyFor(type);
+    const { items, truncated } = suggest(textBeforeCaret, {
+      tables: this.hints?.tables ?? [],
+      columns: this.hints?.columns ?? [],
+      columnsByTable: this.hints?.columnsByTable,
+      keywords: vocab.keywords,
+      functions: vocab.functions,
+      dataTypes: vocab.dataTypes,
+    });
+    this.post({
+      type: "completions",
+      items,
+      seq,
+      // Two independent truncations to be honest about: the visible list was cut,
+      // and/or the schema itself was too big to read fully.
+      listTruncated: truncated,
+      schemaTruncated: !!this.hints?.truncated,
+    });
+  }
+
+  /** Format the editor's contents in place. On a parse error the buffer is left
+   *  exactly as typed — a half-parsed reformat would destroy unrecoverable work. */
+  private handleFormat(sql: string): void {
+    const type = this.store.get(this.connectionId)?.type;
+    if (!type || !canFormat(type)) {
+      return;
+    }
+    try {
+      const formatted = formatSql(sql, type, {
+        tabWidth: vscode.workspace.getConfiguration("editor").get<number>("tabSize") ?? 2,
+      });
+      if (formatted !== sql) {
+        this.post({ type: "setSql", sql: formatted });
+      }
+      this.post({ type: "status", message: "Formatted ✓" });
+    } catch (err) {
+      this.post({ type: "status", message: `Format failed: ${(err as Error).message}` });
+    }
+  }
+
   private post(msg: Record<string, unknown>): void {
     void this.panel.webview.postMessage(msg);
   }
 
-  private render(initialSql: string, dbType: string, hasFile: boolean): string {
+  private render(initialSql: string, dbType: string, hasFile: boolean, dbLabel: string): string {
     const placeholder = dbType === "redis" ? "GET mykey" : "SELECT * FROM ... LIMIT 100";
+    // Redis has no SQL dialect, so the button is omitted rather than shown inert.
+    const formattable = canFormat(dbType as DatabaseType);
     const nonce = String(Date.now());
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -444,6 +586,13 @@ export class QueryPanel {
            color: var(--vscode-input-foreground); border: 1px solid var(--border);
            padding: 2px 6px; border-radius: 3px; }
   input.search { width: 160px; }
+  /* Which database this panel's queries actually hit. Deliberately visible — a
+     panel silently bound to the wrong database is how "relation does not exist"
+     surprises happen on multi-database servers. */
+  #dbctx { padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px;
+           opacity: .85; white-space: nowrap; max-width: 180px; overflow: hidden;
+           text-overflow: ellipsis; cursor: default; }
+  #dbctx:empty { display: none; }
   #status, #cost, #total { opacity: .8; }
   #scope { opacity: .8; margin-bottom: 4px; }
   #scope:empty { display: none; }
@@ -474,6 +623,33 @@ export class QueryPanel {
   td input.cell { width: 100%; box-sizing: border-box; font: inherit;
              background: var(--vscode-input-background); color: var(--vscode-input-foreground);
              border: 1px solid var(--vscode-focusBorder); }
+  /* --- completion dropdown --- */
+  /* Invisible clone of the editor used only to measure where the caret is on
+     screen; a textarea exposes no caret coordinates of its own. */
+  #acmirror { position: absolute; top: 0; left: 0; visibility: hidden;
+              white-space: pre-wrap; word-wrap: break-word; pointer-events: none;
+              z-index: -1; }
+  #ac { position: fixed; z-index: 50; display: none; max-height: 240px;
+        overflow-y: auto; min-width: 220px; max-width: 420px;
+        background: var(--vscode-editorWidget-background, #252526);
+        border: 1px solid var(--vscode-editorWidget-border, var(--border));
+        box-shadow: 0 2px 8px #0006; padding: 2px 0; }
+  #ac .row { display: flex; align-items: baseline; gap: 6px; padding: 2px 8px;
+             cursor: pointer; white-space: nowrap; }
+  #ac .row.sel { background: var(--vscode-list-activeSelectionBackground, #04395e);
+                 color: var(--vscode-list-activeSelectionForeground, #fff); }
+  #ac .ico { width: 1em; text-align: center; opacity: .85; flex: none; }
+  #ac .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  #ac .det { opacity: .55; font-size: 11px; }
+  /* Per-kind colour so keyword / function / table / column are distinguishable
+     at a glance, as in the reference clients. */
+  #ac .k-keyword  .ico { color: var(--vscode-symbolIcon-keywordForeground, #c586c0); }
+  #ac .k-function .ico { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
+  #ac .k-table    .ico { color: var(--vscode-symbolIcon-structForeground, #4ec9b0); }
+  #ac .k-column   .ico { color: var(--vscode-symbolIcon-fieldForeground, #9cdcfe); }
+  #ac .k-dataType .ico { color: var(--vscode-symbolIcon-typeParameterForeground, #569cd6); }
+  #ac .more { padding: 2px 8px; opacity: .6; font-size: 11px; font-style: italic;
+              border-top: 1px solid var(--border); }
   .null { opacity: .5; font-style: italic; }
   .chk { width: 22px; text-align: center; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
@@ -509,6 +685,8 @@ export class QueryPanel {
     <button id="runBtn">Run ▶</button>
     ${hasFile ? '<button id="saveBtn" class="secondary" title="Save to file (Cmd/Ctrl+S)">💾 Save</button>' : ""}
     <button id="refreshBtn" class="secondary" title="Refresh">⟳</button>
+    <span id="dbctx" title="${escapeHtml(this.contextTooltip())}">${escapeHtml(dbLabel)}</span>
+    ${formattable ? '<button id="formatBtn" class="secondary" title="Format SQL (Shift+Alt+F)">Format</button>' : ""}
     <button id="addBtn" class="secondary" title="Add row" disabled>＋ Row</button>
     <button id="delBtn" class="secondary" title="Delete selected rows" disabled>🗑 Delete</button>
     <button id="csvBtn" class="secondary">Export CSV</button>
@@ -528,6 +706,7 @@ export class QueryPanel {
     <button id="nextBtn" class="secondary" disabled>›</button>
     <span id="total"></span>
   </div>
+  <div id="ac"></div>
   <div id="status">Ctrl/Cmd+Enter to run</div>
   <div id="scope"></div>
   <div id="grid"></div>
@@ -595,6 +774,20 @@ export class QueryPanel {
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveFile(); }
     });
     $('refreshBtn').addEventListener('click', () => vscode.postMessage({ type:'refresh' }));
+    // Formatting runs on the host (that is where sql-formatter lives). The reply
+    // is a normal setSql, so an unparseable statement simply never comes back and
+    // the editor keeps what the user typed.
+    if ($('formatBtn')) {
+      $('formatBtn').addEventListener('click', () => {
+        vscode.postMessage({ type:'format', sql: sqlEl.value });
+      });
+    }
+    window.addEventListener('keydown', (e) => {
+      if (e.shiftKey && e.altKey && (e.key === 'F' || e.key === 'f')) {
+        e.preventDefault();
+        if ($('formatBtn')) vscode.postMessage({ type:'format', sql: sqlEl.value });
+      }
+    });
     $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv' }));
     $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json' }));
     $('copyJsonBtn').addEventListener('click', copyAsJson);
@@ -622,6 +815,128 @@ export class QueryPanel {
     $('clearFiltersBtn').addEventListener('click', clearFilters);
     sqlEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
+    });
+
+    // ---------------- completion dropdown ----------------
+    // The reasoning lives on the host (sqlComplete.ts, unit-tested); this owns
+    // only the UI: where to draw, what is selected, and how to insert.
+    const acEl = $('ac');
+    let acItems = [], acSel = 0, acOpen = false, acMore = false;
+    let acSeq = 0, acRendered = 0, acComposing = false;
+    const ICON = { keyword:'◇', function:'ƒ', table:'▦', column:'▪', dataType:'T' };
+
+    // A textarea gives no caret coordinates, so measure with a hidden clone that
+    // has identical text metrics and read the offset of a marker at the caret.
+    let mirror = null;
+    function caretPoint(){
+      if (!mirror) { mirror = document.createElement('div'); mirror.id = 'acmirror'; document.body.appendChild(mirror); }
+      const cs = getComputedStyle(sqlEl);
+      for (const p of ['fontFamily','fontSize','fontWeight','fontStyle','letterSpacing',
+                       'lineHeight','textTransform','paddingTop','paddingRight','paddingBottom',
+                       'paddingLeft','borderTopWidth','borderLeftWidth','boxSizing','tabSize']) {
+        mirror.style[p] = cs[p];
+      }
+      mirror.style.width = sqlEl.clientWidth + 'px';
+      mirror.textContent = sqlEl.value.slice(0, sqlEl.selectionStart);
+      const marker = document.createElement('span');
+      marker.textContent = '\\u200b';
+      mirror.appendChild(marker);
+      const box = sqlEl.getBoundingClientRect();
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+      return {
+        // Drop the list one line below the caret so it never covers what is typed.
+        top: box.top + marker.offsetTop - sqlEl.scrollTop + lh,
+        left: box.left + marker.offsetLeft - sqlEl.scrollLeft,
+        lineHeight: lh,
+      };
+    }
+
+    function acClose(){ acOpen = false; acEl.style.display = 'none'; acItems = []; }
+
+    function acRender(){
+      if (!acItems.length) { acClose(); return; }
+      let h = '';
+      acItems.forEach((it, i) => {
+        h += '<div class="row k-'+it.kind+(i===acSel?' sel':'')+'" data-i="'+i+'">' +
+             '<span class="ico">'+(ICON[it.kind]||'•')+'</span>' +
+             '<span class="lbl">'+esc(it.label)+'</span>' +
+             (it.detail ? '<span class="det">'+esc(it.detail)+'</span>' : '') + '</div>';
+      });
+      // Never imply the list is everything when it isn't.
+      if (acMore) h += '<div class="more">more matches — keep typing to narrow</div>';
+      acEl.innerHTML = h;
+      const pt = caretPoint();
+      acEl.style.display = 'block';
+      acOpen = true;
+      // Measure after display so the height is real, then flip above the caret
+      // when there is not enough room below.
+      const h2 = acEl.offsetHeight;
+      const below = window.innerHeight - pt.top;
+      acEl.style.top = (h2 > below && pt.top - pt.lineHeight - h2 > 0
+        ? pt.top - pt.lineHeight - h2 : pt.top) + 'px';
+      acEl.style.left = Math.min(pt.left, window.innerWidth - acEl.offsetWidth - 8) + 'px';
+      const sel = acEl.querySelector('.row.sel');
+      if (sel) sel.scrollIntoView({ block: 'nearest' });
+    }
+
+    function acRequest(){
+      if (acComposing) return;
+      // Never awaits the database: the host replies from cached hints, and a
+      // stale reply is dropped by seq (same guard the results grid uses).
+      vscode.postMessage({ type:'complete', text: sqlEl.value.slice(0, sqlEl.selectionStart), seq: ++acSeq });
+    }
+
+    function acAccept(){
+      const it = acItems[acSel];
+      if (!it) return;
+      const caret = sqlEl.selectionStart;
+      const v = sqlEl.value;
+      // Replace just the identifier being typed. Word chars only, so a preceding
+      // "." or quote is preserved.
+      let start = caret;
+      while (start > 0 && /[A-Za-z0-9_$#]/.test(v[start-1])) start--;
+      // Trailing space is a convenience for typing on, but not when it would
+      // double up an existing one (accepting mid-statement).
+      const insert = it.label + (/^\\s/.test(v.slice(caret)) ? '' : ' ');
+      sqlEl.value = v.slice(0, start) + insert + v.slice(caret);
+      const pos = start + insert.length;
+      sqlEl.setSelectionRange(pos, pos);
+      acClose();
+      sqlEl.focus();
+    }
+
+    sqlEl.addEventListener('input', acRequest);
+    // IME: a composing keystroke is not a completion trigger, and committing one
+    // should not leave a stale list open.
+    sqlEl.addEventListener('compositionstart', () => { acComposing = true; acClose(); });
+    sqlEl.addEventListener('compositionend', () => { acComposing = false; acRequest(); });
+    sqlEl.addEventListener('blur', acClose);
+    sqlEl.addEventListener('scroll', () => { if (acOpen) acRender(); });
+
+    // Registered before the Ctrl+Enter handler above only in the sense that it
+    // handles UNMODIFIED keys — Ctrl/Cmd+Enter and Cmd+S never reach here as
+    // completion keys, so both keep working while the list is open.
+    sqlEl.addEventListener('keydown', (e) => {
+      if (!acOpen) {
+        // Ctrl/Cmd+Space asks explicitly, which is what people expect.
+        if ((e.ctrlKey || e.metaKey) && e.key === ' ') { e.preventDefault(); acRequest(); }
+        return;
+      }
+      if (e.key === 'ArrowDown') { e.preventDefault(); acSel = (acSel+1) % acItems.length; acRender(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); acSel = (acSel-1+acItems.length) % acItems.length; acRender(); }
+      else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); acAccept(); }
+      else if (e.key === 'Tab') { e.preventDefault(); acAccept(); }
+      // Only closes the list — the panel itself is unaffected.
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); acClose(); }
+    });
+
+    acEl.addEventListener('mousedown', (e) => {
+      // mousedown, not click: blur would close the list before click landed.
+      const row = e.target.closest('.row');
+      if (!row) return;
+      e.preventDefault();
+      acSel = Number(row.getAttribute('data-i'));
+      acAccept();
     });
 
     $('prevBtn').addEventListener('click', () => pageBy(-1));
@@ -967,6 +1282,25 @@ export class QueryPanel {
         return;
       }
       if (m.type === 'saved') { statusEl.textContent = 'Saved ✓'; return; }
+      if (m.type === 'status') { statusEl.textContent = m.message; return; }
+      if (m.type === 'context') {
+        $('dbctx').textContent = m.label;
+        $('dbctx').title = m.tooltip;
+        return;
+      }
+      if (m.type === 'completions') {
+        // Drop a reply that a newer request has already overtaken.
+        if (m.seq < acRendered) return;
+        acRendered = m.seq;
+        // Only show the list while the editor has focus — a reply can land after
+        // the user has clicked away.
+        if (document.activeElement !== sqlEl) { acClose(); return; }
+        acItems = m.items || [];
+        acMore = !!m.listTruncated || !!m.schemaTruncated;
+        acSel = 0;
+        acRender();
+        return;
+      }
       if (m.type === 'setSql') { sqlEl.value = m.sql; return; }
       if (m.type === 'result') {
         // Drop a response that a newer request has already overtaken. Results with no

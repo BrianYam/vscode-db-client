@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Autocomplete in the query editor.** Typing now suggests tables, columns, keywords,
+  functions and data types, with ↑/↓ to move, Enter or Tab to accept, Esc to dismiss and
+  Ctrl/Cmd+Space to ask on demand. Suggestions understand where you are in the statement:
+  after `FROM` you get tables, after `WHERE` you get columns, and — the part that matters —
+  **only the columns of the tables actually in your statement**, resolved through aliases, so
+  `FROM saving_plans sp WHERE sp.` offers that table's columns rather than every column in the
+  database. Schema-qualified names work too — `FROM public.` lists tables. Suggestions are
+  withheld where they would produce invalid SQL: straight after `ORDER BY` you get columns and
+  functions, not `DESC`. Keywords and functions come from the real dialect for your connection
+  (PostgreSQL contributes 653 function names where the old list had 46 shared entries), and
+  Redis gets its command set instead. Everything works offline from cached schema, so typing
+  never waits on the database — and never triggers a connection or password prompt on its own.
+  Saved `.sql` query files get the same suggestions through VS Code's own IntelliSense.
+
+- **The query panel now shows — and respects — which database it runs against.** On servers
+  with several databases, a panel opened from a table preview silently ran its SQL (and looked
+  up autocomplete tables) against the connection's default database, producing "relation does
+  not exist" errors and empty suggestions for tables you could see in the tree. Preview panels
+  are now bound to the database they came from, autocomplete refreshes when a panel is
+  re-pointed at another database, and a badge in the toolbar shows the target (`aerobus`,
+  `db0`, or the SQLite file name) with a tooltip explaining how to aim at a different one.
+  Schema is intentionally not shown: queries aren't pinned to a schema — unqualified names
+  resolve through `search_path`, and suggestions already cover every schema's tables.
+
+- **Format SQL.** A new **Format** button in the query panel pretty-prints your statement using
+  the right dialect for the connection — PostgreSQL, MySQL/MariaDB or SQLite — so engine-specific
+  syntax (Postgres `->>` and `interval`, MySQL backtick identifiers, SQLite functions) survives
+  intact. `Shift+Alt+F` does the same, and saved `.sql` query files now work with VS Code's own
+  Format Document. If a statement can't be parsed your query is left exactly as you typed it and
+  the error is reported — formatting never overwrites work it couldn't understand. Redis
+  connections don't show the button, since Redis commands aren't SQL.
+
 - **Close a single connection from the tree.** Connected connections now show a
   disconnect icon inline on the row, next to Refresh and New Query. Previously the only
   one-click option was **Stop All Connections** in the view's title bar, which closed

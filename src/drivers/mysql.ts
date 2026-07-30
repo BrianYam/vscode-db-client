@@ -6,8 +6,10 @@ import type {
   ForeignKey,
   PreviewOptions,
   QueryResult,
+  SchemaHints,
   TreeItemData,
 } from "./Driver";
+import { groupColumns, HINT_COLUMN_LIMIT, HINT_TABLE_LIMIT } from "./hints";
 import { displayBacktick as db2, quoteBacktick as qb } from "./ident";
 import { displaySql, tableFolders } from "./postgres";
 import { buildTls } from "./ssl";
@@ -299,24 +301,36 @@ export class MySqlDriver implements Driver {
     });
   }
 
-  async schemaHints(database?: string): Promise<{ tables: string[]; columns: string[] }> {
+  async schemaHints(database?: string): Promise<SchemaHints> {
     const db = database ?? this.config.database ?? "";
     if (!db) {
       return { tables: [], columns: [] };
     }
     const [t] = await this.p.query<mysql.RowDataPacket[]>(
       `SELECT table_name FROM information_schema.tables
-       WHERE table_schema = ? ORDER BY table_name LIMIT 2000`,
+       WHERE table_schema = ? ORDER BY table_name LIMIT ${HINT_TABLE_LIMIT + 1}`,
       [db],
     );
+    // Carries table_name so columns group per table (was SELECT DISTINCT, which
+    // lost the association). LIMIT+1 makes truncation provable.
     const [c] = await this.p.query<mysql.RowDataPacket[]>(
-      `SELECT DISTINCT column_name FROM information_schema.columns
-       WHERE table_schema = ? ORDER BY column_name LIMIT 4000`,
+      `SELECT table_name, column_name FROM information_schema.columns
+       WHERE table_schema = ? ORDER BY table_name, ordinal_position
+       LIMIT ${HINT_COLUMN_LIMIT + 1}`,
       [db],
+    );
+    const truncated = t.length > HINT_TABLE_LIMIT || c.length > HINT_COLUMN_LIMIT;
+    const grouped = groupColumns(
+      c.slice(0, HINT_COLUMN_LIMIT).map((r) => ({
+        // information_schema casing varies by server config, hence both spellings.
+        table: String(r.table_name ?? r.TABLE_NAME),
+        column: String(r.column_name ?? r.COLUMN_NAME),
+      })),
     );
     return {
-      tables: t.map((r) => String(r.table_name ?? r.TABLE_NAME)),
-      columns: c.map((r) => String(r.column_name ?? r.COLUMN_NAME)),
+      tables: t.slice(0, HINT_TABLE_LIMIT).map((r) => String(r.table_name ?? r.TABLE_NAME)),
+      ...grouped,
+      truncated,
     };
   }
 

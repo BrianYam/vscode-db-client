@@ -37,6 +37,30 @@ export interface PreviewFilter {
   value: unknown;
 }
 
+/**
+ * Schema names for editor autocomplete. Dialect keywords/functions are NOT here —
+ * those come from `sqlDialect.ts` and need no connection.
+ */
+export interface SchemaHints {
+  tables: string[];
+  /**
+   * Every column name in the database, de-duplicated. The fallback for when we
+   * cannot tell which table is in scope.
+   */
+  columns: string[];
+  /**
+   * Columns grouped by table name, so `FROM saving_plans WHERE …` can suggest
+   * only that table's columns. Optional: engines without tables (Redis) omit it,
+   * and callers fall back to `columns`.
+   */
+  columnsByTable?: Record<string, string[]>;
+  /**
+   * A row limit was hit, so the lists above are incomplete. Surfaced to the user
+   * rather than silently dropping suggestions.
+   */
+  truncated?: boolean;
+}
+
 /** A substring filter on one column (from the grid's per-column filter box). */
 export interface ColumnFilter {
   column: string;
@@ -148,7 +172,7 @@ export interface Driver {
   foreignKeys(path: string[]): Promise<ForeignKey[]>;
 
   /** Table and column names for editor autocomplete. */
-  schemaHints(database?: string): Promise<{ tables: string[]; columns: string[] }>;
+  schemaHints(database?: string): Promise<SchemaHints>;
 
   /** Total row count for a table (for pagination), honoring preview filters. */
   countRows(path: string[], opts?: PreviewOptions): Promise<number>;

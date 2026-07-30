@@ -331,3 +331,187 @@ paginated preview), so clearing them one box at a time was tedious.
       zero messages posted. Server-backed: exactly one `filters: []` post, and no stale
       second round-trip 600ms later
 - [ ] `[SDD][M17]` Remaining human check: exercise in the Extension Development Host
+
+## M18 — SQL language suite: completion + formatting 🟡  SPEC LOCKED 2026-07-30
+Spec: `docs/DISCOVERY_SQL_AUTOCOMPLETE.md` (locked) → `docs/BLUEPRINT_SQL_AUTOCOMPLETE.md`.
+Locked: custom widget in the webview (not Monaco, not routed to `.sql`), table-aware columns,
+dialect-aware vocabulary, **and dialect-aware formatting** — the "full suite".
+Context: `sqlFeatures.ts` already gives **native** IntelliSense to saved `.sql` files, but it
+is scoped `{ language:"sql", scheme:"file" }` — the panel's `<textarea>` gets nothing. That
+gap is the whole feature.
+
+**Dependency decision (measured, reversed from the first pass):** take `sql-formatter` 15.8.2
+(MIT), imported per-dialect via `formatDialect` — **87 KB minified / 24 KB gzipped, +3.2 %**
+on the bundle. The `format` barrel pulls all 21 dialects (313 KB) and must not be used. One
+dependency serves both halves: it formats, *and* its dialect objects expose the completion
+vocabulary — Postgres 653 functions / 116 keywords / 323 clauses, MySQL 411/228/245, SQLite
+116/149/52, against today's 46 hardcoded dialect-blind keywords.
+
+### M18.0 — Prerequisite (done ahead of the spec)
+- [x] `[SDD][M18]` `src/drivers/postgres.ts` held a **raw NUL byte** in the `CS_KEY` literal
+      (byte 418), which made `file` report "data" and made grep/ripgrep treat the file as
+      binary and **silently return no matches**. That is how the Postgres driver first looked
+      like it was missing `schemaHints` when it implements it at line 418. Replaced with an
+      escaped `` — identical runtime value, source is ASCII again, grep works
+
+### M18.1a — Dialect vocabulary from `sql-formatter` (static baseline) 🟢  ✅ DONE 2026-07-30
+- [x] `[SDD][M18]` Add `sql-formatter@15` to `dependencies`. Import **only** via
+      `formatDialect` + named dialect imports so esbuild tree-shakes the other 18 dialects;
+      a stray `import { format }` silently costs 226 KB. Add a bundle-size check to QA
+- [x] `[SDD][M18]` `src/sqlDialect.ts`: map connection `type` → dialect vocabulary
+      (keywords + clauses + functions + data types) pulled from the dialect's
+      `tokenizerOptions`. Redis has no dialect → returns a static command list
+- [x] `[SDD][M18]` Retire the hardcoded 46-keyword `KEYWORDS` array in `sqlFeatures.ts` in
+      favour of this — it is dialect-blind and an order of magnitude smaller
+
+### M18.1b — Driver: table-aware columns 🟢  ✅ DONE 2026-07-30
+- [x] `[SDD][M18]` Widen `schemaHints` to return `SchemaHints` (`columnsByTable?`, `keywords?`,
+      `functions?`, `truncated?`), all **optional** so Redis and any failing catalog query
+      degrade to today's behaviour. `tables`/`columns` unchanged → existing callers compile
+- [x] `[SDD][M18]` Postgres: `columnsByTable` from one `information_schema.columns` pass.
+      This is the part that matters — the static baseline cannot know your schema
+- [x] `[SDD][M18]` MySQL + SQLite: same `columnsByTable` treatment
+- [x] `[SDD][M18]` Redis: `keywords` = `COMMAND LIST`; tables/columns stay empty. The one
+      engine with no static dialect, so this is its only vocabulary source. Verify live
+- [x] `[SDD][M18]` **Optional** augmentation on top of the static baseline, each behind a
+      try/catch that degrades silently — these are designed from docs and **unverified**:
+      Postgres `pg_proc` (user-defined functions), MySQL `information_schema.KEYWORDS`
+      (8.0.11+), SQLite `pragma_function_list` (**verified**: 155 functions on sql.js 3.49.1)
+- [x] `[SDD][M18]` Set `truncated` when a LIMIT is hit (Postgres already caps at 2000/4000) so
+      the UI can admit it instead of silently dropping suggestions
+
+### M18.2 — Pure logic: `src/sqlComplete.ts` + unit tests 🟢  ✅ DONE 2026-07-30
+- [x] `[SDD][M18]` Export `currentToken`, `aliasMap`, `tablesInScope`, `completionContext`,
+      `rank` — pure functions, no VS Code API, so `test/sqlComplete.test.js` can cover them
+      under the existing `node:test` + compiled-`out/` setup
+- [x] `[SDD][M18]` Context rules: `FROM`/`JOIN`/`INTO`/`UPDATE` → tables;
+      `SELECT`/`WHERE`/`ON`/`SET`/`GROUP BY`/`ORDER BY`/`HAVING` → in-scope columns + keywords;
+      `alias.` / `table.` → that table's columns only; else keywords + functions + tables
+- [x] `[SDD][M18]` Ranking must reproduce the reference: `or` → `ORDER BY, OR, ORDER,
+      ORDINALITY`. Tiers exact → prefix → contains; then in-scope columns > tables > keywords
+      > functions > alpha
+- [x] `[SDD][M18]` Test the ugly cases: quoted identifiers, trailing comments, `--` and `/* */`,
+      caret mid-word, aliases without `AS`, multi-statement buffers
+
+### M18.3 — Webview widget 🟢  ✅ DONE 2026-07-30
+- [x] `[SDD][M18]` Caret pixel position via a hidden mirror element (cloned font/padding/width),
+      **minus `textarea.scrollTop`** — the known-fiddly part
+- [x] `[SDD][M18]` Dropdown with per-kind icons (keyword / function / table / column) as in the
+      reference screenshots; flip above the caret when it would clip the panel bottom
+- [x] `[SDD][M18]` Cap the visible list and show an explicit "showing first N" row when cut —
+      house rule is to admit truncation, and surface `truncated` from M18.1 here too
+- [x] `[SDD][M18]` Keys ↑ ↓ Enter Tab Esc + click. **Must not swallow `Ctrl/Cmd+Enter` (run) or
+      `Cmd+S` (save)** — both already bound on `sqlEl`/`window`; handler ordering is the
+      regression risk. Esc must close the list, not the panel
+- [x] `[SDD][M18]` Suppress during IME composition (`compositionstart`/`compositionend`)
+- [x] `[SDD][M18]` Never block typing: a cache miss shows keywords only, no await on the DB
+
+### M18.4 — Host ↔ webview wiring 🟢  ✅ DONE 2026-07-30
+- [x] `[SDD][M18]` Host posts `{ type:"hints", … }` on panel open and after a connection or
+      database change; webview caches in memory. Key `connId::database`, mirroring
+      `sqlFeatures.ts`. Invalidate on `refresh`
+
+### M18.5 — Feed the native `.sql` provider the same data 🟢  ✅ DONE 2026-07-30
+- [x] `[SDD][M18]` `sqlFeatures.ts` currently serves a hardcoded 46-keyword list. Pass it
+      `columnsByTable` + dialect `keywords`/`functions` so **saved query files** become
+      table-aware and dialect-aware too. Same data, second surface, small change
+
+### M18 — notes from the build (2026-07-30)
+- [x] `[SDD][M18]` **Completion runs on the host, not in the webview.** The widget posts
+      `{type:'complete', text, seq}` and renders the reply; all reasoning stays in the
+      unit-tested `sqlComplete.ts` rather than being duplicated as untested webview JS.
+      Stale replies are dropped by `seq`, the same guard the results grid uses
+- [x] `[SDD][M18]` **Typing never triggers a connect.** Schema hints load only when the
+      connection is already live (`manager.isConnected`); until then completion still works
+      off the dialect vocabulary, which needs no connection. A password prompt must never be
+      a side effect of typing
+- [x] `[SDD][M18]` Ranking fix found in the live harness: Postgres really has `OR DELETE` /
+      `OR INSERT` / `OR TRUNCATE`, and alphabetically they all precede `ORDER`, so `ORDER BY`
+      was pushed off the top for "or". Added a shorter-label-first tiebreak — applied only
+      when a prefix was typed, since with an empty prefix alphabetical is what reads
+- [x] `[SDD][M18]` Insertion no longer doubles a space when accepting mid-statement
+      (`from sav| LIMIT 10` → `from saving_plans LIMIT 10`, not two spaces)
+- [ ] `[SDD][M18]` **Deferred (was M18.1b optional):** server-reported vocabulary
+      augmentation — Postgres `pg_proc` user-defined functions, MySQL
+      `information_schema.KEYWORDS`, SQLite `pragma_function_list`, Redis `COMMAND LIST`.
+      The static dialect baseline made these unnecessary for the core experience; they only
+      add user-defined names. Redis currently uses a small static command list
+- [x] `[SDD][M18]` **Fix (reported from live use):** `ORDER BY` / `GROUP BY` / `PARTITION BY`
+      now withhold the keyword vocabulary — only a column or function can begin an expression.
+      Typing `d` after `ORDER BY` had offered `DO/DAY/DESC/DROP`, and accepting produced
+      `ORDER BY DESC`, a syntax error. `ASC`/`DESC` become available again once a sort column
+      is present
+- [x] `[SDD][M18]` **Fix (reported from live use):** a trailing `name.` means a **schema** in a
+      table position (`FROM public.` → tables) and a table/alias anywhere else (`WHERE sp.` →
+      columns). Reading it always as an alias made `FROM public.er` suggest nothing, because
+      no table is called `public`. Accepting keeps the `public.` prefix
+- [x] `[SDD][M18]` Fix: the `any` context no longer offers table names. A bare table is only
+      valid after `FROM`/`JOIN`/`INTO`/`UPDATE`, so listing every table after
+      `ORDER BY created_at ` was noise. An earlier test asserted the old behaviour and was
+      corrected rather than worked around
+- [x] `[SDD][M18]` A trailing comma is treated as a column list continuation (`SELECT a, `,
+      `ORDER BY a, `). Known limitation: `FROM a, b` comma-joins get column context too —
+      acceptable, since explicit `JOIN` is the common form
+- [ ] `[SDD][M18]` Known: with an **empty** prefix in a mid-statement position the keyword list
+      is alphabetical, so `ABORT`/`ADD COLUMN` head the list where `ASC`/`DESC`/`LIMIT` would be
+      more useful. Needs frequency or position weighting; typing one character already fixes it
+- [ ] `[SDD][M18]` Deferred: CTE / subquery scope. The context scan handles `FROM`, `JOIN`,
+      aliases and qualifiers, not `WITH x AS (…)`. Revisit only if it bites
+
+### M18.6 — Formatting (`src/sqlFormat.ts`) 🟢  ✅ DONE 2026-07-30
+**Measured on landing:** production (minified) bundle **1704 KB → 1792 KB = +88 KB**, inside
+the 90 KB budget. Note the *dev* (unminified) build grows ~149 KB — that is whitespace, not
+dialects; always judge the budget against `--production`, which is what `vsce package` ships.
+An earlier worry that the CJS entry would defeat tree-shaking proved wrong: aliasing to the
+ESM build produced a byte-identical 1792 KB, so no esbuild config change was needed.
+
+- [x] `[SDD][M18]` `canFormat(type)` / `formatSql(sql, type)` — one thin module is the **only**
+      importer of `sql-formatter`, so the dependency stays containable. Dialect is chosen from
+      the connection `type`, the same discriminant `registry.ts` switches on
+- [x] `[SDD][M18]` Redis → `canFormat() === false`, and the button/command is **hidden**, not a
+      no-op — the house pattern for capabilities only some engines have (`if (driver.setTtl)`)
+- [x] `[SDD][M18]` **Never destroy work**: on a parse error leave the buffer untouched and
+      report it. Formatting must never replace a query with a mangled parse
+- [x] `[SDD][M18]` Surfaces: `Format` button in the panel bar (plus `Shift+Alt+F` inside the
+      panel), and a native `DocumentFormattingEditProvider` for `.sql` so VS Code's own
+      Format Document works on saved query files
+- [x] `[SDD][M18]` Dropped the planned standalone `openDbClient.formatSql` command as
+      redundant — the provider already owns `Shift+Alt+F` / Format Document for files, and the
+      panel has its own button. One less command in the palette for no lost capability
+- [x] `[SDD][M18]` Options `keywordCase: "upper"` + `tabWidth`; expose in the settings panel
+      later, not this milestone
+- [x] `[SDD][M18]` Unit tests — pure string→string, fits the existing `node:test` tier.
+      Verified samples to lock in: Postgres `->>` / `interval`, MySQL backtick identifiers,
+      SQLite `json_extract`
+
+### M18.8 — Multi-database binding + context badge 🟢  ✅ DONE 2026-07-30
+Reported: on a server with several databases/schemas, Run on a previewed table failed with
+`relation "drizzle.__drizzle_migrations" does not exist` and suggestions stopped working.
+- [x] `[SDD][M18]` Root cause: a preview panel never bound `this.database` — `previewTable`
+      resolves its own path, but the panel's Run (`driver.query(sql, database)`) and
+      completion hints (`schemaHints(database)`) both fell back to the connection's **entry**
+      database. Wrong DB → missing relation on Run, wrong/empty tables in suggestions
+- [x] `[SDD][M18]` Fix: bind the panel to `previewPath[0]` on multi-database engines
+      (postgres/mysql db name, redis db number — `RedisDriver.query` does `SELECT n`).
+      SQLite excluded: its `path[0]` is a table name and it has one database anyway
+- [x] `[SDD][M18]` Fix: schema hints are now cached **per database** (`hintsDb`) with an
+      in-flight guard — a panel re-pointed via `rerun` refetches instead of serving the old
+      database's tables forever
+- [x] `[SDD][M18]` **Context badge**: the panel bar now shows which database queries actually
+      run against (`aerobus`, `db0`, or the SQLite file name), with a tooltip naming the
+      connection and how to target a different database. Updates live on `rerun`.
+      **Schema deliberately not shown** — a session isn't pinned to one; unqualified names
+      resolve via `search_path` and suggestions already span every schema
+- [ ] `[SDD][M18]` F5 check: preview `drizzle.__drizzle_migrations` on a multi-DB server →
+      Run succeeds; suggestions offer that database's tables; badge shows the right DB
+
+### M18.7 — Phase 4 QA gate 🔴
+- [ ] `[SDD][M18]` Unit tests green for every `sqlComplete.ts` and `sqlFormat.ts` export
+- [ ] `[SDD][M18]` Manual matrix: 4 engines × {keyword prefix, table after `FROM`, column after
+      `WHERE`, `alias.` qualified, Format}
+- [ ] `[SDD][M18]` Regression: `Ctrl/Cmd+Enter` runs, `Cmd+S` saves, Esc closes only the list
+- [ ] `[SDD][M18]` Degradation: catalog query denied → static baseline still serves, nothing
+      surfaced to the user
+- [ ] `[SDD][M18]` Confirm `truncated` reaches the UI on a wide schema
+- [ ] `[SDD][M18]` **Bundle budget**: `dist/extension.js` grows by ≲ 90 KB. If it jumped ~300 KB
+      someone imported the `format` barrel instead of `formatDialect`
