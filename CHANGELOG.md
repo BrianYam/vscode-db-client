@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Close a single connection from the tree.** Connected connections now show a
+  disconnect icon inline on the row, next to Refresh and New Query. Previously the only
+  one-click option was **Stop All Connections** in the view's title bar, which closed
+  everything; closing just one meant right-clicking the node. Stop All is unchanged for
+  when you do want the bulk action.
+
 - **Copy as JSON.** A new results-grid button copies rows straight to the clipboard, no save
   dialog. Check one row and you get a bare object; check several and you get an array. With
   nothing checked — including results that aren't editable and so have no checkboxes — it

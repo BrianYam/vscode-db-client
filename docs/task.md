@@ -268,3 +268,15 @@ nothing for values that are demonstrably in the table.
       values (`DGS-00374`) match in both
 - [ ] `[SDD][M14]` Deferred: true server-side global search (OR across all columns per driver) —
       rejected for now on unindexed-`ILIKE` cost; revisit if page-local proves too limiting
+
+## M15 — Per-connection Close Connection 🟢  ✅ DONE 2026-07-30
+Gap: the only one-click way to drop a connection was the title-bar **Stop All Connections**
+(`$(stop-circle)`), which is all-or-nothing. Closing a single connection meant knowing to
+right-click the node. With many saved connections open at once, that's the common case.
+- [x] `[SDD][M15]` Surface the existing `openDbClient.disconnect` command as an **inline**
+      icon (`$(debug-disconnect)`, `inline@2`) on connection rows, next to Refresh and
+      New Query. No new command or driver work — the per-connection teardown
+      (`manager.disconnect` + `tree.markDisconnected`) already existed
+- [x] `[SDD][M15]` Gated on `viewItem == connectionActive`, so the icon appears only on
+      connections that are actually live and vanishes the moment one is closed. The
+      right-click entry stays for discoverability; **Stop All** stays as the bulk action

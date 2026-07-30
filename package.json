@@ -188,6 +188,11 @@
           "group": "inline@1"
         },
         {
+          "command": "openDbClient.disconnect",
+          "when": "view == openDbClient.connections && viewItem == connectionActive",
+          "group": "inline@2"
+        },
+        {
           "command": "openDbClient.connect",
           "when": "view == openDbClient.connections && viewItem == connection",
           "group": "0_conn@1"
