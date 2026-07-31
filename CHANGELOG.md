@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-31
+
 ### Added
 - Query panel editor: **`Ctrl/Cmd+/`** toggles `--` line comments over every line the
   selection touches (comments at the shallowest indent, uncomments only when the whole

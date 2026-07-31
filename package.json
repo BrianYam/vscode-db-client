@@ -2,7 +2,7 @@
   "name": "open-db-client",
   "displayName": "Open DB Client",
   "description": "Lightweight database client for VS Code with unlimited connections (PostgreSQL, MySQL/MariaDB, SQLite, Redis).",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "brianlab",
   "license": "MIT",
   "engines": {
