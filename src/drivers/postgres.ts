@@ -10,7 +10,7 @@ import type {
   TreeItemData,
 } from "./Driver";
 import { groupColumns, HINT_COLUMN_LIMIT, HINT_TABLE_LIMIT } from "./hints";
-import { displayIdent as di, quoteIdent as qi, sqlLiteral } from "./ident";
+import { displayIdent as di, parseFromTable, quoteIdent as qi, sqlLiteral } from "./ident";
 import { buildTls } from "./ssl";
 
 // Sentinel pool key for connection-string mode (single database).
@@ -88,8 +88,12 @@ export class PostgresDriver implements Driver {
     return p;
   }
 
+  private entryKey(): string {
+    return this.usingCS ? CS_KEY : this.config.database || "postgres";
+  }
+
   private entryPool(): Pool {
-    return this.poolFor(this.usingCS ? CS_KEY : this.config.database || "postgres");
+    return this.poolFor(this.entryKey());
   }
 
   /** Resolve a table path ([db,schema,table]) to its pool. */
@@ -285,14 +289,40 @@ export class PostgresDriver implements Driver {
   }
 
   async query(sql: string, database?: string): Promise<QueryResult> {
-    const pool = database ? this.poolFor(database) : this.entryPool();
+    const dbKey = database || this.entryKey();
+    const pool = this.poolFor(dbKey);
     const res = await pool.query(sql);
-    return {
+    const result: QueryResult = {
       columns: res.fields?.map((f) => f.name) ?? [],
       rows: (res.rows as Array<Record<string, unknown>>) ?? [],
       rowCount: res.rowCount ?? res.rows?.length ?? 0,
       message: res.rows?.length ? undefined : `${res.command} ${res.rowCount ?? 0}`,
     };
+    await this.attachEditable(result, sql, dbKey);
+    return result;
+  }
+
+  /**
+   * Hand-typed SQL (unlike a tree-driven preview) carries no known table/PK,
+   * so `query()` never got to offer row editing or multi-select — even for a
+   * trivial `SELECT * FROM t WHERE ...`. Best-effort detect a single-table
+   * SELECT and resolve its PK the same way `previewTable` does.
+   */
+  private async attachEditable(result: QueryResult, sql: string, dbKey: string): Promise<void> {
+    const parts = parseFromTable(sql);
+    if (!parts || parts.length > 2) {
+      return;
+    }
+    const [schema, table] = parts.length === 2 ? parts : ["public", parts[0]];
+    try {
+      const cols = await this.tableColumns([dbKey, schema, table]);
+      const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
+      if (pkColumns.length && pkColumns.every((pk) => result.columns.includes(pk))) {
+        result.editable = { table: [dbKey, schema, table], pkColumns };
+      }
+    } catch {
+      // Not a real/accessible table (view, mis-parsed syntax) — stay read-only.
+    }
   }
 
   private buildWhere(opts: PreviewOptions): { where: string; params: unknown[] } {

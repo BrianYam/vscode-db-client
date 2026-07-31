@@ -8,6 +8,7 @@ const {
   displayIdent,
   displayBacktick,
   sqlLiteral,
+  parseFromTable,
 } = require("../out/drivers/ident.js");
 
 test("quoteIdent wraps in double quotes", () => {
@@ -42,4 +43,43 @@ test("sqlLiteral quotes strings, passes numbers, handles null", () => {
   assert.strictEqual(sqlLiteral(42), "42");
   assert.strictEqual(sqlLiteral(null), "NULL");
   assert.strictEqual(sqlLiteral(undefined), "NULL");
+});
+
+test("parseFromTable extracts a bare table name", () => {
+  assert.deepStrictEqual(parseFromTable("SELECT * FROM users"), ["users"]);
+});
+
+test("parseFromTable extracts a schema-qualified table with a WHERE clause", () => {
+  assert.deepStrictEqual(
+    parseFromTable(
+      "SELECT * FROM public.saving_plans_transactions where saving_plan_id='x' LIMIT 100",
+    ),
+    ["public", "saving_plans_transactions"],
+  );
+});
+
+test("parseFromTable unquotes double-quoted and backtick identifiers", () => {
+  assert.deepStrictEqual(parseFromTable('SELECT * FROM "public"."Users"'), ["public", "Users"]);
+  assert.deepStrictEqual(parseFromTable("SELECT * FROM `db`.`t`"), ["db", "t"]);
+});
+
+test("parseFromTable strips a trailing semicolon", () => {
+  assert.deepStrictEqual(parseFromTable("SELECT * FROM users;"), ["users"]);
+});
+
+test("parseFromTable bails on joins, unions, and multiple statements", () => {
+  assert.strictEqual(parseFromTable("SELECT * FROM a JOIN b ON a.id = b.id"), undefined);
+  assert.strictEqual(parseFromTable("SELECT * FROM a UNION SELECT * FROM b"), undefined);
+  assert.strictEqual(parseFromTable("SELECT * FROM a; SELECT * FROM b"), undefined);
+});
+
+test("parseFromTable bails on multiple tables or a function/subquery source", () => {
+  assert.strictEqual(parseFromTable("SELECT * FROM a, b"), undefined);
+  assert.strictEqual(parseFromTable("SELECT * FROM generate_series(1, 10)"), undefined);
+  assert.strictEqual(parseFromTable("SELECT * FROM (SELECT 1) t"), undefined);
+});
+
+test("parseFromTable bails on non-SELECT statements and missing FROM", () => {
+  assert.strictEqual(parseFromTable("UPDATE users SET x = 1"), undefined);
+  assert.strictEqual(parseFromTable("SELECT 1"), undefined);
 });

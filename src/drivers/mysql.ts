@@ -10,7 +10,7 @@ import type {
   TreeItemData,
 } from "./Driver";
 import { groupColumns, HINT_COLUMN_LIMIT, HINT_TABLE_LIMIT } from "./hints";
-import { displayBacktick as db2, quoteBacktick as qb } from "./ident";
+import { displayBacktick as db2, parseFromTable, quoteBacktick as qb } from "./ident";
 import { displaySql, tableFolders } from "./postgres";
 import { buildTls } from "./ssl";
 
@@ -182,13 +182,15 @@ export class MySqlDriver implements Driver {
     const [result, fields] = await this.p.query(sql);
     if (Array.isArray(result)) {
       const rows = result as Array<Record<string, unknown>>;
-      return {
+      const out: QueryResult = {
         columns:
           (fields as mysql.FieldPacket[] | undefined)?.map((f) => f.name) ??
           (rows[0] ? Object.keys(rows[0]) : []),
         rows,
         rowCount: rows.length,
       };
+      await this.attachEditable(out, sql);
+      return out;
     }
     const info = result as mysql.ResultSetHeader;
     return {
@@ -197,6 +199,34 @@ export class MySqlDriver implements Driver {
       rowCount: info.affectedRows ?? 0,
       message: `OK, ${info.affectedRows ?? 0} row(s) affected`,
     };
+  }
+
+  /**
+   * Hand-typed SQL carries no known table/PK, so `query()` never got to offer
+   * row editing or multi-select — even for a trivial `SELECT * FROM t WHERE
+   * ...`. Best-effort detect a single-table SELECT and resolve its PK the
+   * same way `previewTable` does. An unqualified table falls back to the
+   * connection's configured database, since this driver has no single
+   * "current database" beyond that.
+   */
+  private async attachEditable(result: QueryResult, sql: string): Promise<void> {
+    const parts = parseFromTable(sql);
+    if (!parts || parts.length > 2) {
+      return;
+    }
+    const [db, table] = parts.length === 2 ? parts : [this.config.database, parts[0]];
+    if (!db) {
+      return;
+    }
+    try {
+      const cols = await this.tableColumns([db, table]);
+      const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
+      if (pkColumns.length && pkColumns.every((pk) => result.columns.includes(pk))) {
+        result.editable = { table: [db, table], pkColumns };
+      }
+    } catch {
+      // Not a real/accessible table (view, mis-parsed syntax) — stay read-only.
+    }
   }
 
   private buildWhere(opts: PreviewOptions): { where: string; params: unknown[] } {

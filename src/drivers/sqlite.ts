@@ -11,7 +11,7 @@ import type {
   TreeItemData,
 } from "./Driver";
 import { groupColumns } from "./hints";
-import { displayIdent as di, quoteIdent as qi } from "./ident";
+import { displayIdent as di, parseFromTable, quoteIdent as qi } from "./ident";
 import { displaySql, tableFolders } from "./postgres";
 
 // sql.js is a WASM build — no native compilation needed. The .wasm file lives
@@ -189,7 +189,31 @@ export class SqliteDriver implements Driver {
       });
       return obj;
     });
-    return { columns, rows, rowCount: rows.length };
+    const result: QueryResult = { columns, rows, rowCount: rows.length };
+    await this.attachEditable(result, sql);
+    return result;
+  }
+
+  /**
+   * Hand-typed SQL carries no known table/PK, so `query()` never got to offer
+   * row editing or multi-select — even for a trivial `SELECT * FROM t WHERE
+   * ...`. Best-effort detect a single-table SELECT and resolve its PK the
+   * same way `previewTable` does.
+   */
+  private async attachEditable(result: QueryResult, sql: string): Promise<void> {
+    const parts = parseFromTable(sql);
+    if (!parts || parts.length > 1) {
+      return;
+    }
+    try {
+      const cols = await this.tableColumns(parts);
+      const pkColumns = cols.filter((c) => c.pk).map((c) => c.name);
+      if (pkColumns.length && pkColumns.every((pk) => result.columns.includes(pk))) {
+        result.editable = { table: parts, pkColumns };
+      }
+    } catch {
+      // Not a real table (view, mis-parsed syntax) — stay read-only.
+    }
   }
 
   private buildWhere(opts: PreviewOptions): { where: string; bind: Record<string, never> } {

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Row multi-select/checkboxes were lost after running hand-typed SQL.** Only tree-driven
+  table previews resolved a table's primary key and offered row checkboxes/editing; running
+  any manually typed or edited query — even a trivial `SELECT * FROM t WHERE ...` — went
+  through the generic query path, which never attached that metadata, so the checkbox column
+  silently disappeared. `query()` on Postgres, MySQL, and SQLite now best-effort detects a
+  simple single-table `SELECT` (no joins/unions/subqueries) and resolves its primary key the
+  same way a preview does, so multi-select and delete keep working after editing the query.
+
 ## [0.4.0] - 2026-07-30
 
 ### Added
