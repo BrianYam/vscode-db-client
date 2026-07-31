@@ -515,3 +515,44 @@ Reported: on a server with several databases/schemas, Run on a previewed table f
 - [ ] `[SDD][M18]` Confirm `truncated` reaches the UI on a wide schema
 - [ ] `[SDD][M18]` **Bundle budget**: `dist/extension.js` grows by ≲ 90 KB. If it jumped ~300 KB
       someone imported the `format` barrel instead of `formatDialect`
+
+## M19 — Editor ergonomics in the query panel (requested 2026-07-31)
+Reported: the panel's editor is a bare textarea — no way to comment a line out, and Run
+always fires the whole buffer even when one statement is highlighted.
+
+### M19.1 — Toggle line comment (`Ctrl/Cmd+/`) 🟢  ✅ DONE 2026-07-31
+- [x] `[SDD][M19]` VS Code's `editor.action.commentLine` is gated on `editorTextFocus`, so it
+      never reaches a webview — the panel binds its own handler on the textarea
+- [x] `[SDD][M19]` Whole-line semantics: acts on every line the selection touches; a selection
+      ending exactly on a line break does **not** drag in the following line
+- [x] `[SDD][M19]` Uncomments only when **every** non-blank line is already commented —
+      on a mixed block, toggling would otherwise silently uncomment half the selection
+- [x] `[SDD][M19]` Comments at the shallowest indent in the block so it keeps its shape;
+      blank lines are left alone
+- [x] `[SDD][M19]` Caret/selection is mapped through the edit (columns before the edit point
+      stay put); the write goes through `execCommand('insertText')` so the native **undo**
+      stack survives, with a `.value` assignment as fallback
+- [x] `[SDD][M19]` Not bound on **Redis** — a buffer there is one command, and `--` would be
+      sent as an argument rather than ignored. No binding beats a broken one
+- [x] `[SDD][M19]` Suppresses the completion request the synthetic input event would fire,
+      so commenting never pops the suggestion list
+
+### M19.2 — Highlight-to-run (`Ctrl/Cmd+Enter`) 🟢  ✅ DONE 2026-07-31
+- [x] `[SDD][M19]` With a non-blank selection, only the selected text is sent as the query;
+      otherwise the whole buffer, as before
+- [x] `[SDD][M19]` The **Run button** follows the same rule (a textarea keeps its selection
+      after blur) — one rule to learn, not two
+- [x] `[SDD][M19]` Honest UX: status reads "Running selection…" vs "Running…", the button
+      tooltip says so, and the idle hint under the bar spells out both shortcuts
+- [x] `[SDD][M19]` No host change — the existing `run` message carries whatever text was sent,
+      so editable-table extraction operates on the statement that actually ran
+
+### M19.3 — Phase 4 QA gate 🔴
+- [ ] `[SDD][M19]` F5 matrix: caret-only toggle, multi-line toggle, re-toggle restores the
+      original text, indented block keeps its shape, mixed block comments all
+- [ ] `[SDD][M19]` Undo (`Cmd+Z`) after a toggle restores the previous buffer in one step
+- [ ] `[SDD][M19]` Highlight one statement of several → Run and `Cmd+Enter` both run only it;
+      clear the selection → whole buffer runs again
+- [ ] `[SDD][M19]` Redis panel: `Cmd+/` does nothing, hint text omits it, highlight-to-run works
+- [ ] `[SDD][M19]` Regression: `Cmd+S` saves, `Shift+Alt+F` formats, Esc closes only the
+      completion list, suggestions still fire on ordinary typing

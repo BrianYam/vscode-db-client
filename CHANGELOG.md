@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Query panel editor: **`Ctrl/Cmd+/`** toggles `--` line comments over every line the
+  selection touches (comments at the shallowest indent, uncomments only when the whole
+  block is already commented). Not bound on Redis, where a buffer is a single command
+  and `--` would be sent as an argument rather than ignored.
+- Query panel editor: **highlight-to-run** — with text selected, `Ctrl/Cmd+Enter` (and
+  the Run button) executes only the selection instead of the whole buffer. The status
+  line says "Running selection…" so it is never ambiguous which one ran.
+
 ## [0.4.1] - 2026-07-31
 
 ### Fixed

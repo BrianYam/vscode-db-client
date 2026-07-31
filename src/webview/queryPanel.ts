@@ -559,6 +559,9 @@ export class QueryPanel {
     const placeholder = dbType === "redis" ? "GET mykey" : "SELECT * FROM ... LIMIT 100";
     // Redis has no SQL dialect, so the button is omitted rather than shown inert.
     const formattable = canFormat(dbType as DatabaseType);
+    // Same reasoning for the comment toggle: a Redis buffer is one command, and `--`
+    // would be sent as an argument rather than ignored. No binding beats a broken one.
+    const commentable = dbType !== "redis";
     const nonce = String(Date.now());
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -682,7 +685,7 @@ export class QueryPanel {
 <body>
   <textarea id="sql" placeholder="${placeholder}">${escapeHtml(initialSql)}</textarea>
   <div class="bar">
-    <button id="runBtn">Run ▶</button>
+    <button id="runBtn" title="Run (Ctrl/Cmd+Enter) — runs the highlighted text only, when something is highlighted">Run ▶</button>
     ${hasFile ? '<button id="saveBtn" class="secondary" title="Save to file (Cmd/Ctrl+S)">💾 Save</button>' : ""}
     <button id="refreshBtn" class="secondary" title="Refresh">⟳</button>
     <span id="dbctx" title="${escapeHtml(this.contextTooltip())}">${escapeHtml(dbLabel)}</span>
@@ -707,7 +710,9 @@ export class QueryPanel {
     <span id="total"></span>
   </div>
   <div id="ac"></div>
-  <div id="status">Ctrl/Cmd+Enter to run</div>
+  <div id="status">Ctrl/Cmd+Enter to run — highlight to run only that${
+    commentable ? " · Ctrl/Cmd+/ to comment" : ""
+  }</div>
   <div id="scope"></div>
   <div id="grid"></div>
 
@@ -762,7 +767,15 @@ export class QueryPanel {
       }, 350);
     }
 
-    function run() { statusEl.textContent = 'Running…'; vscode.postMessage({ type:'run', sql: sqlEl.value }); }
+    // Highlight-to-run: with a selection, only that text is sent. The textarea keeps
+    // its selection after losing focus, so the Run button behaves the same as
+    // Ctrl/Cmd+Enter — one rule, not two. A whitespace-only selection is ignored.
+    function run() {
+      const sel = sqlEl.value.slice(sqlEl.selectionStart, sqlEl.selectionEnd);
+      const partial = !!sel.trim();
+      statusEl.textContent = partial ? 'Running selection…' : 'Running…';
+      vscode.postMessage({ type:'run', sql: partial ? sel : sqlEl.value });
+    }
     $('runBtn').addEventListener('click', run);
     function saveFile() {
       const btn = $('saveBtn'); if (!btn) return;
@@ -817,12 +830,80 @@ export class QueryPanel {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
     });
 
+    // ---------------- line comment toggle (Ctrl/Cmd+/) ----------------
+    // VS Code's own editor.action.commentLine is gated on editorTextFocus, so it
+    // never fires inside a webview — the panel has to bring its own.
+    function toggleComment(){
+      const v = sqlEl.value, s = sqlEl.selectionStart, e = sqlEl.selectionEnd;
+      // Whole lines only. A selection ending exactly on a line break stops at the
+      // line it visibly covers rather than pulling in the next one.
+      const from = v.lastIndexOf('\\n', s - 1) + 1;
+      let tail = e;
+      if (tail > s && v[tail-1] === '\\n') tail--;
+      let to = v.indexOf('\\n', tail);
+      if (to < 0) to = v.length;
+
+      const block = v.slice(from, to);
+      const lines = block.split('\\n');
+      const filled = lines.filter((l) => l.trim());
+      if (!filled.length) return;
+      // Uncomment only when every line is already commented — on a mixed block,
+      // "toggle" that uncommented half the selection would be a surprise.
+      const off = filled.every((l) => /^\\s*--/.test(l));
+      // Comment at the shallowest indent so the block keeps its shape.
+      const col = off ? 0 : Math.min.apply(null, filled.map((l) => l.match(/^\\s*/)[0].length));
+      const out = lines.map((l) => !l.trim() ? l
+        : off ? l.replace(/^(\\s*)--[ ]?/, '$1')
+        : l.slice(0, col) + '-- ' + l.slice(col));
+      const text = out.join('\\n');
+      if (text === block) return;
+
+      // Map a caret through the edit: columns before the edit point stay put,
+      // the rest shift by their own line's delta.
+      function mapPos(pos){
+        let src = from, dst = from;
+        for (let i = 0; i < lines.length; i++) {
+          if (pos <= src + lines[i].length) {
+            const c = pos - src, d = out[i].length - lines[i].length;
+            return dst + (c <= col ? c : Math.max(col, c + d));
+          }
+          src += lines[i].length + 1;
+          dst += out[i].length + 1;
+        }
+        return dst;
+      }
+      const ns = mapPos(s), ne = mapPos(e);
+
+      // insertText keeps the browser's native undo stack; assigning .value wipes it,
+      // so that path is only the fallback.
+      sqlEl.setSelectionRange(from, to);
+      let ok = false;
+      // insertText fires an input event, but a comment toggle is not someone typing
+      // an identifier — don't let it pop the completion list.
+      acQuiet = true;
+      try { ok = document.execCommand('insertText', false, text); } catch (err) { ok = false; }
+      acQuiet = false;
+      if (!ok) sqlEl.value = v.slice(0, from) + text + v.slice(to);
+      sqlEl.setSelectionRange(ns, ne);
+    }
+    ${
+      commentable
+        ? `sqlEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === '/' || e.code === 'Slash')) {
+        e.preventDefault();
+        acClose();
+        toggleComment();
+      }
+    });`
+        : ""
+    }
+
     // ---------------- completion dropdown ----------------
     // The reasoning lives on the host (sqlComplete.ts, unit-tested); this owns
     // only the UI: where to draw, what is selected, and how to insert.
     const acEl = $('ac');
     let acItems = [], acSel = 0, acOpen = false, acMore = false;
-    let acSeq = 0, acRendered = 0, acComposing = false;
+    let acSeq = 0, acRendered = 0, acComposing = false, acQuiet = false;
     const ICON = { keyword:'◇', function:'ƒ', table:'▦', column:'▪', dataType:'T' };
 
     // A textarea gives no caret coordinates, so measure with a hidden clone that
@@ -880,7 +961,7 @@ export class QueryPanel {
     }
 
     function acRequest(){
-      if (acComposing) return;
+      if (acComposing || acQuiet) return;
       // Never awaits the database: the host replies from cached hints, and a
       // stale reply is dropped by seq (same guard the results grid uses).
       vscode.postMessage({ type:'complete', text: sqlEl.value.slice(0, sqlEl.selectionStart), seq: ++acSeq });
