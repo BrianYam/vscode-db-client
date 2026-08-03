@@ -89,23 +89,27 @@ step on top:
 #    stamps CHANGELOG, commits, tags, builds the .vsix)
 npm run release:patch     # or release:minor / release:major
 
-# 2. Publish the version you just cut to the Marketplace
+# 2. Publish the version you just cut — on success this also runs
+#    `git push` + `git push --tags` for you
 npm run publish:marketplace
 
-# 3. Push the release commit + tag
-git push && git push --tags
-
-# 4. A few minutes later, confirm the Marketplace picked it up
+# 3. A few minutes later, confirm the Marketplace picked it up
 npm run marketplace:verify
 ```
 
 `publish:marketplace` runs `scripts/publish.mjs`, which refuses to publish
 unless the working tree is clean and `CHANGELOG.md` has a stamped section for
 the current version — so you can't accidentally ship an un-released state.
-Pass `--dry-run` to run only the checks:
+After a successful publish it pushes the release commit and tags to origin
+(the version is public at that point, so the tag must not stay local).
+Note the split: `release:*` stays local on purpose — until you publish, a bad
+release can still be undone (`git tag -d vX.Y.Z` + `git reset --hard HEAD~1`).
+
+Flags:
 
 ```bash
-npm run publish:marketplace -- --dry-run
+npm run publish:marketplace -- --dry-run   # run only the checks, publish nothing
+npm run publish:marketplace -- --no-push   # publish but leave git push to you
 ```
 
 Under the hood the script calls `vsce publish`, which triggers

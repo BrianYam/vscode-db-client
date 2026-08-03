@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count and last-update time, and exits non-zero on drift — usable as a
   post-publish/CI gate. `-- --ovsx` also checks Open VSX; `npm run
   marketplace:show` proxies the full `vsce show` listing.
+- `publish:marketplace` now runs `git push` + `git push --tags` after a
+  successful publish (skippable with `--no-push`); `release:*` still leaves the
+  release local so a bad bump can be undone before anything goes public.
 
 ### Changed
 - **Extension ID renamed to `open-database-client`** (Marketplace ID

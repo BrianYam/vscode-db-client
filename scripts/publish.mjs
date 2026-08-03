@@ -5,8 +5,9 @@
 // by vsce — so publishing can't drift from CHANGELOG.md or ship a dirty tree.
 //
 // Usage:
-//   npm run publish:marketplace              # checks, then `vsce publish`
+//   npm run publish:marketplace              # checks, `vsce publish`, git push + tags
 //   npm run publish:marketplace -- --dry-run # checks only, publish nothing
+//   npm run publish:marketplace -- --no-push # publish but skip the git push
 //   OVSX_PAT=… npm run publish:marketplace -- --ovsx   # also Open VSX
 //
 // Auth: `npx @vscode/vsce login brianlab` once per machine (see
@@ -70,6 +71,16 @@ if (alsoOvsx) {
   run("npx", ["--yes", "ovsx", "publish"]);
 }
 
-console.log(
-  `\n✔ Published ${publisher}.${name}@${version}. Don't forget: git push && git push --tags`,
-);
+// The version is now public — the release commit + tag must not stay local.
+// (release:* deliberately doesn't push, so a bad bump can still be undone;
+// past this point there is nothing left to undo.)
+if (args.includes("--no-push")) {
+  console.log(
+    `\n✔ Published ${publisher}.${name}@${version}. --no-push given — remember: git push && git push --tags`,
+  );
+} else {
+  console.log("\nPushing release commit + tags…");
+  run("git", ["push"]);
+  run("git", ["push", "--tags"]);
+  console.log(`\n✔ Published ${publisher}.${name}@${version} and pushed the release to origin.`);
+}
