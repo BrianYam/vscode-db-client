@@ -1,9 +1,18 @@
+import * as fs from "node:fs";
 import * as vscode from "vscode";
 import { ConnectionManager } from "./connections/manager";
+import {
+  buildExport,
+  decryptBundle,
+  encryptBundle,
+  isEncryptedBundle,
+  mergeConnections,
+  parseImport,
+} from "./connections/portability";
 import { QueryStore } from "./connections/queryStore";
-import { ConnectionStore } from "./connections/store";
+import { ConnectionStore, newId } from "./connections/store";
 import { setSqliteWasmDir } from "./drivers/sqlite";
-import { initLog, logInfo } from "./log";
+import { initLog, logError, logInfo } from "./log";
 import { bindQueryDoc, registerSqlFeatures } from "./sqlFeatures";
 import { DatabaseTreeProvider, type DbNode, splitQueryPath } from "./tree/DatabaseTreeProvider";
 import { ConnectionFormPanel } from "./webview/connectionFormPanel";
@@ -137,6 +146,158 @@ export function activate(ctx: vscode.ExtensionContext): void {
       await manager.disconnect(existing.id);
       await store.delete(existing.id);
       tree.refresh();
+    }
+  });
+
+  // ---------------------------------------------------------------- portability
+  // Two export commands on purpose: the default file is safe to hand to someone
+  // else (no secrets, and passwords stripped out of connection strings), the
+  // encrypted one carries credentials but is useless without the passphrase.
+  const doExport = async (includeSecrets: boolean) => {
+    const configs = store.all();
+    if (!configs.length) {
+      vscode.window.showInformationMessage("Open DB Client: there are no connections to export.");
+      return;
+    }
+    let passphrase: string | undefined;
+    if (includeSecrets) {
+      passphrase = await promptNewPassphrase();
+      if (!passphrase) {
+        return;
+      }
+    }
+    const suffix = includeSecrets ? "encrypted.json" : "json";
+    const target = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(`open-db-client-connections.${suffix}`),
+      filters: { JSON: ["json"] },
+      saveLabel: "Export",
+    });
+    if (!target) {
+      return;
+    }
+    try {
+      const entries = [];
+      for (const config of configs) {
+        entries.push({
+          config,
+          secrets: includeSecrets
+            ? {
+                password: await store.getPassword(config.id),
+                sshPassword: await store.getSshPassword(config.id),
+                sshPassphrase: await store.getSshPassphrase(config.id),
+              }
+            : undefined,
+        });
+      }
+      const { file, redactedNames } = buildExport(entries, {
+        includeSecrets,
+        exportedBy: `open-db-client ${version}`,
+        exportedAt: new Date().toISOString(),
+      });
+      const body = includeSecrets
+        ? JSON.stringify(encryptBundle(JSON.stringify(file), passphrase as string), null, 2)
+        : JSON.stringify(file, null, 2);
+      // 0600 on a credential-bearing file. Best-effort: the mode only applies on
+      // creation, and the save dialog may be overwriting something that exists.
+      fs.writeFileSync(target.fsPath, body, includeSecrets ? { mode: 0o600 } : {});
+      if (includeSecrets) {
+        try {
+          fs.chmodSync(target.fsPath, 0o600);
+        } catch {
+          /* non-POSIX filesystem — the file is still encrypted */
+        }
+      }
+      const n = configs.length;
+      if (includeSecrets) {
+        vscode.window.showInformationMessage(
+          `Exported ${n} connection(s) with passwords, encrypted. Without the passphrase this file cannot be opened — there is no recovery.`,
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          `Exported ${n} connection(s) without passwords.` +
+            (redactedNames.length
+              ? ` A password was stripped from the connection string of: ${redactedNames.join(", ")} (usernames kept).`
+              : ""),
+        );
+      }
+    } catch (err) {
+      logError("exportConnections", err);
+      vscode.window.showErrorMessage(`Open DB Client: export failed. ${(err as Error).message}`);
+    }
+  };
+
+  reg("openDbClient.exportConnections", () => doExport(false));
+  reg("openDbClient.exportConnectionsEncrypted", () => doExport(true));
+
+  // Import only ever appends: nothing existing is modified, reordered, or removed,
+  // and a connection you already have is skipped rather than duplicated.
+  reg("openDbClient.importConnections", async () => {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      filters: { JSON: ["json"] },
+      openLabel: "Import",
+    });
+    if (!picked?.length) {
+      return;
+    }
+    try {
+      let text = fs.readFileSync(picked[0].fsPath, "utf8");
+      if (isEncryptedBundle(text)) {
+        const passphrase = await vscode.window.showInputBox({
+          password: true,
+          title: "Import connections",
+          prompt: "Passphrase for this encrypted connections file",
+          ignoreFocusOut: true,
+        });
+        if (!passphrase) {
+          return;
+        }
+        text = decryptBundle(text, passphrase);
+      }
+      const parsed = parseImport(text);
+      for (const w of parsed.warnings) {
+        logInfo("importConnections", w);
+      }
+      if (!parsed.connections.length) {
+        vscode.window.showWarningMessage(
+          `Open DB Client: no importable connections in that file.${warnTail(parsed.warnings)}`,
+        );
+        return;
+      }
+      const { added, skipped, secrets } = mergeConnections(store.all(), parsed.connections, newId);
+      if (!added.length) {
+        vscode.window.showInformationMessage(
+          `Open DB Client: nothing to import — all ${skipped.length} connection(s) in that file are already saved.`,
+        );
+        return;
+      }
+      const ok = await vscode.window.showInformationMessage(
+        `Import ${added.length} connection(s)?` +
+          (skipped.length ? ` ${skipped.length} already saved and will be skipped.` : "") +
+          " Your existing connections are not changed.",
+        { modal: true },
+        "Import",
+      );
+      if (ok !== "Import") {
+        return;
+      }
+      for (const config of added) {
+        await store.save(config, secrets.get(config.id) ?? {});
+      }
+      tree.refresh();
+      const parts = [`Imported ${added.length} connection(s)`];
+      if (skipped.length) {
+        parts.push(`${skipped.length} skipped (already saved)`);
+      }
+      if (!parsed.hasSecrets) {
+        parts.push("no passwords in the file — add them via Edit Connection");
+      }
+      vscode.window.showInformationMessage(
+        `Open DB Client: ${parts.join(" · ")}.${warnTail(parsed.warnings)}`,
+      );
+    } catch (err) {
+      logError("importConnections", err);
+      vscode.window.showErrorMessage(`Open DB Client: import failed. ${(err as Error).message}`);
     }
   });
 
@@ -383,4 +544,37 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   // Drivers are disposed via the subscription registered in activate().
+}
+
+/**
+ * Ask for a passphrase twice. There is no recovery for an encrypted export, so
+ * a typo has to be caught here rather than at import time on the other machine.
+ */
+async function promptNewPassphrase(): Promise<string | undefined> {
+  const first = await vscode.window.showInputBox({
+    password: true,
+    title: "Export connections (encrypted)",
+    prompt: "Passphrase to encrypt the file. There is no way to recover it.",
+    ignoreFocusOut: true,
+    validateInput: (v) => (v.length < 8 ? "Use at least 8 characters." : undefined),
+  });
+  if (!first) {
+    return undefined;
+  }
+  const second = await vscode.window.showInputBox({
+    password: true,
+    title: "Export connections (encrypted)",
+    prompt: "Type the same passphrase again",
+    ignoreFocusOut: true,
+    validateInput: (v) => (v === first ? undefined : "The two passphrases do not match."),
+  });
+  return second === first ? first : undefined;
+}
+
+/** Never swallow a dropped entry — say how many and where to read why. */
+function warnTail(warnings: string[]): string {
+  if (!warnings.length) {
+    return "";
+  }
+  return ` ${warnings.length} entry/entries in the file were skipped — see View → Output → "Open DB Client".`;
 }

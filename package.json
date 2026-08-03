@@ -138,6 +138,23 @@
         "title": "Reset All Data (remove connections, secrets & queries)"
       },
       {
+        "command": "openDbClient.exportConnections",
+        "category": "Open DB Client",
+        "title": "Export Connections (without passwords)…",
+        "icon": "$(export)"
+      },
+      {
+        "command": "openDbClient.exportConnectionsEncrypted",
+        "category": "Open DB Client",
+        "title": "Export Connections with Passwords (encrypted)…"
+      },
+      {
+        "command": "openDbClient.importConnections",
+        "category": "Open DB Client",
+        "title": "Import Connections…",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "openDbClient.refreshNode",
         "title": "Refresh",
         "icon": "$(refresh)"
@@ -174,6 +191,21 @@
           "command": "openDbClient.stopAll",
           "when": "view == openDbClient.connections",
           "group": "navigation@3"
+        },
+        {
+          "command": "openDbClient.importConnections",
+          "when": "view == openDbClient.connections",
+          "group": "1_portability@0"
+        },
+        {
+          "command": "openDbClient.exportConnections",
+          "when": "view == openDbClient.connections",
+          "group": "1_portability@1"
+        },
+        {
+          "command": "openDbClient.exportConnectionsEncrypted",
+          "when": "view == openDbClient.connections",
+          "group": "1_portability@2"
         }
       ],
       "view/item/context": [

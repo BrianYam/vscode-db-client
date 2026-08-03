@@ -1,11 +1,20 @@
 import * as fs from "node:fs";
 import * as vscode from "vscode";
+import { renderChangelog } from "./miniMarkdown";
+
+/** Everything a guide body may need from the running extension. */
+interface GuideCtx {
+  icon: (type: string) => string;
+  version: string;
+  /** CHANGELOG.md rendered to HTML, or "" when it could not be read. */
+  changelog: string;
+}
 
 interface Guide {
   id: string;
   title: string;
   /** Returns the guide body HTML. */
-  body: (icon: (type: string) => string) => string;
+  body: (g: GuideCtx) => string;
 }
 
 /**
@@ -61,17 +70,36 @@ export class SettingsPanel {
     }
   }
 
+  /**
+   * The changelog shown in-app is the very `CHANGELOG.md` that ships in the
+   * .vsix (`.vscodeignore` excludes `docs/**`, not the root file). Rendering the
+   * shipped file at runtime means the in-app notes cannot drift from the released
+   * ones — there is no second copy to forget to update.
+   */
+  private changelogHtml(): string {
+    try {
+      const file = vscode.Uri.joinPath(this.ctx.extensionUri, "CHANGELOG.md").fsPath;
+      return renderChangelog(fs.readFileSync(file, "utf8"));
+    } catch {
+      return "";
+    }
+  }
+
   private render(): string {
-    const icon = (t: string) => this.iconSvg(t);
     const nonce = String(Date.now());
     const version = this.ctx.extension.packageJSON.version;
+    const gctx: GuideCtx = {
+      icon: (t: string) => this.iconSvg(t),
+      version,
+      changelog: this.changelogHtml(),
+    };
     const nav = GUIDES.map(
       (g, i) => `<div class="nav${i === 0 ? " active" : ""}" data-g="${g.id}">${g.title}</div>`,
     ).join("");
     const sections = GUIDES.map(
       (g, i) =>
         `<section id="g-${g.id}" class="guide${i === 0 ? " active" : ""}">
-           <h2>${g.title}</h2>${g.body(icon)}</section>`,
+           <h2>${g.title}</h2>${g.body(gctx)}</section>`,
     ).join("");
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -109,6 +137,18 @@ export class SettingsPanel {
   .tip { border-left: 3px solid var(--vscode-focusBorder); padding: 6px 10px; margin: 10px 0;
          background: var(--vscode-editorWidget-background); border-radius: 0 4px 4px 0; }
   #side .ver { margin-top: 18px; padding: 0 18px; font-size: 11px; opacity: .5; }
+  .changelog h3.rel { margin: 22px 0 4px; padding-bottom: 4px; font-size: 15px;
+         border-bottom: 1px solid var(--vscode-panel-border,#4443); }
+  .changelog h4 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase;
+         letter-spacing: .06em; opacity: .7; }
+  .changelog ul { margin: 4px 0 10px; padding-left: 20px; font-size: 13px; }
+  .changelog code { background: var(--vscode-textCodeBlock-background,#8882);
+         padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .changelog a { color: var(--vscode-textLink-foreground); }
+  pre { background: var(--vscode-textCodeBlock-background,#8882); padding: 10px 12px;
+         border-radius: 4px; overflow-x: auto; border: 1px solid var(--vscode-panel-border,#4443); }
+  pre code { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px;
+         white-space: pre; }
   .danger-zone { margin-top: 34px; padding-top: 18px;
          border-top: 1px solid var(--vscode-panel-border,#4443); }
   .danger-zone h4 { color: var(--vscode-errorForeground); margin-top: 0; }
@@ -189,7 +229,19 @@ const GUIDES: Guide[] = [
         <li>Right-click a connection or database → <b>New Query</b> for raw SQL (<kbd>Cmd/Ctrl</kbd>+<kbd>Enter</kbd> to run). For Redis, type commands like <span class="glyph">GET mykey</span>.</li>
       </ul>
 
-      <h4>4 · Troubleshooting</h4>
+      <h4>4 · Move your connections to another machine</h4>
+      <ul>
+        <li>The <b>…</b> menu in the panel title bar (also the Command Palette) has
+            <b>Export Connections</b>, <b>Export Connections with Passwords (encrypted)</b>, and
+            <b>Import Connections</b>.</li>
+        <li><b>Import only ever adds.</b> Your existing connections are never overwritten, renamed,
+            or reordered — and a connection you already have is skipped, so importing the same file
+            twice changes nothing.</li>
+      </ul>
+      <div class="tip">Full details — which export to pick, how to open an encrypted file, and what
+        is inside it — are in the <b>Backup &amp; transfer</b> guide.</div>
+
+      <h4>5 · Troubleshooting</h4>
       <ul>
         <li>A tree node showing <b>⚠</b> is a connection/query error — right-click → Edit Connection to fix.</li>
         <li>Deeper diagnostics: <b>View → Output → "Open DB Client"</b> logs failures with stack traces.</li>
@@ -198,7 +250,7 @@ const GUIDES: Guide[] = [
   {
     id: "icon-legend",
     title: "What icon means what",
-    body: (icon) => `
+    body: ({ icon }) => `
       <h4>Connections</h4>
       <table>
         <tr><th>Icon</th><th>Meaning</th></tr>
@@ -241,6 +293,91 @@ const GUIDES: Guide[] = [
       </table>`,
   },
   {
+    id: "backup-transfer",
+    title: "Backup & transfer",
+    body: () => `
+      <h4>Which export do I want?</h4>
+      <table>
+        <tr><th>Command</th><th>Contains</th><th>Use it for</th></tr>
+        <tr>
+          <td><b>Export Connections</b></td>
+          <td>Servers, ports, users, options. <b>No passwords</b> — and any password embedded in a
+              connection string is stripped out (the username is kept).</td>
+          <td>Sharing a starting set with a teammate, committing a team template, any file that
+              might end up in chat or a backup.</td>
+        </tr>
+        <tr>
+          <td><b>Export Connections with Passwords (encrypted)</b></td>
+          <td>Everything above <b>plus</b> database passwords, SSH passwords and SSH key
+              passphrases — encrypted with a passphrase you choose.</td>
+          <td>Moving your own setup to a new machine, or a backup before <b>Reset all data</b>.</td>
+        </tr>
+      </table>
+      <div class="tip">Whichever you pick, <b>import only ever appends</b>. Nothing you already have
+        is overwritten, renamed or reordered, and a connection you already have is skipped — so
+        importing the same file twice is a no-op.</div>
+
+      <h4>How do I open the encrypted file?</h4>
+      <p>You don't open it by hand — you <b>import</b> it, and the extension asks for the passphrase:</p>
+      <ol>
+        <li>Panel <b>…</b> menu → <b>Import Connections…</b> (or the Command Palette).</li>
+        <li>Pick the <span class="glyph">.encrypted.json</span> file. The passphrase prompt appears
+            automatically — the file is recognised by its contents, not its name.</li>
+        <li>Type the passphrase, then confirm the summary of what will be added and skipped.</li>
+      </ol>
+      <p>Opening it in a text editor is fine, but there is nothing readable inside: everything sits
+         in one base64 <span class="glyph">data</span> field. The surrounding fields
+         (<span class="glyph">kdf</span>, <span class="glyph">iv</span>,
+         <span class="glyph">tag</span>) are the parameters needed to decrypt — they are not secret
+         and they are useless on their own.</p>
+
+      <div class="tip"><b>Lose the passphrase and the file is gone.</b> It is never stored anywhere,
+        not in the file and not in the extension. There is no reset and no recovery — keep it where
+        you keep passwords.</div>
+
+      <h4>Wrong passphrase, or a file that won't open</h4>
+      <ul>
+        <li><i>"Wrong passphrase, or the file has been modified"</i> — the file is authenticated, so a
+            bad passphrase and a corrupted/edited file give the same error. Re-download or re-copy
+            the file before assuming the passphrase is wrong.</li>
+        <li><i>"This file is encrypted — it needs its passphrase"</i> — you picked an encrypted file
+            somewhere that expected a plain one; use <b>Import Connections</b>, which handles both.</li>
+        <li>Editing an encrypted file by hand — even reformatting the JSON — will break it. Keep the
+            <span class="glyph">data</span>, <span class="glyph">iv</span> and
+            <span class="glyph">tag</span> values byte-for-byte.</li>
+      </ul>
+
+      <h4>The format is open — you are not locked in</h4>
+      <p>The file is scrypt (N=16384, r=8, p=1) → AES-256-GCM, all standard, all in Node's built-in
+         <span class="glyph">crypto</span>. If you ever want the contents without this extension —
+         to audit what you exported, or to recover after uninstalling — this reads it back:</p>
+      <pre><code>node -e '
+const fs = require("fs"), c = require("crypto");
+const b = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const key = c.scryptSync(process.argv[2], Buffer.from(b.kdf.salt, "base64"), 32,
+                         { N: b.kdf.N, r: b.kdf.r, p: b.kdf.p });
+const d = c.createDecipheriv("aes-256-gcm", key, Buffer.from(b.iv, "base64"));
+d.setAuthTag(Buffer.from(b.tag, "base64"));
+console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).toString());
+' open-db-client-connections.encrypted.json 'your passphrase'</code></pre>
+      <div class="tip"><b>That prints your passwords to the terminal.</b> Your shell history will
+        also keep the passphrase you typed. Use it to inspect or recover, not as a routine step —
+        importing never exposes either.</div>`,
+  },
+  {
+    id: "whats-new",
+    title: "What's new",
+    body: ({ version, changelog }) => `
+      <p>You're running <b>v${version}</b>. Every released change is listed below, newest first.</p>
+      ${
+        changelog
+          ? `<div class="changelog">${changelog}</div>`
+          : `<div class="tip">The changelog file could not be read from this install.
+               The full history is on the extension's Marketplace page under
+               <b>Changelog</b>.</div>`
+      }`,
+  },
+  {
     id: "uninstalling",
     title: "Uninstalling & your data",
     body: () => `
@@ -261,6 +398,15 @@ const GUIDES: Guide[] = [
             connection, all stored passwords &amp; SSH secrets, and all saved query files in one step.</li>
         <li>This is <b>irreversible</b> — there is no undo. Do it before uninstalling if you want to leave
             nothing behind.</li>
-      </ul>`,
+        <li><b>Back up first if you may come back:</b> use <b>Export Connections with Passwords
+            (encrypted)</b> from the panel's <b>…</b> menu, then import it later. Keep that file
+            somewhere you would keep a password — it is your credentials, encrypted.</li>
+      </ul>
+
+      <div class="tip"><b>One caveat worth knowing:</b> a connection saved via <b>Use Connection
+        String</b> keeps the whole URL — including any <code>user:password@</code> in it — in
+        globalState, which is not encrypted. Connections set up with the separate host/user/password
+        fields keep the password in SecretStorage instead. If that matters to you, re-save those
+        connections using the individual fields.</div>`,
   },
 ];

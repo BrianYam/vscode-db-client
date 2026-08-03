@@ -556,3 +556,85 @@ always fires the whole buffer even when one statement is highlighted.
 - [ ] `[SDD][M19]` Redis panel: `Cmd+/` does nothing, hint text omits it, highlight-to-run works
 - [ ] `[SDD][M19]` Regression: `Cmd+S` saves, `Shift+Alt+F` formats, Esc closes only the
       completion list, suggestions still fire on ordinary typing
+
+## M20 — Connection portability (import / export) 🟢  SPEC LOCKED 2026-08-02
+Spec: `docs/BLUEPRINT_CONNECTION_PORTABILITY.md`. Requested 2026-08-02: move connections
+between machines; on import, **append — never replace**.
+
+### M20.0 — Discovery finding (drives the whole design)
+- [x] `[SDD][M20]` `ConnectionConfig.connectionString` is persisted **whole** into globalState,
+      so a pasted `postgres://user:pass@host/db` puts the password in cleartext in an
+      unencrypted SQLite file. Verified: **5 of 11** connections on the author's install.
+      Therefore an export that only omits SecretStorage values is still a credential dump —
+      URL redaction is part of the export contract, not a nicety
+
+### M20.1 — Core logic (`src/connections/portability.ts`) ✅ DONE 2026-08-02
+- [x] `[SDD][M20]` Pure module (no vscode, no fs) so redaction / whitelist / crypto are unit-testable
+- [x] `[SDD][M20]` `redactConnectionString` strips the password, keeps scheme/user/host/port/db/query.
+      Username kept deliberately — not a secret, and already cleartext in the `username` field for
+      every non-connection-string connection. Non-URL-parseable strings fall back to a textual
+      strip rather than failing **open**
+- [x] `[SDD][M20]` `buildExport` — omits `id` + `schemaVersion` (ids are local SecretStorage keys);
+      `secrets: "omitted" | "included"`; flags redacted entries and returns their names to report
+- [x] `[SDD][M20]` `parseImport` treats the file as untrusted: `kind`/`version` checked first,
+      fields **whitelisted** by primitive type (several are paths the extension later reads —
+      `sslCA`, `sslKey`, `sshPrivateKeyPath` — and `connectionString` is dialled), bad entries
+      dropped individually with warnings so one malformed record doesn't cost the other ten
+- [x] `[SDD][M20]` `identityKey` — `type + host + port + database + username`, `filePath` for SQLite,
+      `redisDb` for Redis, resolved **through** the connection string so the same server saved two
+      ways dedupes. Ignores display name and SSL/SSH options (how you reach it, not which it is)
+- [x] `[SDD][M20]` `mergeConnections` — append-only; existing entries untouched; fresh ids; secrets
+      returned keyed by new id so they land in SecretStorage; name clash on a *different* server
+      gets ` (imported)` / ` (imported N)`
+- [x] `[SDD][M20]` `encryptBundle`/`decryptBundle` — scrypt (N=16384, r=8, p=1) → AES-256-GCM,
+      random salt + IV per file, auth tag verified. `node:crypto` only, no new dependency
+
+### M20.2 — Commands & UX ✅ DONE 2026-08-02
+- [x] `[SDD][M20]` `exportConnections` / `exportConnectionsEncrypted` / `importConnections`,
+      on `view/title` group `1_portability` (the **…** overflow, not the 4 navigation icons)
+      and in the palette under an **Open DB Client** category
+- [x] `[SDD][M20]` Encrypted export asks for the passphrase **twice** (min 8 chars) — there is no
+      recovery, so a typo has to be caught here, not on the other machine
+- [x] `[SDD][M20]` Encrypted file written `0600`, best-effort `chmod` after (mode only applies on
+      create, and the save dialog may be overwriting)
+- [x] `[SDD][M20]` Honest reporting: export names the connections whose connection-string password
+      was stripped; import shows added/skipped **before** writing, then reports counts, warns when
+      the file carried no passwords, and logs each dropped entry to the output channel
+- [x] `[SDD][M20]` Guides updated — new "Move your connections to another machine" section, and the
+      uninstall page now states the connection-string cleartext caveat plainly
+- [x] `[SDD][M20]` **Backup & transfer guide** (asked 2026-08-02: "how do I open the encrypted
+      file?"). Answer in-app: you import it, the passphrase prompt fires on content sniffing not
+      filename. Also covers which export to pick, the two failure messages, "lose the passphrase and
+      it is gone", and a verified `node` decrypt snippet so an encrypted export is not lock-in —
+      with the caveat that running it prints passwords to the terminal and leaves the passphrase in
+      shell history
+
+### M20.3 — Unit tests ✅ DONE 2026-08-02 (`test/portability.test.js`, 24 tests)
+- [x] `[SDD][M20]` Redaction: password stripped / left alone / non-parseable fallback
+- [x] `[SDD][M20]` Export: asserts the serialized file does **not** contain the password, SSH
+      passphrase, or `:pw@` — the leak test, not just a shape test
+- [x] `[SDD][M20]` Import: foreign `kind`, newer version, encrypted file, unknown fields,
+      invalid `sshAuth`, wrong-typed fields, per-entry warnings
+- [x] `[SDD][M20]` Merge: append-only, skip duplicates, twice-is-a-no-op, name-clash rename,
+      secrets keyed by new id and removed from the config
+- [x] `[SDD][M20]` Crypto: round-trip, no plaintext in the bundle, fresh salt/IV per export,
+      wrong passphrase, tampered ciphertext
+
+### M20.4 — Phase 4 QA gate 🔴
+- [ ] `[SDD][M20]` F5: export plain → open the file and confirm no password appears anywhere,
+      including for the 5 connection-string connections
+- [ ] `[SDD][M20]` F5: export encrypted → import on a fresh profile → connections connect without
+      re-entering passwords; wrong passphrase gives a clean error, not a stack trace
+- [ ] `[SDD][M20]` F5: import the same file twice → second run reports 0 added / N skipped and the
+      tree is unchanged
+- [ ] `[SDD][M20]` F5: import a file with one connection you already have and one you don't →
+      exactly one added, existing rows untouched and in the same order
+- [ ] `[SDD][M20]` F5: hand-edit a file to add junk fields and a bogus entry → import succeeds,
+      junk dropped, warning count shown, output channel names the reason
+- [ ] `[SDD][M20]` Confirm imported secrets are in SecretStorage and **not** in globalState
+
+## M21 — Connection-string passwords into SecretStorage 🔴 (from M20.0)
+- [ ] `[SDD][M21]` Split `connectionString` on save: keep the URL minus the password in globalState,
+      put the password in SecretStorage, re-assemble at connect time. Migrate existing records on
+      upgrade (`schemaVersion` 2) so today's cleartext entries are cleaned up, not just new ones
+- [ ] `[SDD][M21]` Until then the caveat is documented in the uninstall guide (M20.2)

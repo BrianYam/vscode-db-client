@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Import & export connections.** Move a whole connection set to another machine, hand a
+  team a starting set, or back one up before a reset. Three commands, on the panel's **…**
+  menu and in the Command Palette:
+  - **Export Connections** writes a file that is safe to share — no stored passwords, and
+    any password embedded in a connection string is stripped out (the username is kept).
+    Entries that lost one are flagged in the file, and the export names them so nothing is
+    lost silently.
+  - **Export Connections with Passwords (encrypted)** includes passwords and SSH secrets,
+    sealed with a passphrase you choose (scrypt + AES-256-GCM, random salt/IV per file,
+    authenticated so a tampered file fails loudly). There is no recovery if the passphrase
+    is lost, and the file is written `0600` where the filesystem allows it.
+  - **Import Connections** only ever **appends**: existing connections are never
+    overwritten, renamed, or reordered. A connection you already have — matched on
+    server, port, database and user, resolved through the connection string when one is
+    used — is skipped, so importing the same file twice does nothing the second time. A
+    name clash between two *different* servers is renamed rather than merged. Imported
+    entries get fresh ids, and any secrets in an encrypted file go into SecretStorage, not
+    globalState. You are shown what will be added and skipped before anything is written,
+    and told afterwards if the file carried no passwords.
+  - Import treats the file as untrusted: only known fields are read (several are paths the
+    extension later opens), and malformed entries are dropped with a count and a reason in
+    the output channel rather than skipped in silence.
+- **"What's new" guide** in Settings & Guides, rendered from the changelog that ships with
+  the extension — so the in-app notes can never drift from the released ones.
+- **"Backup & transfer" guide** in Settings & Guides: which export to pick, how to open an
+  encrypted file (import it — the passphrase prompt appears on its own), what the errors
+  mean, and a copy-paste `node` snippet that decrypts a bundle without the extension, so an
+  encrypted export is never a lock-in.
+
+### Changed
+- Settings & Guides: the *Uninstalling & your data* page now spells out that a connection
+  saved via **Use Connection String** keeps its whole URL — including any embedded
+  password — in unencrypted globalState, unlike the separate-fields path which uses
+  SecretStorage. Storing those in SecretStorage instead is tracked as follow-up work.
+
 ## [0.4.2] - 2026-07-31
 
 ### Added
