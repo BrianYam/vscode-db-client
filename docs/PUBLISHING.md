@@ -94,6 +94,9 @@ npm run publish:marketplace
 
 # 3. Push the release commit + tag
 git push && git push --tags
+
+# 4. A few minutes later, confirm the Marketplace picked it up
+npm run marketplace:verify
 ```
 
 `publish:marketplace` runs `scripts/publish.mjs`, which refuses to publish
@@ -107,11 +110,26 @@ npm run publish:marketplace -- --dry-run
 
 Under the hood the script calls `vsce publish`, which triggers
 `vscode:prepublish` (typecheck + production esbuild bundle) before uploading.
-The extension usually goes live within a few minutes; check it with:
+
+### Verifying what's live
+
+A fresh publish spends **5–10 minutes** in Marketplace validation before going
+public (it shows in [the manage dashboard](https://marketplace.visualstudio.com/manage/publishers/brianlab)
+first). To check without opening a browser:
 
 ```bash
-npx --yes @vscode/vsce show brianlab.open-database-client
+npm run marketplace:verify             # live version vs local package.json
+npm run marketplace:verify -- --ovsx   # also check Open VSX
+npm run marketplace:show               # full `vsce show` listing
 ```
+
+`marketplace:verify` (`scripts/marketplace-status.mjs`) hits the public gallery
+API — no login needed — and exits non-zero when the extension isn't found or
+the live version differs from local, so it doubles as a CI/post-publish gate.
+Once live, users find it in VS Code's Extensions view by searching
+**"Open DB Client"**, or at:
+
+- https://marketplace.visualstudio.com/items?itemName=brianlab.open-database-client
 
 > **Do not use `vsce publish patch/minor/major` directly** — it would bump the
 > version without running `scripts/stamp-changelog.mjs`, breaking the
@@ -172,6 +190,7 @@ npm run release:patch                          # bump + stamp CHANGELOG + tag + 
 npm run publish:marketplace                    # checked publish of the current version
 npm run publish:marketplace -- --dry-run       # run the safety checks only
 OVSX_PAT=… npm run publish:marketplace -- --ovsx   # also publish to Open VSX
-npx --yes @vscode/vsce show brianlab.open-database-client  # view published info
+npm run marketplace:verify                     # live Marketplace version vs local
+npm run marketplace:show                       # full `vsce show` listing
 npx --yes @vscode/vsce unpublish brianlab.open-database-client  # remove (use with care)
 ```

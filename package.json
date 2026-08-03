@@ -354,6 +354,8 @@
     "fetch-icons": "node scripts/fetch-icons.mjs",
     "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl https://localhost/ --baseImagesUrl https://localhost/",
     "publish:marketplace": "node scripts/publish.mjs",
+    "marketplace:verify": "node scripts/marketplace-status.mjs",
+    "marketplace:show": "node scripts/marketplace-status.mjs --show",
     "prepare": "husky"
   },
   "lint-staged": {

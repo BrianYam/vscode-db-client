@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the current version after verifying a clean tree and a stamped CHANGELOG section,
   with `--dry-run` and an optional `--ovsx` pass to Open VSX. `package.json` now
   declares the GitHub `repository` so Marketplace links resolve correctly.
+- **Marketplace status check.** `npm run marketplace:verify`
+  (`scripts/marketplace-status.mjs`) compares the live Marketplace version against
+  the local `package.json` via the public gallery API (no login), reports install
+  count and last-update time, and exits non-zero on drift — usable as a
+  post-publish/CI gate. `-- --ovsx` also checks Open VSX; `npm run
+  marketplace:show` proxies the full `vsce show` listing.
 
 ### Changed
 - **Extension ID renamed to `open-database-client`** (Marketplace ID
