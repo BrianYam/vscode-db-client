@@ -1,6 +1,6 @@
 # Publishing Open DB Client to the VS Code Marketplace
 
-End-to-end guide for getting `brianlab.open-db-client` live on the Visual Studio
+End-to-end guide for getting `brianlab.open-database-client` live on the Visual Studio
 Code Marketplace, and keeping it updated. One-time setup is Steps 1–3; every
 release after that is just the [release loop](#the-release-loop).
 
@@ -26,7 +26,7 @@ Do them in that order and it's smooth.
 - **Node.js ≥ 20.18.1** — vsce complains with `EBADENGINE` below that.
 - No global install needed: this repo invokes vsce via `npx --yes @vscode/vsce`
   (see the `package` and `publish:marketplace` scripts in `package.json`).
-- `package.json` already carries the required fields: `name: open-db-client`,
+- `package.json` already carries the required fields: `name: open-database-client`,
   `publisher: brianlab`, `displayName`, `version`, `engines.vscode`, and a
   `repository` pointing at GitHub (the Marketplace uses it to resolve README
   links and show the repo link on the extension page).
@@ -110,7 +110,7 @@ Under the hood the script calls `vsce publish`, which triggers
 The extension usually goes live within a few minutes; check it with:
 
 ```bash
-npx --yes @vscode/vsce show brianlab.open-db-client
+npx --yes @vscode/vsce show brianlab.open-database-client
 ```
 
 > **Do not use `vsce publish patch/minor/major` directly** — it would bump the
@@ -120,14 +120,14 @@ npx --yes @vscode/vsce show brianlab.open-db-client
 ### Manual fallback
 
 If you'd rather upload by hand: `npm run package` produces
-`open-db-client-<version>.vsix` (note: this local build intentionally uses
+`open-database-client-<version>.vsix` (note: this local build intentionally uses
 placeholder content URLs — fine for local installs, but prefer
 `publish:marketplace` for the real Marketplace so README links resolve to
 GitHub). The `.vsix` can be uploaded through the web UI at
 https://marketplace.visualstudio.com/manage, or installed locally to test:
 
 ```bash
-code --install-extension open-db-client-0.4.3.vsix
+code --install-extension open-database-client-0.4.3.vsix
 ```
 
 ## Optional — publish to Open VSX too
@@ -159,6 +159,7 @@ the repo).
 | A page asks for credit card details | You've wandered into `signup.azure.com` (paid cloud). Publishing never needs a card — back out and use `aex.dev.azure.com` |
 | Publish fails with an auth error | Check **both**: token scope is `Marketplace → Manage`, **and** the org dropdown was set to **All accessible organizations** |
 | `ERROR: publisher not found` | Create the `brianlab` publisher first (Step 2); the ID must match `package.json` |
+| `ERROR: The extension '<name>' already exists in the Marketplace` | Extension `name`s are reserved **globally across all publishers** (even by unpublished/removed extensions, which don't show in search). Pick a different `name` in `package.json` — this is why ours is `open-database-client` while the `displayName` stays "Open DB Client" |
 | Publish rejected on version | You can't republish the same version number — cut a new one with `npm run release:*` |
 | `EBADENGINE` warning | Update Node.js to ≥ 20.18.1 |
 | `scripts/publish.mjs` aborts on a dirty tree / missing changelog section | That's the guard working: commit or stash your changes, and cut the version via `npm run release:*` before publishing |
@@ -171,6 +172,6 @@ npm run release:patch                          # bump + stamp CHANGELOG + tag + 
 npm run publish:marketplace                    # checked publish of the current version
 npm run publish:marketplace -- --dry-run       # run the safety checks only
 OVSX_PAT=… npm run publish:marketplace -- --ovsx   # also publish to Open VSX
-npx --yes @vscode/vsce show brianlab.open-db-client  # view published info
-npx --yes @vscode/vsce unpublish brianlab.open-db-client  # remove (use with care)
+npx --yes @vscode/vsce show brianlab.open-database-client  # view published info
+npx --yes @vscode/vsce unpublish brianlab.open-database-client  # remove (use with care)
 ```

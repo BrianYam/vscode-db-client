@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `--dry-run` and an optional `--ovsx` pass to Open VSX. `package.json` now
   declares the GitHub `repository` so Marketplace links resolve correctly.
 
+### Changed
+- **Extension ID renamed to `open-database-client`** (Marketplace ID
+  `brianlab.open-database-client`). The old name `open-db-client` is already
+  reserved on the Marketplace by another party — extension names are unique
+  globally, not per publisher. The display name is still "Open DB Client", and
+  the export-file format tags (`open-db-client/connections*`) are unchanged so
+  existing exports keep importing.
+- `.vscodeignore` now excludes dev-only files (`CLAUDE.md`, `biome.json`,
+  `.husky/`, `package-lock.json`) from the shipped VSIX.
+
 ## [0.4.3] - 2026-08-03
 
 ### Added

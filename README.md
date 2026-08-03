@@ -63,7 +63,7 @@ server-side.)
 You don't need to uninstall the old version first — `--force` overwrites it in place.
 
 ```bash
-npm run package             # builds open-db-client-<version>.vsix in the repo root
+npm run package             # builds open-database-client-<version>.vsix in the repo root
 ./scripts/install-local.sh  # installs that .vsix with --force
 ```
 
