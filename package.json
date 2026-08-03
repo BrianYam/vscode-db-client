@@ -5,6 +5,10 @@
   "version": "0.4.3",
   "publisher": "brianlab",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BrianYam/vscode-db-client.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -349,6 +353,7 @@
     "release:major": "npm version major && npm run package",
     "fetch-icons": "node scripts/fetch-icons.mjs",
     "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl https://localhost/ --baseImagesUrl https://localhost/",
+    "publish:marketplace": "node scripts/publish.mjs",
     "prepare": "husky"
   },
   "lint-staged": {

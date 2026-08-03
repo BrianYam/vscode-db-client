@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Marketplace publishing workflow.** `docs/PUBLISHING.md` documents the full
+  one-time setup (Azure DevOps PAT, `brianlab` publisher, vsce login) and the
+  per-release flow; `npm run publish:marketplace` (`scripts/publish.mjs`) publishes
+  the current version after verifying a clean tree and a stamped CHANGELOG section,
+  with `--dry-run` and an optional `--ovsx` pass to Open VSX. `package.json` now
+  declares the GitHub `repository` so Marketplace links resolve correctly.
+
 ## [0.4.3] - 2026-08-03
 
 ### Added
