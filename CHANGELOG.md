@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **README rewritten for the Marketplace page.** It now leads with what the
+  extension does — features, install, getting started, security notes — instead
+  of contributor workflow. All development content (build/run, scripts, local
+  VSIX install, release process, architecture pointers) moved to a new
+  `DEVELOPMENT.md`.
+
 ## [1.0.0] - 2026-08-03
 
 ### Added
