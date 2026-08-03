@@ -232,8 +232,8 @@ const GUIDES: Guide[] = [
       <h4>4 · Move your connections to another machine</h4>
       <ul>
         <li>The <b>…</b> menu in the panel title bar (also the Command Palette) has
-            <b>Export Connections</b>, <b>Export Connections with Passwords (encrypted)</b>, and
-            <b>Import Connections</b>.</li>
+            <b>Export Connections…</b> and <b>Import Connections…</b>. Export asks whether to
+            include passwords — without them, encrypted, or in plain text.</li>
         <li><b>Import only ever adds.</b> Your existing connections are never overwritten, renamed,
             or reordered — and a connection you already have is skipped, so importing the same file
             twice changes nothing.</li>
@@ -297,22 +297,43 @@ const GUIDES: Guide[] = [
     title: "Backup & transfer",
     body: () => `
       <h4>Which export do I want?</h4>
+      <p><b>Export Connections…</b> asks you this first. Three choices, safest at the top:</p>
       <table>
-        <tr><th>Command</th><th>Contains</th><th>Use it for</th></tr>
+        <tr><th>Choice</th><th>Contains</th><th>Use it for</th></tr>
         <tr>
-          <td><b>Export Connections</b></td>
+          <td><b>Without passwords</b><br><span style="opacity:.7">safe to share</span></td>
           <td>Servers, ports, users, options. <b>No passwords</b> — and any password embedded in a
               connection string is stripped out (the username is kept).</td>
           <td>Sharing a starting set with a teammate, committing a team template, any file that
               might end up in chat or a backup.</td>
         </tr>
         <tr>
-          <td><b>Export Connections with Passwords (encrypted)</b></td>
+          <td><b>With passwords — encrypted</b><br><span style="opacity:.7">needs a passphrase</span></td>
           <td>Everything above <b>plus</b> database passwords, SSH passwords and SSH key
-              passphrases — encrypted with a passphrase you choose.</td>
+              passphrases — sealed with a passphrase you choose.</td>
           <td>Moving your own setup to a new machine, or a backup before <b>Reset all data</b>.</td>
         </tr>
+        <tr>
+          <td><b>With passwords — PLAIN TEXT</b><br><span style="opacity:.7">readable by anyone</span></td>
+          <td>The same passwords, <b>unencrypted</b>. Saved as
+              <span class="glyph">…PLAINTEXT.json</span> and stamped with a warning inside the file.</td>
+          <td>When you need to read or edit the values yourself, or feed them to another tool.
+              Not for sharing, storing, or syncing.</td>
+        </tr>
       </table>
+      <p>Import reads all three — you are never asked which kind of file you have.</p>
+
+      <h4>About the plain-text option</h4>
+      <p>It exists because sometimes you genuinely need to see the values. It is deliberately the
+         slowest path: you get a confirmation dialog that counts exactly what is about to be
+         written — including passwords hidden inside connection strings — and offers the encrypted
+         export instead. The file is created with owner-only permissions
+         (<span class="glyph">0600</span>) where the filesystem supports it.</p>
+      <div class="tip"><b>What that file means in practice:</b> anything with access to the folder
+        has your databases. Cloud sync, Time Machine, a search index, and a careless
+        <span class="glyph">git add</span> all count. <b>Delete it as soon as you are done</b> —
+        it is a password, not a document. If you only need to move machines, the encrypted export
+        carries exactly the same credentials and none of this risk.</div>
       <div class="tip">Whichever you pick, <b>import only ever appends</b>. Nothing you already have
         is overwritten, renamed or reordered, and a connection you already have is skipped — so
         importing the same file twice is a no-op.</div>
@@ -398,9 +419,9 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
             connection, all stored passwords &amp; SSH secrets, and all saved query files in one step.</li>
         <li>This is <b>irreversible</b> — there is no undo. Do it before uninstalling if you want to leave
             nothing behind.</li>
-        <li><b>Back up first if you may come back:</b> use <b>Export Connections with Passwords
-            (encrypted)</b> from the panel's <b>…</b> menu, then import it later. Keep that file
-            somewhere you would keep a password — it is your credentials, encrypted.</li>
+        <li><b>Back up first if you may come back:</b> <b>Export Connections…</b> from the panel's
+            <b>…</b> menu, choose <b>With passwords — encrypted</b>, then import it later. Keep that
+            file somewhere you would keep a password — it is your credentials, encrypted.</li>
       </ul>
 
       <div class="tip"><b>One caveat worth knowing:</b> a connection saved via <b>Use Connection

@@ -589,10 +589,10 @@ between machines; on import, **append — never replace**.
 - [x] `[SDD][M20]` `encryptBundle`/`decryptBundle` — scrypt (N=16384, r=8, p=1) → AES-256-GCM,
       random salt + IV per file, auth tag verified. `node:crypto` only, no new dependency
 
-### M20.2 — Commands & UX ✅ DONE 2026-08-02
-- [x] `[SDD][M20]` `exportConnections` / `exportConnectionsEncrypted` / `importConnections`,
-      on `view/title` group `1_portability` (the **…** overflow, not the 4 navigation icons)
-      and in the palette under an **Open DB Client** category
+### M20.2 — Commands & UX ✅ DONE 2026-08-02 (revised 2026-08-03, M20.5)
+- [x] `[SDD][M20]` `exportConnections` / `importConnections`, on `view/title` group
+      `1_portability` (the **…** overflow, not the 4 navigation icons) and in the palette under
+      an **Open DB Client** category
 - [x] `[SDD][M20]` Encrypted export asks for the passphrase **twice** (min 8 chars) — there is no
       recovery, so a typo has to be caught here, not on the other machine
 - [x] `[SDD][M20]` Encrypted file written `0600`, best-effort `chmod` after (mode only applies on
@@ -638,3 +638,42 @@ between machines; on import, **append — never replace**.
       put the password in SecretStorage, re-assemble at connect time. Migrate existing records on
       upgrade (`schemaVersion` 2) so today's cleartext entries are cleaned up, not just new ones
 - [ ] `[SDD][M21]` Until then the caveat is documented in the uninstall guide (M20.2)
+
+### M20.5 — Third export mode: plaintext, behind a gate ✅ DONE 2026-08-03
+Requested 2026-08-03: alongside encrypt and mask, an option that shows the passwords —
+"but with extra dialog to get user to confirm the action".
+- [x] `[SDD][M20]` **Consolidated to one `Export Connections…` command** with a QuickPick of three
+      modes instead of adding a third command. Three export entries in a 2-item overflow menu
+      would have buried the safe one; a picker lists them safest-first with the cost of each
+      stated in the `detail` line, at the moment of choosing. `exportConnectionsEncrypted` is
+      gone — never released, so no migration owed
+- [x] `[SDD][M20]` Plaintext mode writes the same document as the encrypted one, unencrypted:
+      SecretStorage secrets included, connection strings **not** redacted (readability is the
+      whole point of the mode)
+- [x] `[SDD][M20]` **The gate** is a modal that states facts, not a generic caution: it counts the
+      database passwords, SSH secrets, *and* passwords embedded in connection strings that are
+      about to be written. `countEmbeddedCredentials` exists because that last group is invisible
+      to any SecretStorage lookup, yet is the majority of this install's credentials (M20.0)
+- [x] `[SDD][M20]` The dialog offers **"Use the encrypted export instead"** as a button — the safer
+      route is one click away at the point of risk, not advice buried in the message
+- [x] `[SDD][M20]` Degenerate case: no stored secrets at all → say so and fall back to the redacted
+      export rather than writing a "plaintext" file that is identical to the safe one
+- [x] `[SDD][M20]` Defence in depth after the confirm: filename `…PLAINTEXT.json`, a `warning`
+      field stamped **inside** the document (whoever opens it next may not be who exported it),
+      `0600` where the filesystem allows, and a warning — not info — toast naming the file and
+      saying to delete it
+- [x] `[SDD][M20]` `warning` is ignored by `parseImport`; a plaintext file imports like any other
+- [x] `[SDD][M20]` Guides + changelog rewritten for three modes; the Backup & transfer guide gains
+      an "About the plain-text option" section spelling out what such a file means in practice
+- [x] `[SDD][M20]` Tests: plaintext keeps secrets and skips redaction, `warning` present only when
+      asked, `countSecrets` / `countEmbeddedCredentials`, and a plaintext round-trip through import
+
+### M20.6 — Phase 4 QA gate for the plaintext mode 🔴
+- [ ] `[SDD][M20]` F5: picker shows three modes, safest first, each with a readable detail line
+- [ ] `[SDD][M20]` F5: plaintext → the modal's counts match reality (expect 5 embedded on this
+      install per M20.0); Cancel and Escape both write nothing
+- [ ] `[SDD][M20]` F5: "Use the encrypted export instead" hands off to the passphrase prompt
+- [ ] `[SDD][M20]` F5: exported plaintext file is `0600`, named `…PLAINTEXT.json`, carries the
+      `warning` field, and imports cleanly with passwords landing in SecretStorage
+- [ ] `[SDD][M20]` F5: on a profile with no stored passwords, plaintext falls back to redacted
+      with the explanation shown

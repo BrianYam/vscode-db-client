@@ -9,17 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Import & export connections.** Move a whole connection set to another machine, hand a
-  team a starting set, or back one up before a reset. Three commands, on the panel's **…**
+  team a starting set, or back one up before a reset. Two commands, on the panel's **…**
   menu and in the Command Palette:
-  - **Export Connections** writes a file that is safe to share — no stored passwords, and
-    any password embedded in a connection string is stripped out (the username is kept).
-    Entries that lost one are flagged in the file, and the export names them so nothing is
-    lost silently.
-  - **Export Connections with Passwords (encrypted)** includes passwords and SSH secrets,
-    sealed with a passphrase you choose (scrypt + AES-256-GCM, random salt/IV per file,
-    authenticated so a tampered file fails loudly). There is no recovery if the passphrase
-    is lost, and the file is written `0600` where the filesystem allows it.
-  - **Import Connections** only ever **appends**: existing connections are never
+  - **Export Connections…** asks how much to include, safest first, with the trade-off
+    spelled out on each choice:
+    - **Without passwords** — safe to share. No stored passwords, and any password embedded
+      in a connection string is stripped out (the username is kept). Entries that lost one
+      are flagged in the file, and the export names them so nothing is lost silently.
+    - **With passwords — encrypted** — passwords and SSH secrets sealed with a passphrase
+      you choose (scrypt + AES-256-GCM, random salt/IV per file, authenticated so a tampered
+      file fails loudly). No recovery if the passphrase is lost.
+    - **With passwords — plain text** — the same credentials, readable, for when you need to
+      see or reuse the values. Gated behind a confirmation that counts exactly what is about
+      to be written (including passwords hidden inside connection strings, which no keychain
+      lookup would report) and offers the encrypted export as an alternative. Saved as
+      `…PLAINTEXT.json` and stamped with a warning inside the file itself.
+    - Either credential-bearing file is written `0600` where the filesystem allows it.
+  - **Import Connections…** only ever **appends**: existing connections are never
     overwritten, renamed, or reordered. A connection you already have — matched on
     server, port, database and user, resolved through the connection string when one is
     used — is skipped, so importing the same file twice does nothing the second time. A
@@ -27,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     entries get fresh ids, and any secrets in an encrypted file go into SecretStorage, not
     globalState. You are shown what will be added and skipped before anything is written,
     and told afterwards if the file carried no passwords.
-  - Import treats the file as untrusted: only known fields are read (several are paths the
+  - Import reads all three formats without being told which it has, and treats the file as
+    untrusted: only known fields are read (several are paths the
     extension later opens), and malformed entries are dropped with a count and a reason in
     the output channel rather than skipped in silence.
 - **"What's new" guide** in Settings & Guides, rendered from the changelog that ships with

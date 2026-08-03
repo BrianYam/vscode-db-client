@@ -11,6 +11,8 @@ const {
   encryptBundle,
   decryptBundle,
   isEncryptedBundle,
+  countSecrets,
+  countEmbeddedCredentials,
   EXPORT_KIND,
 } = require("../out/connections/portability.js");
 
@@ -102,6 +104,59 @@ test("encrypted export keeps secrets and leaves connection strings intact", () =
   assert.strictEqual(file.secrets, "included");
 });
 
+test("plaintext export keeps secrets readable and stamps a warning into the file", () => {
+  const { file } = buildExport(
+    [
+      {
+        config: {
+          id: "c1",
+          type: "postgres",
+          name: "S",
+          useConnectionString: true,
+          connectionString: "postgresql://u:p@h/db",
+        },
+        secrets: { password: "hunter2", sshPassphrase: "kp" },
+      },
+    ],
+    { ...OPTS, includeSecrets: true, warning: "This file contains UNENCRYPTED credentials." },
+  );
+  assert.strictEqual(file.connections[0].password, "hunter2");
+  assert.strictEqual(file.connections[0].sshPassphrase, "kp");
+  // Nothing is redacted when secrets are included — the point is to be readable.
+  assert.strictEqual(file.connections[0].connectionString, "postgresql://u:p@h/db");
+  assert.strictEqual(file.connections[0].redactedCredentials, undefined);
+  assert.match(file.warning, /UNENCRYPTED/);
+});
+
+test("no warning field is written unless one was asked for", () => {
+  const { file } = buildExport([{ config: { id: "c1", type: "postgres", name: "S" } }], OPTS);
+  assert.ok(!("warning" in file));
+});
+
+test("countSecrets counts what would actually be written, not connections", () => {
+  const c = (id) => ({ id, type: "postgres", name: id });
+  const counts = countSecrets([
+    { config: c("a"), secrets: { password: "pw" } },
+    { config: c("b"), secrets: { password: "pw", sshPassword: "sp", sshPassphrase: "kp" } },
+    { config: c("c"), secrets: {} },
+    { config: c("d") },
+  ]);
+  assert.strictEqual(counts.passwords, 2);
+  assert.strictEqual(counts.sshSecrets, 2);
+});
+
+test("countEmbeddedCredentials finds passwords SecretStorage never sees", () => {
+  // These are the ones a "we omit secrets" export would leak: the password is in
+  // the connection string, so no keychain lookup would ever report it.
+  const n = countEmbeddedCredentials([
+    { connectionString: "postgresql://u:pw@h/db" },
+    { connectionString: "postgresql://u@h/db" },
+    { connectionString: "redis://h:6379/0" },
+    {},
+  ]);
+  assert.strictEqual(n, 1);
+});
+
 // ------------------------------------------------------------------- import
 
 const wrap = (connections) => JSON.stringify({ kind: EXPORT_KIND, version: 1, connections });
@@ -170,6 +225,17 @@ test("parseImport coerces wrong-typed fields away rather than trusting them", ()
   assert.strictEqual(connections[0].port, undefined);
   assert.strictEqual(connections[0].ssl, undefined);
   assert.strictEqual(connections[0].host, undefined);
+});
+
+test("a plaintext export round-trips: warning field is ignored, secrets come back", () => {
+  const { file } = buildExport(
+    [{ config: { id: "c1", type: "postgres", name: "S", host: "h" }, secrets: { password: "pw" } }],
+    { ...OPTS, includeSecrets: true, warning: "cleartext!" },
+  );
+  const parsed = parseImport(JSON.stringify(file));
+  assert.strictEqual(parsed.hasSecrets, true);
+  assert.strictEqual(parsed.connections[0].password, "pw");
+  assert.strictEqual(parsed.warnings.length, 0, "the warning field must not read as a bad entry");
 });
 
 // -------------------------------------------------------------------- merge

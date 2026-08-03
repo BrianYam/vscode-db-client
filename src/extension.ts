@@ -1,8 +1,11 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import * as vscode from "vscode";
 import { ConnectionManager } from "./connections/manager";
 import {
   buildExport,
+  countEmbeddedCredentials,
+  countSecrets,
   decryptBundle,
   encryptBundle,
   isEncryptedBundle,
@@ -20,6 +23,37 @@ import { QueryPanel } from "./webview/queryPanel";
 import { SettingsPanel } from "./webview/settingsPanel";
 
 const LAST_SEEN_VERSION_KEY = "openDbClient.lastSeenVersion";
+
+type ExportMode = "redacted" | "encrypted" | "plaintext";
+
+/**
+ * The three export shapes, in increasing order of what they give away. Listed in
+ * one picker so the trade-off is visible at the moment of choosing — the detail
+ * lines are the whole point, not decoration.
+ */
+const EXPORT_MODES: Array<vscode.QuickPickItem & { mode: ExportMode }> = [
+  {
+    mode: "redacted",
+    label: "$(shield) Without passwords",
+    description: "safe to share",
+    detail:
+      "Servers, ports, users and options only. Passwords are left out, and any password inside a connection string is stripped.",
+  },
+  {
+    mode: "encrypted",
+    label: "$(lock) With passwords — encrypted",
+    description: "needs a passphrase",
+    detail:
+      "Everything, including passwords and SSH secrets, sealed with a passphrase you choose. Lose the passphrase and the file is unrecoverable.",
+  },
+  {
+    mode: "plaintext",
+    label: "$(warning) With passwords — PLAIN TEXT",
+    description: "readable by anyone",
+    detail:
+      "Everything, unencrypted. Only for a file you control and delete straight after. You will be asked to confirm.",
+  },
+];
 
 export function activate(ctx: vscode.ExtensionContext): void {
   initLog(ctx);
@@ -150,23 +184,81 @@ export function activate(ctx: vscode.ExtensionContext): void {
   });
 
   // ---------------------------------------------------------------- portability
-  // Two export commands on purpose: the default file is safe to hand to someone
-  // else (no secrets, and passwords stripped out of connection strings), the
-  // encrypted one carries credentials but is useless without the passphrase.
-  const doExport = async (includeSecrets: boolean) => {
+  // Three export shapes, offered together in one picker so the safe one is what
+  // you see first and the cost of each is stated before you choose — rather than
+  // three commands whose difference only shows up in the file afterwards.
+  const doExport = async (mode: ExportMode): Promise<void> => {
     const configs = store.all();
     if (!configs.length) {
       vscode.window.showInformationMessage("Open DB Client: there are no connections to export.");
       return;
     }
+    const includeSecrets = mode !== "redacted";
+    const entries = [];
+    for (const config of configs) {
+      entries.push({
+        config,
+        secrets: includeSecrets
+          ? {
+              password: await store.getPassword(config.id),
+              sshPassword: await store.getSshPassword(config.id),
+              sshPassphrase: await store.getSshPassphrase(config.id),
+            }
+          : undefined,
+      });
+    }
+
+    // The plaintext gate. Count what would actually be written — including
+    // passwords embedded in connection strings, which no SecretStorage lookup
+    // sees — so the dialog states a fact rather than a generic caution. The safer
+    // route is offered as a button, not buried in the message.
+    if (mode === "plaintext") {
+      const { passwords, sshSecrets } = countSecrets(entries);
+      const embedded = countEmbeddedCredentials(configs);
+      const total = passwords + sshSecrets + embedded;
+      if (total === 0) {
+        vscode.window.showInformationMessage(
+          "Open DB Client: none of your connections have a stored password, so a plaintext export would be identical to the normal one. Exporting without passwords instead.",
+        );
+        return doExport("redacted");
+      }
+      const bits = [
+        passwords ? `${passwords} database password(s)` : "",
+        sshSecrets ? `${sshSecrets} SSH secret(s)` : "",
+        embedded ? `${embedded} password(s) embedded in connection strings` : "",
+      ].filter(Boolean);
+      const choice = await vscode.window.showWarningMessage(
+        "Export passwords in PLAIN TEXT?",
+        {
+          modal: true,
+          detail:
+            `The file will contain ${bits.join(", ")} — readable by anyone who opens it.\n\n` +
+            "Anything that touches that folder gets them too: cloud sync, Time Machine, a search index, or a stray `git add`. " +
+            "Delete the file as soon as you are done with it.\n\n" +
+            "The encrypted export carries exactly the same passwords, but useless without your passphrase.",
+        },
+        "Export in plain text",
+        "Use the encrypted export instead",
+      );
+      if (choice === "Use the encrypted export instead") {
+        return doExport("encrypted");
+      }
+      if (choice !== "Export in plain text") {
+        return;
+      }
+    }
+
     let passphrase: string | undefined;
-    if (includeSecrets) {
+    if (mode === "encrypted") {
       passphrase = await promptNewPassphrase();
       if (!passphrase) {
         return;
       }
     }
-    const suffix = includeSecrets ? "encrypted.json" : "json";
+    // The filename carries the warning too — a plaintext export should be
+    // recognisable in a folder listing months later, without opening it.
+    const suffix =
+      mode === "encrypted" ? "encrypted.json" : mode === "plaintext" ? "PLAINTEXT.json" : "json";
     const target = await vscode.window.showSaveDialog({
       defaultUri: vscode.Uri.file(`open-db-client-connections.${suffix}`),
       filters: { JSON: ["json"] },
@@ -176,41 +268,37 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return;
     }
     try {
-      const entries = [];
-      for (const config of configs) {
-        entries.push({
-          config,
-          secrets: includeSecrets
-            ? {
-                password: await store.getPassword(config.id),
-                sshPassword: await store.getSshPassword(config.id),
-                sshPassphrase: await store.getSshPassphrase(config.id),
-              }
-            : undefined,
-        });
-      }
       const { file, redactedNames } = buildExport(entries, {
         includeSecrets,
         exportedBy: `open-db-client ${version}`,
         exportedAt: new Date().toISOString(),
+        warning:
+          mode === "plaintext"
+            ? "This file contains UNENCRYPTED credentials. Anyone who reads it can connect to these databases. Delete it when you are done."
+            : undefined,
       });
-      const body = includeSecrets
-        ? JSON.stringify(encryptBundle(JSON.stringify(file), passphrase as string), null, 2)
-        : JSON.stringify(file, null, 2);
-      // 0600 on a credential-bearing file. Best-effort: the mode only applies on
+      const body =
+        mode === "encrypted"
+          ? JSON.stringify(encryptBundle(JSON.stringify(file), passphrase as string), null, 2)
+          : JSON.stringify(file, null, 2);
+      // 0600 on any credential-bearing file. Best-effort: the mode only applies on
       // creation, and the save dialog may be overwriting something that exists.
       fs.writeFileSync(target.fsPath, body, includeSecrets ? { mode: 0o600 } : {});
       if (includeSecrets) {
         try {
           fs.chmodSync(target.fsPath, 0o600);
         } catch {
-          /* non-POSIX filesystem — the file is still encrypted */
+          /* non-POSIX filesystem — nothing else changes about the export */
         }
       }
       const n = configs.length;
-      if (includeSecrets) {
+      if (mode === "encrypted") {
         vscode.window.showInformationMessage(
           `Exported ${n} connection(s) with passwords, encrypted. Without the passphrase this file cannot be opened — there is no recovery.`,
+        );
+      } else if (mode === "plaintext") {
+        vscode.window.showWarningMessage(
+          `Exported ${n} connection(s) with passwords in plain text to ${path.basename(target.fsPath)}. Treat that file as a password — delete it once you have imported it.`,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -226,8 +314,15 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   };
 
-  reg("openDbClient.exportConnections", () => doExport(false));
-  reg("openDbClient.exportConnectionsEncrypted", () => doExport(true));
+  reg("openDbClient.exportConnections", async () => {
+    const picked = await vscode.window.showQuickPick(EXPORT_MODES, {
+      title: "Export connections",
+      placeHolder: "How much should the file contain?",
+    });
+    if (picked) {
+      await doExport(picked.mode);
+    }
+  });
 
   // Import only ever appends: nothing existing is modified, reordered, or removed,
   // and a connection you already have is skipped rather than duplicated.

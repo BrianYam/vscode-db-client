@@ -40,6 +40,12 @@ export interface ExportFile {
   exportedAt: string;
   exportedBy: string;
   secrets: "omitted" | "included";
+  /**
+   * Set on a plaintext-with-secrets export so the danger is stated inside the
+   * file itself — whoever opens it next may not be whoever exported it.
+   * Ignored on import; it is a note to a human, not a field we act on.
+   */
+  warning?: string;
   connections: ExportedConnection[];
 }
 
@@ -111,7 +117,13 @@ export function redactConnectionString(cs: string): { value: string; redacted: b
  */
 export function buildExport(
   entries: Array<{ config: ConnectionConfig; secrets?: ConnectionSecrets }>,
-  opts: { includeSecrets: boolean; exportedBy: string; exportedAt: string },
+  opts: {
+    includeSecrets: boolean;
+    exportedBy: string;
+    exportedAt: string;
+    /** Stamped into the document; used for the plaintext export. */
+    warning?: string;
+  },
 ): { file: ExportFile; redactedNames: string[] } {
   const redactedNames: string[] = [];
   const connections = entries.map(({ config, secrets }) => {
@@ -141,10 +153,43 @@ export function buildExport(
       exportedAt: opts.exportedAt,
       exportedBy: opts.exportedBy,
       secrets: opts.includeSecrets ? "included" : "omitted",
+      ...(opts.warning ? { warning: opts.warning } : {}),
       connections,
     },
     redactedNames,
   };
+}
+
+/** How many secret values an export would actually write, for the confirm dialog. */
+export function countSecrets(entries: Array<{ secrets?: ConnectionSecrets }>): {
+  passwords: number;
+  sshSecrets: number;
+} {
+  let passwords = 0;
+  let sshSecrets = 0;
+  for (const { secrets } of entries) {
+    if (secrets?.password) {
+      passwords++;
+    }
+    if (secrets?.sshPassword) {
+      sshSecrets++;
+    }
+    if (secrets?.sshPassphrase) {
+      sshSecrets++;
+    }
+  }
+  return { passwords, sshSecrets };
+}
+
+/**
+ * Connections whose password rides inside `connectionString` rather than
+ * SecretStorage. They are invisible to `countSecrets` but very much present in a
+ * plaintext export, so the confirm dialog has to count them separately.
+ */
+export function countEmbeddedCredentials(configs: Array<{ connectionString?: string }>): number {
+  return configs.filter(
+    (c) => c.connectionString && redactConnectionString(c.connectionString).redacted,
+  ).length;
 }
 
 // ------------------------------------------------------------------- import
