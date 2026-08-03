@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-03
+
 ### Added
 - **Import & export connections.** Move a whole connection set to another machine, hand a
   team a starting set, or back one up before a reset. Two commands, on the panel's **…**
