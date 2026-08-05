@@ -281,8 +281,9 @@ export class ConnectionFormPanel {
   .subtitle { opacity: .55; font-size: 12.5px; margin: 0 0 24px; }
   .slabel { font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
             opacity: .55; font-weight: 600; margin: 24px 0 10px; }
-  .banner { padding: 11px 14px; border-radius: var(--r); margin-bottom: 4px; display: none;
-            font-size: 12.5px; }
+  .banner { display: none; height: 34px; line-height: 34px; padding: 0 12px;
+            border-radius: var(--r); font-size: 12.5px; min-width: 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .banner.ok { display: block; background: color-mix(in srgb, var(--vscode-testing-iconPassed,#3fb950) 16%, transparent);
             color: var(--vscode-testing-iconPassed, #3fb950); }
   .banner.err { display: block; background: color-mix(in srgb, var(--vscode-errorForeground,#f85149) 16%, transparent);
@@ -371,7 +372,6 @@ export class ConnectionFormPanel {
       <span id="title">Connect to server</span>
     </h2>
     <p class="subtitle">Configure a database connection — no connection limit.</p>
-    <div id="banner" class="banner"></div>
 
     <label class="req">Name</label>
     <input type="text" id="name" placeholder="my-database" />
@@ -503,7 +503,8 @@ export class ConnectionFormPanel {
 
   <div class="footer">
     <div class="inner">
-      <button class="ghost" id="testBtn">⚡ Test Connection</button>
+      <button id="testBtn">⚡ Test Connection</button>
+      <div id="banner" class="banner"></div>
       <span class="spacer"></span>
       <button class="ghost" id="closeBtn">Close</button>
       <button id="saveBtn">Save</button>
@@ -669,6 +670,7 @@ export class ConnectionFormPanel {
       const b = $('banner');
       b.className = 'banner ' + (ok ? 'ok' : 'err');
       b.textContent = text;
+      b.title = text; // full message on hover — long errors get ellipsized in the footer
     }
     $('testBtn').addEventListener('click', () => {
       const err = validate(); if (err) { banner(false, err); return; }

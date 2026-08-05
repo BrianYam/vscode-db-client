@@ -677,3 +677,14 @@ Requested 2026-08-03: alongside encrypt and mask, an option that shows the passw
       `warning` field, and imports cleanly with passwords landing in SecretStorage
 - [ ] `[SDD][M20]` F5: on a profile with no stored passwords, plaintext falls back to redacted
       with the explanation shown
+
+## M21 — Connection form UX polish (requested 2026-08-05)
+
+### M21.0 — Test-result placement + button affordance ✅ DONE 2026-08-05
+- [x] `[SDD][M21]` Move the test-connection result banner from the top of the form (off-screen
+      once the form is scrolled) into the fixed footer, beside the Test Connection button —
+      the result appears where the user just clicked
+- [x] `[SDD][M21]` Long error messages ellipsize in the footer row; full text available via
+      hover tooltip (honest UX: nothing silently hidden)
+- [x] `[SDD][M21]` Test Connection loses its `ghost` styling so it reads as a real button
+      (secondary background) instead of blending into the footer

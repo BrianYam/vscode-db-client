@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Connection form: test result shown next to the button.** The "Connection
+  successful / failed" banner moved from the top of the form — where it was
+  invisible once you scrolled down — into the fixed footer beside Test
+  Connection, so the result appears right where you clicked. Long error
+  messages ellipsize with the full text on hover. Test Connection also gains
+  a solid secondary-button background so it no longer blends into the footer.
 - **README rewritten for the Marketplace page.** It now leads with what the
   extension does — features, install, getting started, security notes — instead
   of contributor workflow. All development content (build/run, scripts, local
