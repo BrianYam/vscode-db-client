@@ -48,6 +48,10 @@ export function systemPrompt(verb: AiVerb, connType: string): string {
         base +
         RUNNABLE_RULES +
         STYLE_RULES +
+        "A 'Current query' and earlier requests from this session may be " +
+        "provided: when the new request asks to change, extend, or build on " +
+        "them, edit the current query rather than starting from scratch; when " +
+        "the request is about something new, ignore them and write fresh SQL. " +
         "Reply with exactly one SQL statement in a ```sql fenced block, " +
         "preceded by a single plain-language sentence saying what it does. " +
         "Never produce DROP, TRUNCATE, ALTER, or DELETE/UPDATE without a WHERE " +
@@ -71,8 +75,30 @@ export function systemPrompt(verb: AiVerb, connType: string): string {
   }
 }
 
-export function generateUserPrompt(intent: string, schemaContext: string): string {
-  return `Schema:\n${schemaContext}\n\nRequest: ${intent}`;
+/** One earlier Generate exchange in this panel, oldest first. */
+export interface AiExchange {
+  prompt: string;
+  sql: string;
+}
+
+export function generateUserPrompt(
+  intent: string,
+  schemaContext: string,
+  currentSql?: string,
+  history?: AiExchange[],
+): string {
+  let out = `Schema:\n${schemaContext}\n`;
+  if (history?.length) {
+    // Prompts only — the SQL each produced has been superseded by the editor's
+    // current content, which is sent in full below.
+    out += `\nEarlier requests in this session, oldest first:\n${history
+      .map((h, i) => `${i + 1}. ${h.prompt}`)
+      .join("\n")}\n`;
+  }
+  if (currentSql?.trim()) {
+    out += `\nCurrent query in the editor:\n${currentSql.trim()}\n`;
+  }
+  return `${out}\nRequest: ${intent}`;
 }
 
 export function explainUserPrompt(sql: string, schemaContext: string): string {

@@ -95,6 +95,8 @@ export class QueryPanel {
   private disposed = false;
   private readonly ai: AiService;
   private aiBarShown = false;
+  /** Recent Generate exchanges in this panel, oldest first — follow-up context. */
+  private aiHistory: Array<{ prompt: string; sql: string }> = [];
 
   private rerun(sql: string, database?: string): void {
     this.previewPath = undefined;
@@ -242,6 +244,9 @@ export class QueryPanel {
         case "ai":
           await this.handleAi(msg);
           break;
+        case "aiReset":
+          this.aiHistory = [];
+          break;
         case "aiComplete":
           await this.handleAiComplete(String(msg.word ?? ""), Number(msg.seq ?? 0));
           break;
@@ -307,12 +312,21 @@ export class QueryPanel {
           prompt: msg.prompt,
           sql: msg.sql,
           error: msg.error,
+          history: msg.verb === "generate" ? this.aiHistory : undefined,
         },
         driver,
       );
       if (!res) {
         this.post({ type: "aiResult", seq: msg.seq, cancelled: true });
         return;
+      }
+      // Remember the exchange so the next prompt can say "now also…" and be
+      // understood. Bounded: old asks stop mattering once the SQL has moved on.
+      if (msg.verb === "generate" && res.sql) {
+        this.aiHistory.push({ prompt: msg.prompt ?? "", sql: res.sql });
+        if (this.aiHistory.length > 6) {
+          this.aiHistory.shift();
+        }
       }
       this.post({
         type: "aiResult",
@@ -820,7 +834,8 @@ export class QueryPanel {
     <input id="aiPrompt" placeholder="✨ Ask AI — describe the query you want; table names autocomplete" spellcheck="false" />
     <button id="aiGenBtn" title="Generate SQL from the description (Enter)">✨ Generate</button>
     <button id="aiExplainBtn" class="secondary" title="Explain the selected SQL (or the whole editor)">Explain</button>
-    <button id="aiFixBtn" class="secondary" title="Fix the last failed query using its error message" disabled>Fix</button>
+    <button id="aiFixBtn" class="secondary" title="Fix the last failed query using its error message — enabled automatically after a query fails" disabled>Fix</button>
+    <button id="aiResetBtn" class="secondary" title="New session — forget this panel's AI prompts so the next Generate starts fresh">↺</button>
     <span id="aispin"></span>
   </div>
   <textarea id="sql" placeholder="${placeholder}">${escapeHtml(initialSql)}</textarea>
@@ -1167,7 +1182,7 @@ export class QueryPanel {
     // Hidden until the host confirms a configured provider (aiEnabled). All
     // reasoning is host-side; this owns only input, insert, and the note line.
     const aiBar = $('aibar'), aiPromptEl = $('aiPrompt'), aiNote = $('ainote');
-    let aiSeq = 0, lastError = null;
+    let aiSeq = 0, lastError = null, lastAiSql = null;
 
     // Live progress: an animated spinner + elapsed seconds right in the bar, so
     // a long provider round-trip reads as "working" rather than "stuck".
@@ -1203,6 +1218,9 @@ export class QueryPanel {
         const p = aiPromptEl.value.trim();
         if (!p) { aiPromptEl.focus(); return; }
         payload.prompt = p;
+        // The editor's current query rides along, so "now also show X" edits
+        // it instead of answering from scratch.
+        payload.sql = sqlEl.value;
       } else if (verb === 'explain') {
         const sel = sqlEl.value.slice(sqlEl.selectionStart, sqlEl.selectionEnd);
         const sql = sel.trim() ? sel : sqlEl.value;
@@ -1221,6 +1239,15 @@ export class QueryPanel {
     $('aiGenBtn').addEventListener('click', () => aiSend('generate'));
     $('aiExplainBtn').addEventListener('click', () => aiSend('explain'));
     $('aiFixBtn').addEventListener('click', () => aiSend('fix'));
+    $('aiResetBtn').addEventListener('click', () => {
+      lastAiSql = null;
+      aiPromptEl.value = '';
+      aiNote.textContent = '';
+      vscode.postMessage({ type: 'aiReset' });
+      // The editor is deliberately left alone — it may hold work worth keeping.
+      statusEl.textContent = 'AI session reset — next Generate starts fresh' +
+        (sqlEl.value.trim() ? ' (clear the editor too if the current query should not be considered)' : '') + '.';
+    });
 
     // Generated SQL never destroys typed work: it replaces the selection when
     // there is one, fills an empty editor, and otherwise appends on a new line.
@@ -1653,14 +1680,19 @@ export class QueryPanel {
           return;
         }
         if (m.verb !== 'explain' && m.sql) {
-          if (m.verb === 'fix') {
-            // The buffer holds the failed statement — replace it, selected.
+          // Follow-up generates return the FULL edited query. If the editor
+          // still holds exactly what the AI last produced, replace it —
+          // appending would stack near-duplicates. Hand-edited content is
+          // never replaced wholesale; that falls back to the safe insert.
+          const isFollowUp = lastAiSql !== null && sqlEl.value.trim() === lastAiSql.trim();
+          if (m.verb === 'fix' || isFollowUp) {
             sqlEl.value = m.sql;
             sqlEl.setSelectionRange(0, m.sql.length);
             sqlEl.focus();
           } else {
             aiInsertSql(m.sql);
           }
+          lastAiSql = m.sql;
         }
         let note = esc(m.text || '');
         if (m.destructive) {

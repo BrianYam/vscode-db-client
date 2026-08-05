@@ -677,6 +677,8 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <h4>What is sent to the AI provider</h4>
       <ul>
         <li>Your typed request (or the SQL you asked to explain/fix, plus its error message).</li>
+        <li>For follow-ups: the query currently in the editor and your previous requests in
+            that panel, so "now also show…" edits the query instead of starting over.</li>
         <li><b>Schema names only</b>: table names, column names, and foreign-key relations of
             the connected database, so the AI can write queries against your real schema.</li>
         <li>The engine dialect (PostgreSQL / MySQL / SQLite).</li>

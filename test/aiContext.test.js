@@ -11,7 +11,7 @@ const {
   extractSql,
   isDestructive,
 } = require("../out/ai/context.js");
-const { systemPrompt, dialectLabel } = require("../out/ai/prompts.js");
+const { systemPrompt, dialectLabel, generateUserPrompt } = require("../out/ai/prompts.js");
 
 const SCHEMA = {
   tables: ["users", "orders", "saving_plans"],
@@ -113,4 +113,23 @@ test("generate and fix demand runnable SQL — no bind parameters, params CTE in
   assert.match(gen, /avoid DISTINCT/);
   // Explain doesn't write SQL, so it carries no authoring rules.
   assert.doesNotMatch(systemPrompt("explain", "postgres"), /bind parameters/);
+});
+
+test("generateUserPrompt carries editor SQL and session history for follow-ups", () => {
+  const plain = generateUserPrompt("count users", "users(id)");
+  assert.doesNotMatch(plain, /Current query/);
+  assert.doesNotMatch(plain, /Earlier requests/);
+  assert.match(plain, /Request: count users/);
+
+  const followUp = generateUserPrompt(
+    "now also show the name",
+    "users(id, name)",
+    "SELECT id FROM users",
+    [{ prompt: "count users", sql: "SELECT id FROM users" }],
+  );
+  assert.match(followUp, /Earlier requests in this session[\s\S]*1\. count users/);
+  assert.match(followUp, /Current query in the editor:\nSELECT id FROM users/);
+  assert.match(followUp, /Request: now also show the name/);
+  // System prompt tells the model what those sections mean.
+  assert.match(systemPrompt("generate", "postgres"), /edit the current query/);
 });

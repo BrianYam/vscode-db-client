@@ -10,6 +10,7 @@ import {
   schemaInputFromHints,
 } from "./context";
 import {
+  type AiExchange,
   type AiVerb,
   explainUserPrompt,
   fixUserPrompt,
@@ -31,10 +32,13 @@ export interface AiVerbRequest {
   database?: string;
   /** Generate: the natural-language intent. */
   prompt?: string;
-  /** Explain/Fix: the SQL in question. */
+  /** Explain/Fix: the SQL in question. Generate: the editor's current query,
+   *  so follow-up requests edit it instead of starting over. */
   sql?: string;
   /** Fix: the database error message. */
   error?: string;
+  /** Generate: earlier exchanges in this panel, oldest first (bounded). */
+  history?: AiExchange[];
 }
 
 export interface AiVerbResult {
@@ -86,8 +90,9 @@ export class AiService {
       {
         modal: true,
         detail:
-          `AI assistance sends your typed request plus table and column names, ` +
-          `data types, and foreign-key relations for the connected database to ${host}. ` +
+          `AI assistance sends your typed request, the SQL in the query editor, ` +
+          `and table/column names, data types, and foreign-key relations for the ` +
+          `connected database to ${host}. ` +
           `It never sends row data, query results, passwords, or connection hosts. ` +
           `You can revoke this any time in Settings & Guides → AI Assistant.`,
       },
@@ -146,7 +151,10 @@ export class AiService {
     }
 
     const hints = await driver.schemaHints(req.database);
-    const focus = req.verb === "generate" ? (req.prompt ?? "") : (req.sql ?? "");
+    // Trim relevance comes from the prompt AND the current SQL — a follow-up
+    // like "add the plan name" names no tables itself; the query does.
+    const focus =
+      req.verb === "generate" ? [req.prompt, req.sql].filter(Boolean).join("\n") : (req.sql ?? "");
     const fksByTable = await this.collectFks(driver, focus, hints.tables);
     const ctx = buildSchemaContext(
       focus,
@@ -163,7 +171,7 @@ export class AiService {
         system: systemPrompt(req.verb, req.connType),
         user:
           req.verb === "generate"
-            ? generateUserPrompt(req.prompt ?? "", ctx.text)
+            ? generateUserPrompt(req.prompt ?? "", ctx.text, req.sql, req.history)
             : req.verb === "explain"
               ? explainUserPrompt(req.sql ?? "", ctx.text)
               : fixUserPrompt(req.sql ?? "", req.error ?? "", ctx.text),
