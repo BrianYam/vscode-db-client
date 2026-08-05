@@ -307,6 +307,23 @@ export class SettingsPanel {
   #aiPricesBox input { width: 70px; padding: 2px 6px; border-radius: 3px;
          background: var(--vscode-input-background); color: var(--vscode-input-foreground);
          border: 1px solid var(--vscode-input-border, #4443); }
+  /* Custom model dropdown — the native datalist can't scroll a 300-model list. */
+  .aimodelwrap { position: relative; flex: 1; max-width: 380px; display: flex; }
+  .aimodelwrap input { flex: 1; max-width: none; }
+  #aiModelDrop { position: absolute; top: 100%; left: 0; right: 0; z-index: 40; display: none;
+         max-height: 300px; overflow-y: auto; margin-top: 2px; border-radius: 4px;
+         background: var(--vscode-editorWidget-background, #252526);
+         border: 1px solid var(--vscode-editorWidget-border, #4443);
+         box-shadow: 0 2px 8px #0006; }
+  #aiModelDrop .mrow { display: flex; gap: 10px; padding: 4px 10px; cursor: pointer;
+         align-items: baseline; }
+  #aiModelDrop .mrow.sel, #aiModelDrop .mrow:hover {
+         background: var(--vscode-list-activeSelectionBackground, #04395e);
+         color: var(--vscode-list-activeSelectionForeground, #fff); }
+  #aiModelDrop .mid { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #aiModelDrop .mprice { opacity: .65; font-size: 12px; white-space: nowrap; }
+  #aiModelDrop .mmore { padding: 4px 10px; opacity: .6; font-style: italic; font-size: 12px;
+         border-top: 1px solid var(--vscode-panel-border, #4443); }
 </style>
 </head>
 <body>
@@ -401,6 +418,69 @@ export class SettingsPanel {
           '<td><input data-m="' + esc(m) + '" data-k="output" value="' + p.output + '"></td></tr>').join('') + '</table>';
     }
 
+    // ---- custom model dropdown (native datalist can't scroll 300+ models) ----
+    let modelList = [];               // fetched AiModelInfo[] for the current endpoint
+    let mdItems = [], mdSel = 0, mdOpen = false, mdMore = 0;
+    const MD_CAP = 100;               // rendered rows; the rest says "keep typing"
+    function mdPriceLabel(mo){
+      if (mo.inputPerMTok == null && mo.outputPerMTok == null) return '';
+      const p = (v) => v == null ? '?' : String(parseFloat(v.toFixed(3)));
+      return (mo.est ? '~' : '') + '$' + p(mo.inputPerMTok) + ' in / $' + p(mo.outputPerMTok) + ' out /MTok';
+    }
+    function mdClose(){ mdOpen = false; mdItems = []; $('aiModelDrop').style.display = 'none'; }
+    function mdRender(){
+      const drop = $('aiModelDrop');
+      if (!mdItems.length) { mdClose(); return; }
+      drop.innerHTML = mdItems.map((mo, i) => {
+        const price = mdPriceLabel(mo);
+        return '<div class="mrow' + (i === mdSel ? ' sel' : '') + '" data-i="' + i + '">' +
+               '<span class="mid">' + esc(mo.id) + '</span>' +
+               (price ? '<span class="mprice">' + esc(price) + '</span>' : '') + '</div>';
+      }).join('') +
+      (mdMore > 0 ? '<div class="mmore">' + mdMore + ' more — keep typing to narrow</div>' : '');
+      drop.style.display = 'block';
+      mdOpen = true;
+      const sel = drop.querySelector('.mrow.sel');
+      if (sel) sel.scrollIntoView({ block: 'nearest' });
+    }
+    function mdFilter(q){
+      if (!modelList.length) { mdClose(); return; }
+      const needle = (q ?? $('aiModel').value).toLowerCase();
+      const all = needle ? modelList.filter((mo) => mo.id.toLowerCase().includes(needle)) : modelList;
+      mdMore = Math.max(0, all.length - MD_CAP);
+      mdItems = all.slice(0, MD_CAP);
+      mdSel = 0;
+      mdRender();
+    }
+    function mdAccept(){
+      const mo = mdItems[mdSel];
+      if (!mo) return;
+      $('aiModel').value = mo.id;
+      mdClose();
+      $('aiModel').focus();
+    }
+    const aiModelEl = $('aiModel');
+    if (aiModelEl) {
+      aiModelEl.addEventListener('input', () => mdFilter());
+      aiModelEl.addEventListener('focus', () => mdFilter());
+      aiModelEl.addEventListener('blur', mdClose);
+      aiModelEl.addEventListener('keydown', (e) => {
+        if (!mdOpen) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); mdSel = (mdSel + 1) % mdItems.length; mdRender(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); mdSel = (mdSel - 1 + mdItems.length) % mdItems.length; mdRender(); }
+        else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); mdAccept(); }
+        else if (e.key === 'Escape') { e.preventDefault(); mdClose(); }
+      });
+      $('aiModelDrop').addEventListener('mousedown', (e) => {
+        // mousedown, not click: blur would close the list before click landed.
+        const row = e.target.closest('.mrow');
+        if (!row) return;
+        e.preventDefault();
+        mdSel = Number(row.getAttribute('data-i'));
+        mdAccept();
+      });
+    }
+
     // Key status follows the preset SHOWN in the dropdown, not just the saved
     // one — each provider has its own SecretStorage slot, and switching presets
     // should immediately show whether that provider already holds a key.
@@ -418,6 +498,9 @@ export class SettingsPanel {
       presetSel.addEventListener('change', () => {
         const p = ai && ai.presets.find((x) => x.id === presetSel.value);
         if (p) { $('aiBase').value = p.baseUrl; if (p.defaultModel) $('aiModel').value = p.defaultModel; }
+        // The fetched model list belongs to the previous endpoint — drop it.
+        modelList = [];
+        mdClose();
         updateKeyStatus();
       });
       // Both buttons submit what is on screen — Test must never run against
@@ -467,24 +550,17 @@ export class SettingsPanel {
         $('aiStatus').className = m.ok ? 'aiok' : 'aierr';
       }
       else if (m.type === 'aiModels') {
-        // Price label per option: endpoint-reported, or "~" local estimates.
-        const fmtP = (v) => v == null ? '?' : String(parseFloat(v.toFixed(3)));
-        const anyPriced = m.models.some((mo) => mo.inputPerMTok != null || mo.outputPerMTok != null);
-        $('aiModelList').innerHTML = m.models.map((mo) => {
-          const priced = mo.inputPerMTok != null || mo.outputPerMTok != null;
-          const label = priced
-            ? (mo.est ? '~' : '') + '$' + fmtP(mo.inputPerMTok) + ' in / $' + fmtP(mo.outputPerMTok) + ' out /MTok'
-            : '';
-          return '<option value="' + esc(mo.id) + '"' + (label ? ' label="' + esc(label) + '"' : '') + '>';
-        }).join('');
+        modelList = m.models;
+        const anyPriced = modelList.some((mo) => mo.inputPerMTok != null || mo.outputPerMTok != null);
         // An empty model field takes the newest fetched id so "preset + key +
         // fetch" alone yields a working setup.
-        if (!$('aiModel').value && m.models.length) $('aiModel').value = m.models[0].id;
-        $('aiStatus').textContent = m.models.length
-          ? m.models.length + ' models — click the Model field to choose, then Save.' +
+        if (!$('aiModel').value && modelList.length) $('aiModel').value = modelList[0].id;
+        $('aiStatus').textContent = modelList.length
+          ? modelList.length + ' models — click the Model field to choose, then Save.' +
             (anyPriced ? ' Prices shown where known (~ = local estimate).' : '')
           : 'The endpoint returned no models.';
-        $('aiStatus').className = m.models.length ? 'aiok' : 'aierr';
+        $('aiStatus').className = modelList.length ? 'aiok' : 'aierr';
+        if (modelList.length) { $('aiModel').focus(); mdFilter(''); }
       }
     });
   </script>
@@ -695,9 +771,12 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <h4>Provider</h4>
       <div class="airow"><label>Preset</label><select id="aiPreset"></select></div>
       <div class="airow"><label>Base URL</label><input id="aiBase" type="text" spellcheck="false" /></div>
-      <div class="airow"><label>Model</label><input id="aiModel" type="text" spellcheck="false"
-           list="aiModelList" placeholder="↻ fetch the live list, or type any model id" />
-           <datalist id="aiModelList"></datalist>
+      <div class="airow"><label>Model</label>
+           <div class="aimodelwrap">
+             <input id="aiModel" type="text" spellcheck="false" autocomplete="off"
+                    placeholder="↻ fetch the live list, or type any model id" />
+             <div id="aiModelDrop"></div>
+           </div>
            <button id="aiModelsBtn" class="aibtn secondary"
                    title="Fetch the models this endpoint currently serves">↻</button></div>
       <div class="airow"><label>API key</label><input id="aiKey" type="password"
