@@ -336,6 +336,7 @@ export class QueryPanel {
         text: res.text,
         trimmedTo: res.trimmedTo,
         destructive: res.destructive,
+        mutation: res.mutation,
         ms: res.ms,
         tokens: res.tokens,
         provider: res.provider,
@@ -802,6 +803,9 @@ export class QueryPanel {
   .aiwarn { color: var(--vscode-editorWarning-foreground); font-weight: 600; }
   .aitrim { color: var(--vscode-editorWarning-foreground); }
   .aidim { opacity: .6; }
+  #lockBtn.locked { background: transparent;
+                    border: 1px solid var(--vscode-editorWarning-foreground);
+                    color: var(--vscode-editorWarning-foreground); }
   .null { opacity: .5; font-style: italic; }
   .chk { width: 22px; text-align: center; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
@@ -844,6 +848,7 @@ export class QueryPanel {
   <div id="ainote"></div>
   <div class="bar">
     <button id="runBtn" title="Run (Ctrl/Cmd+Enter) — runs the highlighted text only, when something is highlighted">Run ▶</button>
+    <button id="lockBtn" class="secondary" title="Query lock — blocks running queries and editing data in this panel. Engages by itself when the AI generates a mutation. One click toggles.">🔓</button>
     ${hasFile ? '<button id="saveBtn" class="secondary" title="Save to file (Cmd/Ctrl+S)">💾 Save</button>' : ""}
     <button id="refreshBtn" class="secondary" title="Refresh">⟳</button>
     <span id="dbctx" title="${escapeHtml(this.contextTooltip())}">${escapeHtml(dbLabel)}</span>
@@ -925,10 +930,29 @@ export class QueryPanel {
       }, 350);
     }
 
+    // ---------------- query lock ----------------
+    // Manual via the toolbar 🔒, automatic when the AI generates a mutation.
+    // Locked = read-only panel: no runs, no cell/row edits, no TTL changes.
+    // One click unlocks — the deliberate click is the safety.
+    let qlock = false;
+    function lockNudge(){ statusEl.textContent = '🔒 Query lock is on — click the lock to unlock.'; }
+    function setLock(on){
+      qlock = on;
+      const b = $('lockBtn');
+      b.textContent = on ? '🔒' : '🔓';
+      b.classList.toggle('locked', on);
+      $('runBtn').disabled = on;
+      statusEl.textContent = on
+        ? '🔒 Query lock on — running and editing are blocked in this panel.'
+        : '🔓 Unlocked.';
+    }
+    $('lockBtn').addEventListener('click', () => setLock(!qlock));
+
     // Highlight-to-run: with a selection, only that text is sent. The textarea keeps
     // its selection after losing focus, so the Run button behaves the same as
     // Ctrl/Cmd+Enter — one rule, not two. A whitespace-only selection is ignored.
     function run() {
+      if (qlock) { lockNudge(); return; }
       const sel = sqlEl.value.slice(sqlEl.selectionStart, sqlEl.selectionEnd);
       const partial = !!sel.trim();
       statusEl.textContent = partial ? 'Running selection…' : 'Running…';
@@ -1324,8 +1348,14 @@ export class QueryPanel {
     $('prevBtn').addEventListener('click', () => pageBy(-1));
     $('nextBtn').addEventListener('click', () => pageBy(1));
     $('delBtn').addEventListener('click', deleteSelected);
-    $('ttlEdit').addEventListener('click', () => vscode.postMessage({ type:'setTtl', action:'edit' }));
-    $('ttlPersist').addEventListener('click', () => vscode.postMessage({ type:'setTtl', action:'persist' }));
+    $('ttlEdit').addEventListener('click', () => {
+      if (qlock) { lockNudge(); return; }
+      vscode.postMessage({ type:'setTtl', action:'edit' });
+    });
+    $('ttlPersist').addEventListener('click', () => {
+      if (qlock) { lockNudge(); return; }
+      vscode.postMessage({ type:'setTtl', action:'persist' });
+    });
 
     // Human-readable TTL from ms; -1 = no expiry, -2 = key gone.
     function fmtTtl(ms){
@@ -1358,6 +1388,7 @@ export class QueryPanel {
       vscode.postMessage({ type:'page', offset: next, seq: ++reqSeq });
     }
     function deleteSelected() {
+      if (qlock) { lockNudge(); return; }
       if (!raw || !raw.editable || !selected.size) return;
       const pks = [...selected].map((ri) => {
         const pk = {}; for (const k of raw.editable.pkColumns) pk[k] = raw.rows[ri][k]; return pk;
@@ -1596,6 +1627,7 @@ export class QueryPanel {
     }
 
     function saveCell(ri, col, val){
+      if (qlock) { lockNudge(); renderGrid(); return; }
       const pk = {}; for (const k of raw.editable.pkColumns) pk[k] = raw.rows[ri][k];
       raw.rows[ri][col] = val;              // optimistic
       statusEl.textContent = 'Saving…';
@@ -1631,6 +1663,7 @@ export class QueryPanel {
     $('aclose').addEventListener('click', () => $('addOverlay').style.display = 'none');
     $('addOverlay').addEventListener('click', (e) => { if (e.target.id === 'addOverlay') $('addOverlay').style.display = 'none'; });
     function openAddModal(){
+      if (qlock) { lockNudge(); return; }
       if (!raw || !raw.editable) return;
       const form = $('addForm');
       form.innerHTML = raw.columns.map((c) => {
@@ -1699,6 +1732,13 @@ export class QueryPanel {
         let note = esc(m.text || '');
         if (m.destructive) {
           note = '<span class="aiwarn">⚠ ' + esc(m.destructive) + ' — review before running</span>' +
+                 (note ? ' · ' + note : '');
+        }
+        // A mutation engages the query lock by itself — the reflex Ctrl+Enter
+        // after a Generate must never be able to run a write unreviewed.
+        if (m.mutation && m.verb !== 'explain') {
+          setLock(true);
+          note = '<span class="aiwarn">🔒 auto-locked (' + esc(m.mutation) + ') — unlock to run</span>' +
                  (note ? ' · ' + note : '');
         }
         if (m.trimmedTo) {

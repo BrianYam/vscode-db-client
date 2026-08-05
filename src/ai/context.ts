@@ -154,6 +154,40 @@ export function extractSql(reply: string): ExtractedReply {
 }
 
 /**
+ * Any statement that writes data or structure — the query-lock trigger. Wider
+ * than isDestructive on purpose: a syntactically fine INSERT is not
+ * "destructive", but it IS a mutation the lock must catch. Returns the verb
+ * (for the "auto-locked (INSERT)" message) or null for read-only statements.
+ * Token scan, not a grammar; over-triggering is fail-safe by design — a rare
+ * false positive costs one click on the lock.
+ */
+const MUTATION_VERB = /^(insert|update|delete|merge|replace|drop|truncate|alter|create)\b/i;
+const EMBEDDED_WRITE = /\b(insert|update|delete|merge|replace)\b/i;
+
+export function isMutation(sql: string): string | null {
+  const stripped = sql.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+  for (const stmt of stripped.split(";")) {
+    const s = stmt.trim();
+    if (!s) {
+      continue;
+    }
+    const lead = MUTATION_VERB.exec(s);
+    if (lead) {
+      return lead[1].toUpperCase();
+    }
+    // CTE-wrapped writes: `WITH x AS (…) INSERT INTO …`. A WITH that merely
+    // *mentions* a write verb (in a string literal) also matches — acceptable.
+    if (/^with\b/i.test(s)) {
+      const inner = EMBEDDED_WRITE.exec(s);
+      if (inner) {
+        return inner[1].toUpperCase();
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Statement shapes that must carry a visible warning tag before the user runs
  * them. Returns a short reason, or null for safe statements. Deliberately
  * shallow — a token scan, not a grammar — matching the sqlComplete.ts approach.

@@ -191,6 +191,12 @@ All §8 recommendations approved:
 2. **UX**: inline assist bar in the query panel; SQL inserted for review, never auto-run.
 3. **Verbs**: all three — Generate, Explain, Fix.
 4. **Redis**: deferred to a later milestone.
+   **Amended 2026-08-06 — descoped entirely, no milestone planned.** Rationale: the value
+   AI adds to SQL (joins, grouping, dialect, schema recall) has no Redis counterpart —
+   commands are single-purpose one-liners, and this client's Redis workflows run through
+   the tree (key search, TTL, in-grid value editing), not the command box. TablePlus's
+   BYOK assist is likewise SQL-only. Revisit only on concrete user demand
+   (Marketplace review / issue asking for it).
 5. **Models**: sensible per-provider default + free-text override.
 
 **Added at the lock:**

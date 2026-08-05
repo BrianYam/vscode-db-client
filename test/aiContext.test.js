@@ -10,6 +10,7 @@ const {
   buildSchemaContext,
   extractSql,
   isDestructive,
+  isMutation,
 } = require("../out/ai/context.js");
 const { systemPrompt, dialectLabel, generateUserPrompt } = require("../out/ai/prompts.js");
 
@@ -91,6 +92,32 @@ test("isDestructive tags the dangerous shapes and clears the safe ones", () => {
   assert.match(isDestructive("SELECT 1; -- ok\nDELETE FROM users"), /DELETE without WHERE/);
   // A WHERE inside a comment doesn't count as a guard.
   assert.match(isDestructive("DELETE FROM users -- where id=1"), /DELETE without WHERE/);
+});
+
+test("isMutation catches every write verb and leaves reads alone", () => {
+  // Reads never lock.
+  assert.strictEqual(isMutation("SELECT * FROM users"), null);
+  assert.strictEqual(isMutation("WITH p AS (SELECT 1) SELECT * FROM p"), null);
+  assert.strictEqual(isMutation("EXPLAIN SELECT 1"), null);
+  // Every write verb, including well-formed ones isDestructive would pass.
+  assert.strictEqual(isMutation("INSERT INTO t (a) VALUES (1)"), "INSERT");
+  assert.strictEqual(isMutation("UPDATE t SET a = 1 WHERE id = 2"), "UPDATE");
+  assert.strictEqual(isMutation("DELETE FROM t WHERE id = 2"), "DELETE");
+  assert.strictEqual(isMutation("MERGE INTO t USING s ON t.id = s.id"), "MERGE");
+  assert.strictEqual(isMutation("REPLACE INTO t VALUES (1)"), "REPLACE");
+  assert.strictEqual(isMutation("CREATE TABLE t (id int)"), "CREATE");
+  assert.strictEqual(isMutation("DROP TABLE t"), "DROP");
+  assert.strictEqual(isMutation("TRUNCATE t"), "TRUNCATE");
+  assert.strictEqual(isMutation("ALTER TABLE t ADD c int"), "ALTER");
+  // Upserts are INSERTs; CTE-wrapped writes are caught through the WITH.
+  assert.strictEqual(isMutation("INSERT INTO t (a) VALUES (1) ON CONFLICT DO NOTHING"), "INSERT");
+  assert.strictEqual(
+    isMutation("WITH src AS (SELECT 1 AS a) INSERT INTO t SELECT * FROM src"),
+    "INSERT",
+  );
+  // Multi-statement: any write in the batch locks; comments can't hide one.
+  assert.strictEqual(isMutation("SELECT 1;\nUPDATE t SET a = 1 WHERE id = 1"), "UPDATE");
+  assert.strictEqual(isMutation("-- UPDATE t SET a = 1\nSELECT 1"), null);
 });
 
 test("prompts pin the dialect and forbid destructive output on generate", () => {

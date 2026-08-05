@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Query lock.** A 🔒 toggle in the query panel toolbar makes the panel
+  read-only: running queries (button, Ctrl/Cmd+Enter, highlight-to-run), cell
+  edits, row insert/delete, and TTL changes are all blocked with a clear
+  message until unlocked. The lock also **engages by itself whenever the AI
+  generates a mutation** — INSERT, UPDATE, DELETE, MERGE/REPLACE, upserts, or
+  DDL (CREATE/DROP/ALTER/TRUNCATE) — so the reflex Ctrl+Enter after a Generate
+  can never run a write unreviewed. One click unlocks; the assist bar notes
+  "🔒 auto-locked (UPDATE)" so it's always clear why. Detection errs on the
+  side of locking (a rare false positive costs one click).
+
 ## [1.1.0] - 2026-08-05
 
 ### Added

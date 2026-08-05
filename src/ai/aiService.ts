@@ -6,6 +6,7 @@ import {
   buildSchemaContext,
   extractSql,
   isDestructive,
+  isMutation,
   referencedTables,
   schemaInputFromHints,
 } from "./context";
@@ -50,6 +51,8 @@ export interface AiVerbResult {
   trimmedTo?: number;
   /** Reason string when the generated SQL matches a destructive shape. */
   destructive?: string;
+  /** Write verb (INSERT/UPDATE/…) when the SQL mutates — engages the query lock. */
+  mutation?: string;
   /** Wall-clock provider round-trip, for the "answered in Xs" line. */
   ms: number;
   /** input + output token total, so the cost of the call is visible in place. */
@@ -235,6 +238,7 @@ export class AiService {
       text: explanation,
       trimmedTo: ctx.trimmed ? ctx.tables.length : undefined,
       destructive: isDestructive(sql) ?? undefined,
+      mutation: isMutation(sql) ?? undefined,
       ...attribution,
     };
   }

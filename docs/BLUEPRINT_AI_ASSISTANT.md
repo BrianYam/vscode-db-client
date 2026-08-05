@@ -2,7 +2,8 @@
 
 Derived from `DISCOVERY_AI_ASSISTANT.md` (locked 2026-08-05).
 Locked decisions: **Anthropic + OpenAI + OpenAI-compatible custom base URL**, **inline
-assist bar** (never auto-run), verbs **Generate / Explain / Fix**, **Redis deferred**.
+assist bar** (never auto-run), verbs **Generate / Explain / Fix**, **Redis deferred**
+(amended 2026-08-06: **descoped — not planned**; see Discovery §9).
 Added at the lock: the prompt field reuses the **existing completion widget**, and schema
 context is **full schema + relations** with an honest token-budget trim.
 
@@ -149,10 +150,11 @@ independent and can interleave.
 ## 3. Pillar III — Growth
 
 Cheap follow-ons once the provider layer exists: SSE streaming; a chat sidebar with
-history; **Redis command generation** (deferred at the lock — same plumbing, key-pattern
-context instead of schema); results-aware follow-ups ("now group it by month"); schema
-embeddings for very large databases; "explain this error" on any failed query even with
-AI otherwise idle.
+history; results-aware follow-ups ("now group it by month"); schema embeddings for very
+large databases; "explain this error" on any failed query even with AI otherwise idle.
+
+Explicitly **not** planned: Redis command generation — descoped 2026-08-06 (Discovery §9
+amendment); the assist bar stays SQL-only unless real user demand appears.
 
 ## 4. Phase 4 — QA gate
 

@@ -693,7 +693,8 @@ Requested 2026-08-03: alongside encrypt and mask, an option that shows the passw
 
 Spec: `DISCOVERY_AI_ASSISTANT.md` (locked 2026-08-05) → `BLUEPRINT_AI_ASSISTANT.md`.
 Locked: Anthropic + OpenAI + OpenAI-compatible custom base URL; inline assist bar
-(never auto-run); Generate / Explain / Fix; Redis deferred; prompt field reuses the
+(never auto-run); Generate / Explain / Fix; Redis descoped 2026-08-06 (not planned —
+Discovery §9 amendment); prompt field reuses the
 completion widget; context = full schema + relations with honest trim.
 
 ### M22.1 — Provider layer (`src/ai/`) ✅ DONE 2026-08-05 (Blueprint §0, §1.1)
@@ -756,3 +757,31 @@ completion widget; context = full schema + relations with honest trim.
 - [ ] `[SDD][M22]` Honesty checks: trim notice, destructive tag, ledger cap, cost label
 - [ ] `[SDD][M22]` Regression: Ctrl/Cmd+Enter runs, editor completion intact, panel
       unchanged with no provider configured
+
+## M23 — Query Lock: manual + AI-mutation auto-lock (requested 2026-08-06)
+
+Spec: `DISCOVERY_QUERY_LOCK.md` (locked 2026-08-06 — full read-only panel, one-click
+unlock, all writes incl. DDL, auto-lock on AI output only).
+
+### M23.0 — Mutation detector ✅ DONE 2026-08-06 (Discovery §3)
+- [x] `[SDD][M23]` `isMutation(sql)` in `src/ai/context.ts`: leading-verb scan over
+      {INSERT, UPDATE, DELETE, MERGE, REPLACE, DROP, TRUNCATE, ALTER, CREATE} per
+      statement, comment-stripped; `WITH …` statements containing a write verb count
+- [x] `[SDD][M23]` Tests: SELECT→null, each verb, upsert, CTE-wrapped INSERT,
+      multi-statement, comment-hidden verbs
+
+### M23.1 — Panel lock ✅ DONE 2026-08-06 (Discovery §3)
+- [x] `[SDD][M23]` 🔒 toolbar toggle beside Run; locked state visually distinct; one
+      click either way
+- [x] `[SDD][M23]` Locked blocks: `run()` (button, Ctrl/Cmd+Enter, highlight-run),
+      `saveCell`, `deleteSelected`, `openAddModal`, TTL edit/persist — each refusal
+      says "🔒 Query lock is on — click the lock to unlock."
+- [x] `[SDD][M23]` Run button disabled while locked
+
+### M23.2 — AI auto-lock 🟡 code done 2026-08-06, manual QA open (Discovery §3)
+- [x] `[SDD][M23]` `AiVerbResult.mutation` from `isMutation` on Generate/Fix; passed in
+      the `aiResult` message
+- [x] `[SDD][M23]` Webview engages lock on mutation results; note line prefixed
+      "🔒 auto-locked (VERB)"; Explain never locks
+- [ ] `[SDD][M23]` QA: generate a SELECT (no lock), an UPDATE (locks), unlock → run;
+      manual lock blocks grid edits; regression on Ctrl+Enter/completion
