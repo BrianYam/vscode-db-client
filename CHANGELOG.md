@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-05
+
 ### Added
 - **Query lock.** A 🔒 toggle in the query panel toolbar makes the panel
   read-only: running queries (button, Ctrl/Cmd+Enter, highlight-to-run), cell
