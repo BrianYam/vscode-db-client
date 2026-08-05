@@ -1,6 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { AiStore } from "./ai/aiStore";
+import { AI_PRESETS } from "./ai/registry";
+import { UsageStore } from "./ai/usageStore";
 import { ConnectionManager } from "./connections/manager";
 import {
   buildExport,
@@ -112,6 +115,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
       await manager.disposeAll();
       const { secretsFailed } = await store.deleteAll();
       await queries.deleteAll();
+      // AI keys live under preset ids plus whatever custom id is active.
+      const aiStore = new AiStore(ctx);
+      await aiStore.deleteAll([...AI_PRESETS.map((p) => p.id), aiStore.get().providerId]);
+      await new UsageStore(ctx).deleteAll();
       if (secretsFailed > 0) {
         vscode.window.showWarningMessage(
           `Open DB Client: connections and query files were removed, but ${secretsFailed} stored secret(s) may still remain in the OS keychain.`,

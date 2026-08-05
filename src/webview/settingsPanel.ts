@@ -1,5 +1,11 @@
 import * as fs from "node:fs";
 import * as vscode from "vscode";
+import { AiError } from "../ai/AiProvider";
+import { AiService } from "../ai/aiService";
+import { AiStore } from "../ai/aiStore";
+import { AI_PRESETS, presetById } from "../ai/registry";
+import { summarizeAllTime, summarizePeriod, UsageStore } from "../ai/usageStore";
+import { ConnectionStore } from "../connections/store";
 import { renderChangelog } from "./miniMarkdown";
 
 /** Everything a guide body may need from the running extension. */
@@ -33,8 +39,16 @@ export class SettingsPanel {
   }
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly aiStore: AiStore;
+  private readonly usageStore: UsageStore;
+  private readonly aiService: AiService;
+  private readonly connStore: ConnectionStore;
 
   private constructor(private readonly ctx: vscode.ExtensionContext) {
+    this.aiStore = new AiStore(ctx);
+    this.usageStore = new UsageStore(ctx);
+    this.aiService = new AiService(this.aiStore, this.usageStore);
+    this.connStore = new ConnectionStore(ctx);
     this.panel = vscode.window.createWebviewPanel(
       "openDbClient.settings",
       "Open DB Client — Settings & Guides",
@@ -43,12 +57,107 @@ export class SettingsPanel {
     );
     this.panel.onDidDispose(() => (SettingsPanel.current = undefined));
     // The Danger-zone button posts a message; the command owns the confirm modal.
-    this.panel.webview.onDidReceiveMessage((msg) => {
+    this.panel.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === "resetAllData") {
         vscode.commands.executeCommand("openDbClient.resetAllData");
+        return;
       }
+      await this.handleAiMessage(msg);
     });
     this.panel.webview.html = this.render();
+    void this.postAiState();
+  }
+
+  /** Everything the AI Assistant section needs to draw, posted after each change. */
+  private async postAiState(): Promise<void> {
+    const settings = this.aiStore.get();
+    const state = this.usageStore.state();
+    const prices = this.usageStore.prices();
+    const preset = presetById(settings.providerId);
+    this.panel.webview.postMessage({
+      type: "aiState",
+      settings: {
+        providerId: settings.providerId,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        consentGiven: settings.consentGiven,
+        disabledConnections: settings.disabledConnections,
+      },
+      hasKey: settings.providerId ? !!(await this.aiStore.getKey(settings.providerId)) : false,
+      needsKey: preset ? preset.needsKey : true,
+      configured: await this.aiStore.isConfigured(),
+      presets: AI_PRESETS,
+      connections: this.connStore.all().map((c) => ({ id: c.id, name: c.name })),
+      usagePeriod: summarizePeriod(state, prices),
+      usageAllTime: summarizeAllTime(state, prices),
+      periodStart: state.periodStart,
+      dropped: state.dropped,
+      prices,
+    });
+  }
+
+  private async handleAiMessage(msg: Record<string, unknown>): Promise<void> {
+    switch (msg?.type) {
+      case "aiLoad":
+        break; // fall through to the postAiState below
+      case "aiSave":
+        await this.saveAiForm(msg);
+        break;
+      case "aiTest":
+        // Test what is on screen, not what happened to be stored — testing an
+        // unsaved form is exactly the "Failed to parse URL" trap.
+        await this.saveAiForm(msg);
+        try {
+          const { ms, model } = await this.aiService.test();
+          this.panel.webview.postMessage({
+            type: "aiTestResult",
+            ok: true,
+            message: `✓ ${model} responded in ${ms}ms`,
+          });
+        } catch (err) {
+          this.panel.webview.postMessage({
+            type: "aiTestResult",
+            ok: false,
+            message: err instanceof AiError ? err.message : (err as Error).message,
+          });
+        }
+        break;
+      case "aiRevokeConsent":
+        await this.aiStore.update({ consentGiven: false });
+        break;
+      case "aiSetConnEnabled":
+        await this.aiStore.setAiEnabledFor(String(msg.connId ?? ""), !!msg.enabled);
+        break;
+      case "aiResetPeriod":
+        await this.usageStore.resetPeriod();
+        break;
+      case "aiSavePrices":
+        if (msg.prices && typeof msg.prices === "object") {
+          await this.usageStore.savePrices(
+            msg.prices as Record<string, { input: number; output: number }>,
+          );
+        }
+        break;
+      default:
+        return; // not an AI message — nothing to re-post
+    }
+    await this.postAiState();
+  }
+
+  /** Persist the form: config to globalState, and the key (when typed) to SecretStorage. */
+  private async saveAiForm(msg: Record<string, unknown>): Promise<void> {
+    const preset = presetById(String(msg.providerId ?? ""));
+    await this.aiStore.update({
+      providerId: String(msg.providerId ?? ""),
+      kind: preset?.kind ?? "openai-compat",
+      baseUrl: String(msg.baseUrl ?? "").trim(),
+      model: String(msg.model ?? "").trim(),
+    });
+    // A blank key field means "keep the stored one", never "delete it".
+    const key = String(msg.key ?? "");
+    if (key) {
+      await this.aiStore.setKey(this.aiStore.get().providerId, key);
+    }
   }
 
   /** Read a bundled engine icon and return inline-safe SVG markup. */
@@ -158,6 +267,24 @@ export class SettingsPanel {
          color: var(--vscode-errorForeground);
          border: 1px solid var(--vscode-errorForeground); }
   .danger-btn:hover { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
+  /* --- AI Assistant section --- */
+  .airow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .airow label { width: 110px; flex: 0 0 auto; font-size: 13px; opacity: .85; }
+  .airow input, .airow select { flex: 1; max-width: 380px; padding: 4px 8px; border-radius: 4px;
+         background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+         border: 1px solid var(--vscode-input-border, #4443); font-size: 13px; }
+  .aibtn { font-family: var(--vscode-font-family); font-size: 13px; cursor: pointer;
+         padding: 5px 12px; border-radius: 4px; border: none;
+         background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .aibtn.secondary { background: var(--vscode-button-secondaryBackground);
+         color: var(--vscode-button-secondaryForeground); }
+  .aibtn:hover { filter: brightness(1.12); }
+  .aiok { color: var(--vscode-testing-iconPassed, #3fb950); }
+  .aierr { color: var(--vscode-errorForeground); }
+  .aimuted { opacity: .6; font-size: 12px; }
+  #aiPricesBox input { width: 70px; padding: 2px 6px; border-radius: 3px;
+         background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+         border: 1px solid var(--vscode-input-border, #4443); }
 </style>
 </head>
 <body>
@@ -188,6 +315,118 @@ export class SettingsPanel {
         n.classList.add('active');
         document.getElementById('g-' + n.getAttribute('data-g')).classList.add('active');
       });
+    });
+
+    // ---------------- AI Assistant section ----------------
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    let ai = null; // last aiState from the host
+    let testTimer = null; // elapsed counter for the ⚡ Test button
+
+    function fmtTokens(n){ return n >= 1e6 ? (n/1e6).toFixed(2)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'k' : String(n); }
+    // Unknown model price → "—", never a fake $0.
+    function fmtCost(c){ return c === undefined || c === null ? '—' : '$' + (c < 0.01 ? c.toFixed(4) : c.toFixed(2)); }
+
+    function usageTable(rows){
+      if (!rows.length) return '<p class="aimuted">No AI calls recorded yet.</p>';
+      let h = '<table><tr><th>Model</th><th>Action</th><th>Requests</th><th>Tokens in</th><th>Tokens out</th><th>Est. cost</th></tr>';
+      let ti = 0, to = 0, tc = 0, priced = true;
+      for (const r of rows) {
+        h += '<tr><td>' + esc(r.model) + '</td><td>' + esc(r.verb) + '</td><td>' + r.requests +
+             '</td><td>' + fmtTokens(r.inputTokens) + '</td><td>' + fmtTokens(r.outputTokens) +
+             '</td><td>' + fmtCost(r.costUsd) + '</td></tr>';
+        ti += r.inputTokens; to += r.outputTokens;
+        if (r.costUsd === undefined || r.costUsd === null) priced = false; else tc += r.costUsd;
+      }
+      h += '<tr><th>Total</th><th></th><th></th><th>' + fmtTokens(ti) + '</th><th>' + fmtTokens(to) +
+           '</th><th>' + (priced ? fmtCost(tc) : fmtCost(tc) + ' +?') + '</th></tr></table>';
+      return h;
+    }
+
+    function renderAi(){
+      if (!ai || !$('aiPreset')) return;
+      const sel = $('aiPreset');
+      sel.innerHTML = '<option value="">— choose —</option>' + ai.presets.map((p) =>
+        '<option value="' + esc(p.id) + '"' + (p.id === ai.settings.providerId ? ' selected' : '') + '>' +
+        esc(p.label) + '</option>').join('');
+      // Don't clobber half-typed edits: only fill when the field isn't focused.
+      if (document.activeElement !== $('aiBase')) $('aiBase').value = ai.settings.baseUrl;
+      if (document.activeElement !== $('aiModel')) $('aiModel').value = ai.settings.model;
+      $('aiKeyStatus').textContent = !ai.needsKey ? 'no key needed (local)' : ai.hasKey ? '🔑 key stored' : 'no key stored';
+      $('aiConfigured').textContent = ai.configured
+        ? '✓ Configured — the assist bar appears in query panels.'
+        : 'Not configured yet — the assist bar stays hidden until this is complete.';
+      $('aiConsentRow').innerHTML = ai.settings.consentGiven
+        ? '<span class="aiok">✓ Granted</span><span class="aimuted">— schema names may be sent to the provider (see "AI & your data")</span> <button id="aiRevokeBtn" class="aibtn secondary">Revoke</button>'
+        : '<span class="aimuted">Not granted — you will be asked before the first request.</span>';
+      const rv = $('aiRevokeBtn');
+      if (rv) rv.addEventListener('click', () => vscode.postMessage({ type: 'aiRevokeConsent' }));
+      $('aiConns').innerHTML = ai.connections.length ? ai.connections.map((c) =>
+        '<div class="airow"><label style="width:auto"><input type="checkbox" class="aiConnChk" data-id="' + esc(c.id) + '"' +
+        (ai.settings.disabledConnections.includes(c.id) ? '' : ' checked') + '> ' + esc(c.name) + '</label></div>').join('')
+        : '<p class="aimuted">No connections yet.</p>';
+      document.querySelectorAll('.aiConnChk').forEach((chk) => chk.addEventListener('change', () =>
+        vscode.postMessage({ type: 'aiSetConnEnabled', connId: chk.getAttribute('data-id'), enabled: chk.checked })));
+      $('aiPeriodLbl').textContent = 'Since ' + new Date(ai.periodStart).toLocaleDateString();
+      $('aiUsagePeriod').innerHTML = usageTable(ai.usagePeriod);
+      $('aiUsageAll').innerHTML = usageTable(ai.usageAllTime);
+      $('aiDropped').textContent = ai.dropped > 0
+        ? 'Note: ' + ai.dropped + ' oldest entries were dropped by the ledger cap — all-time totals above remain exact.'
+        : '';
+      $('aiPricesBox').innerHTML = '<table><tr><th>Model matches</th><th>Input $/MTok</th><th>Output $/MTok</th></tr>' +
+        Object.entries(ai.prices).map(([m, p]) =>
+          '<tr><td>' + esc(m) + '</td><td><input data-m="' + esc(m) + '" data-k="input" value="' + p.input + '"></td>' +
+          '<td><input data-m="' + esc(m) + '" data-k="output" value="' + p.output + '"></td></tr>').join('') + '</table>';
+    }
+
+    const presetSel = $('aiPreset');
+    if (presetSel) {
+      presetSel.addEventListener('change', () => {
+        const p = ai && ai.presets.find((x) => x.id === presetSel.value);
+        if (p) { $('aiBase').value = p.baseUrl; if (p.defaultModel) $('aiModel').value = p.defaultModel; }
+      });
+      // Both buttons submit what is on screen — Test must never run against
+      // stale stored settings while the form shows something else.
+      function aiForm(type){
+        const payload = { type, providerId: presetSel.value,
+          baseUrl: $('aiBase').value, model: $('aiModel').value, key: $('aiKey').value };
+        $('aiKey').value = ''; // it is stored (or kept) host-side now
+        return payload;
+      }
+      $('aiSaveBtn').addEventListener('click', () => {
+        vscode.postMessage(aiForm('aiSave'));
+        $('aiStatus').textContent = 'Saved.'; $('aiStatus').className = 'aiok';
+      });
+      $('aiTestBtn').addEventListener('click', () => {
+        // Live elapsed counter — a slow provider must read as working, not hung.
+        const started = Date.now();
+        $('aiStatus').textContent = 'Testing… 0s'; $('aiStatus').className = 'aimuted';
+        clearInterval(testTimer);
+        testTimer = setInterval(() => {
+          $('aiStatus').textContent = 'Testing… ' + Math.floor((Date.now() - started) / 1000) + 's';
+        }, 500);
+        vscode.postMessage(aiForm('aiTest'));
+      });
+      $('aiResetBtn').addEventListener('click', () => vscode.postMessage({ type: 'aiResetPeriod' }));
+      $('aiSavePricesBtn').addEventListener('click', () => {
+        const prices = {};
+        document.querySelectorAll('#aiPricesBox input').forEach((inp) => {
+          const m = inp.getAttribute('data-m'), k = inp.getAttribute('data-k'), v = Number(inp.value);
+          if (!prices[m]) prices[m] = { input: 0, output: 0 };
+          if (isFinite(v) && v >= 0) prices[m][k] = v;
+        });
+        vscode.postMessage({ type: 'aiSavePrices', prices });
+      });
+    }
+
+    window.addEventListener('message', (ev) => {
+      const m = ev.data;
+      if (m.type === 'aiState') { ai = m; renderAi(); }
+      else if (m.type === 'aiTestResult') {
+        clearInterval(testTimer);
+        $('aiStatus').textContent = m.message;
+        $('aiStatus').className = m.ok ? 'aiok' : 'aierr';
+      }
     });
   </script>
 </body>
@@ -384,6 +623,85 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <div class="tip"><b>That prints your passwords to the terminal.</b> Your shell history will
         also keep the passphrase you typed. Use it to inspect or recover, not as a routine step —
         importing never exposes either.</div>`,
+  },
+  {
+    id: "ai-assistant",
+    title: "AI Assistant",
+    body: () => `
+      <p>Bring your own API key and get AI help in the query panel: describe what you want
+         and it writes the SQL, explains a statement, or fixes a failed one. Your key stays
+         in your OS keychain; requests go straight from this machine to your provider —
+         there is no middleman and nothing to subscribe to.</p>
+
+      <h4>Provider</h4>
+      <div class="airow"><label>Preset</label><select id="aiPreset"></select></div>
+      <div class="airow"><label>Base URL</label><input id="aiBase" type="text" spellcheck="false" /></div>
+      <div class="airow"><label>Model</label><input id="aiModel" type="text" spellcheck="false"
+           placeholder="free text — any model your provider serves" /></div>
+      <div class="airow"><label>API key</label><input id="aiKey" type="password"
+           placeholder="paste to set / replace — leave blank to keep" />
+           <span id="aiKeyStatus" class="aimuted"></span></div>
+      <div class="airow"><label></label>
+        <button id="aiSaveBtn" class="aibtn">Save</button>
+        <button id="aiTestBtn" class="aibtn secondary">⚡ Test</button>
+        <span id="aiStatus"></span></div>
+      <div id="aiConfigured" class="aimuted"></div>
+
+      <h4>Consent</h4>
+      <div id="aiConsentRow" class="airow"></div>
+
+      <h4>Per-connection</h4>
+      <p class="aimuted">Untick a connection to keep AI away from it (e.g. regulated databases).
+         The assist bar disappears in its query panels.</p>
+      <div id="aiConns"></div>
+
+      <h4>Usage</h4>
+      <p class="aimuted">Counted locally from each response's exact token counts. Cost is an
+         <b>estimate</b> from the price table below — verify in your provider's dashboard
+         (live balances need admin keys this extension deliberately never asks for).</p>
+      <div class="airow" style="margin-bottom:2px"><b id="aiPeriodLbl"></b>
+        <button id="aiResetBtn" class="aibtn secondary">Reset period</button></div>
+      <div id="aiUsagePeriod"></div>
+      <b>All time</b>
+      <div id="aiUsageAll"></div>
+      <div id="aiDropped" class="aimuted"></div>
+
+      <h4>Price table (USD per million tokens)</h4>
+      <div id="aiPricesBox"></div>
+      <div class="airow"><button id="aiSavePricesBtn" class="aibtn secondary">Save prices</button></div>`,
+  },
+  {
+    id: "ai-data",
+    title: "AI & your data",
+    body: () => `
+      <h4>What is sent to the AI provider</h4>
+      <ul>
+        <li>Your typed request (or the SQL you asked to explain/fix, plus its error message).</li>
+        <li><b>Schema names only</b>: table names, column names, and foreign-key relations of
+            the connected database, so the AI can write queries against your real schema.</li>
+        <li>The engine dialect (PostgreSQL / MySQL / SQLite).</li>
+      </ul>
+      <h4>What is never sent</h4>
+      <ul>
+        <li><b>Row data or query results</b> — the AI never sees what is inside your tables.</li>
+        <li>Passwords, connection strings, hostnames, or anything from SecretStorage.</li>
+      </ul>
+      <div class="tip">On very large schemas the context is trimmed to the tables your request
+        mentions (plus their foreign-key neighbours) — the assist bar tells you when that
+        happened, because a wrong answer from missing context should be diagnosable.</div>
+      <h4>Where things live</h4>
+      <ul>
+        <li><b>API key</b> — VS Code SecretStorage (your OS keychain). Never in settings files,
+            never in connection exports, never logged.</li>
+        <li><b>Usage ledger</b> — local globalState only. Nothing is reported anywhere.</li>
+        <li><b>Consent</b> — asked once before the first request to a remote provider, revocable
+            in the AI Assistant section. Local endpoints (Ollama on localhost) skip the gate
+            since nothing leaves the machine.</li>
+      </ul>
+      <h4>Generated SQL is yours to review</h4>
+      <p>The AI never runs anything. Statements land in the editor selected, and destructive
+         shapes (DROP, TRUNCATE, ALTER, DELETE/UPDATE without WHERE) are tagged with a visible
+         warning before you decide to hit Run.</p>`,
   },
   {
     id: "whats-new",

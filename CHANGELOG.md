@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **AI query assistance (bring your own key).** Configure Anthropic, OpenAI, or
+  any OpenAI-compatible endpoint (Ollama locally, OpenRouter, Groq, …) in
+  Settings & Guides → AI Assistant, and the query panel gains an assist bar:
+  - **Generate** — describe the query in plain language and get dialect-correct
+    SQL, grounded in the connected database's real tables, columns and
+    foreign-key relations. Table/column names autocomplete inside the prompt.
+  - **Explain** — plain-language explanation of the selected SQL.
+  - **Fix** — after a failed query, one click sends the statement plus its
+    exact error and returns a corrected version.
+  - Generated SQL is **never auto-run**: it lands in the editor selected, and
+    destructive shapes (DROP, TRUNCATE, ALTER, DELETE/UPDATE without WHERE) are
+    tagged with a visible warning first.
+  - **Privacy**: only schema *names* are sent — never row data, results,
+    passwords or hosts. A one-time consent dialog spells this out (local Ollama
+    endpoints skip it — nothing leaves the machine), any connection can be
+    excluded from AI entirely, and the new "AI & your data" guide documents
+    exactly what is shared. On huge schemas the context is trimmed to relevant
+    tables and the bar says so. API keys live in SecretStorage only and are
+    never included in connection exports.
+- **AI usage monitor.** Every call is metered locally from the response's exact
+  token counts: requests, tokens and estimated cost per model and per action,
+  for the current period and all time, with a user-editable price table.
+  Costs are labeled as estimates; live account balances aren't shown because
+  provider billing APIs require admin keys this extension deliberately never
+  asks for — the view links to your provider dashboard instead. Ledger capped
+  at 5 000 entries with the drop counted visibly; all-time totals stay exact.
+- **Reset All Data** now also purges stored AI keys, settings and the usage
+  ledger.
+
 ## [1.0.1] - 2026-08-05
 
 ### Changed

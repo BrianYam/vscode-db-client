@@ -1,5 +1,9 @@
 import * as fs from "node:fs";
 import * as vscode from "vscode";
+import { AiService } from "../ai/aiService";
+import { AiStore } from "../ai/aiStore";
+import type { AiVerb } from "../ai/prompts";
+import { UsageStore } from "../ai/usageStore";
 import type { ConnectionManager } from "../connections/manager";
 import type { ConnectionStore } from "../connections/store";
 import type { DatabaseType } from "../connections/types";
@@ -89,6 +93,8 @@ export class QueryPanel {
   private hintsDb?: string;
   private hintsPending = false;
   private disposed = false;
+  private readonly ai: AiService;
+  private aiBarShown = false;
 
   private rerun(sql: string, database?: string): void {
     this.previewPath = undefined;
@@ -135,6 +141,7 @@ export class QueryPanel {
     options: PanelOptions,
   ) {
     const config = this.store.get(connectionId);
+    this.ai = new AiService(new AiStore(ctx), new UsageStore(ctx));
     this.database = options.database;
     // A preview's path starts with the database on multi-database engines
     // (postgres/mysql: db name, redis: db number). Bind the panel to it, so that
@@ -232,6 +239,12 @@ export class QueryPanel {
         case "complete":
           await this.handleComplete(String(msg.text ?? ""), Number(msg.seq ?? 0));
           break;
+        case "ai":
+          await this.handleAi(msg);
+          break;
+        case "aiComplete":
+          await this.handleAiComplete(String(msg.word ?? ""), Number(msg.seq ?? 0));
+          break;
       }
     });
 
@@ -242,6 +255,114 @@ export class QueryPanel {
     } else if (options.initialSql && options.autoRun) {
       void this.run(options.initialSql);
     }
+
+    void this.syncAiBar();
+    // A provider configured in settings after this panel opened should still
+    // light the bar up — re-check whenever the panel comes back into view.
+    this.panel.onDidChangeViewState((e) => {
+      if (e.webviewPanel.visible) {
+        void this.syncAiBar();
+      }
+    });
+  }
+
+  /**
+   * Show the assist bar only when a provider is fully configured and AI is not
+   * disabled for this connection. Redis is out of scope for v1 (different
+   * language — same deferral as autocomplete), so its panels never get the bar.
+   */
+  private async syncAiBar(): Promise<void> {
+    if (this.aiBarShown || this.disposed) {
+      return;
+    }
+    const type = this.store.get(this.connectionId)?.type;
+    if (!type || type === "redis") {
+      return;
+    }
+    if ((await this.ai.isConfigured()) && this.ai.enabledFor(this.connectionId)) {
+      this.aiBarShown = true;
+      this.post({ type: "aiEnabled" });
+    }
+  }
+
+  private async handleAi(msg: {
+    verb: AiVerb;
+    prompt?: string;
+    sql?: string;
+    error?: string;
+    seq?: number;
+  }): Promise<void> {
+    const config = this.store.get(this.connectionId);
+    if (!config || config.type === "redis") {
+      return;
+    }
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      const res = await this.ai.run(
+        {
+          verb: msg.verb,
+          connId: this.connectionId,
+          connType: config.type,
+          database: this.database,
+          prompt: msg.prompt,
+          sql: msg.sql,
+          error: msg.error,
+        },
+        driver,
+      );
+      if (!res) {
+        this.post({ type: "aiResult", seq: msg.seq, cancelled: true });
+        return;
+      }
+      this.post({
+        type: "aiResult",
+        seq: msg.seq,
+        verb: msg.verb,
+        sql: res.sql,
+        text: res.text,
+        trimmedTo: res.trimmedTo,
+        destructive: res.destructive,
+        ms: res.ms,
+        tokens: res.tokens,
+      });
+    } catch (err) {
+      logError("ai", err);
+      this.post({ type: "aiResult", seq: msg.seq, error: (err as Error).message });
+    }
+  }
+
+  /**
+   * Identifier suggestions for the assist bar's natural-language prompt:
+   * tables and columns only — keywords are noise in prose. Prefix matches
+   * outrank contains, mirroring the SQL widget's feel.
+   */
+  private async handleAiComplete(word: string, seq: number): Promise<void> {
+    await this.ensureHints();
+    const w = word.toLowerCase();
+    if (!w || !this.hints) {
+      this.post({ type: "aiCompletions", items: [], seq });
+      return;
+    }
+    const candidates: Array<{ label: string; kind: string; detail?: string }> = [];
+    for (const t of this.hints.tables) {
+      candidates.push({ label: t, kind: "table" });
+    }
+    if (this.hints.columnsByTable) {
+      for (const [table, cols] of Object.entries(this.hints.columnsByTable)) {
+        for (const c of cols) {
+          candidates.push({ label: c, kind: "column", detail: table });
+        }
+      }
+    } else {
+      for (const c of this.hints.columns) {
+        candidates.push({ label: c, kind: "column" });
+      }
+    }
+    const starts = candidates.filter((c) => c.label.toLowerCase().startsWith(w));
+    const contains = candidates.filter(
+      (c) => !c.label.toLowerCase().startsWith(w) && c.label.toLowerCase().includes(w),
+    );
+    this.post({ type: "aiCompletions", items: [...starts, ...contains].slice(0, 12), seq });
   }
 
   private async runPreview(
@@ -653,6 +774,18 @@ export class QueryPanel {
   #ac .k-dataType .ico { color: var(--vscode-symbolIcon-typeParameterForeground, #569cd6); }
   #ac .more { padding: 2px 8px; opacity: .6; font-size: 11px; font-style: italic;
               border-top: 1px solid var(--border); }
+  /* --- AI assist bar --- */
+  #aibar { display: none; gap: 6px; margin-bottom: 6px; align-items: center; }
+  #aiPrompt { flex: 1; background: var(--vscode-input-background);
+              color: var(--vscode-input-foreground); padding: 4px 8px; border-radius: 3px;
+              border: 1px solid var(--vscode-input-border, var(--border)); font-size: 12px; }
+  #ainote { opacity: .85; margin: 4px 0; }
+  #ainote:empty { display: none; }
+  #aispin { display: none; white-space: nowrap; font-variant-numeric: tabular-nums;
+            color: var(--vscode-textLink-foreground); }
+  .aiwarn { color: var(--vscode-editorWarning-foreground); font-weight: 600; }
+  .aitrim { color: var(--vscode-editorWarning-foreground); }
+  .aidim { opacity: .6; }
   .null { opacity: .5; font-style: italic; }
   .chk { width: 22px; text-align: center; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
@@ -683,7 +816,15 @@ export class QueryPanel {
 </style>
 </head>
 <body>
+  <div id="aibar">
+    <input id="aiPrompt" placeholder="✨ Ask AI — describe the query you want; table names autocomplete" spellcheck="false" />
+    <button id="aiGenBtn" title="Generate SQL from the description (Enter)">✨ Generate</button>
+    <button id="aiExplainBtn" class="secondary" title="Explain the selected SQL (or the whole editor)">Explain</button>
+    <button id="aiFixBtn" class="secondary" title="Fix the last failed query using its error message" disabled>Fix</button>
+    <span id="aispin"></span>
+  </div>
   <textarea id="sql" placeholder="${placeholder}">${escapeHtml(initialSql)}</textarea>
+  <div id="ainote"></div>
   <div class="bar">
     <button id="runBtn" title="Run (Ctrl/Cmd+Enter) — runs the highlighted text only, when something is highlighted">Run ▶</button>
     ${hasFile ? '<button id="saveBtn" class="secondary" title="Save to file (Cmd/Ctrl+S)">💾 Save</button>' : ""}
@@ -1016,8 +1157,139 @@ export class QueryPanel {
       const row = e.target.closest('.row');
       if (!row) return;
       e.preventDefault();
-      acSel = Number(row.getAttribute('data-i'));
-      acAccept();
+      // The dropdown element is shared between the SQL editor and the AI
+      // prompt field — route the click to whichever widget owns it right now.
+      if (pcOpen) { pcSel = Number(row.getAttribute('data-i')); pcAccept(); }
+      else { acSel = Number(row.getAttribute('data-i')); acAccept(); }
+    });
+
+    // ---------------- AI assist bar ----------------
+    // Hidden until the host confirms a configured provider (aiEnabled). All
+    // reasoning is host-side; this owns only input, insert, and the note line.
+    const aiBar = $('aibar'), aiPromptEl = $('aiPrompt'), aiNote = $('ainote');
+    let aiSeq = 0, lastError = null;
+
+    // Live progress: an animated spinner + elapsed seconds right in the bar, so
+    // a long provider round-trip reads as "working" rather than "stuck".
+    const AI_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+    let aiTimer = null, aiStart = 0, aiFrame = 0;
+    function aiSpinStart(){
+      aiStart = Date.now();
+      const spin = $('aispin');
+      spin.textContent = AI_FRAMES[0] + ' Asking AI… 0s';
+      spin.style.display = 'inline';
+      clearInterval(aiTimer);
+      aiTimer = setInterval(() => {
+        aiFrame = (aiFrame + 1) % AI_FRAMES.length;
+        const secs = Math.floor((Date.now() - aiStart) / 1000);
+        spin.textContent = AI_FRAMES[aiFrame] + ' Asking AI… ' + secs + 's';
+      }, 120);
+    }
+    function aiSpinStop(){
+      clearInterval(aiTimer);
+      aiTimer = null;
+      $('aispin').style.display = 'none';
+      return ((Date.now() - aiStart) / 1000).toFixed(1);
+    }
+
+    function setAiBusy(b){
+      $('aiGenBtn').disabled = b;
+      $('aiExplainBtn').disabled = b;
+      $('aiFixBtn').disabled = b || !lastError;
+    }
+    function aiSend(verb){
+      const payload = { type:'ai', verb, seq: ++aiSeq };
+      if (verb === 'generate') {
+        const p = aiPromptEl.value.trim();
+        if (!p) { aiPromptEl.focus(); return; }
+        payload.prompt = p;
+      } else if (verb === 'explain') {
+        const sel = sqlEl.value.slice(sqlEl.selectionStart, sqlEl.selectionEnd);
+        const sql = sel.trim() ? sel : sqlEl.value;
+        if (!sql.trim()) { statusEl.textContent = 'Nothing to explain — the editor is empty.'; return; }
+        payload.sql = sql;
+      } else {
+        if (!lastError) return;
+        payload.sql = sqlEl.value;
+        payload.error = lastError;
+      }
+      aiNote.textContent = '';
+      aiSpinStart();
+      setAiBusy(true);
+      vscode.postMessage(payload);
+    }
+    $('aiGenBtn').addEventListener('click', () => aiSend('generate'));
+    $('aiExplainBtn').addEventListener('click', () => aiSend('explain'));
+    $('aiFixBtn').addEventListener('click', () => aiSend('fix'));
+
+    // Generated SQL never destroys typed work: it replaces the selection when
+    // there is one, fills an empty editor, and otherwise appends on a new line.
+    // Always left selected, so one keystroke discards it and Ctrl+Enter runs it.
+    function aiInsertSql(sql){
+      const v = sqlEl.value;
+      let start, end, insert = sql;
+      if (sqlEl.selectionStart !== sqlEl.selectionEnd) { start = sqlEl.selectionStart; end = sqlEl.selectionEnd; }
+      else if (!v.trim()) { start = 0; end = v.length; }
+      else { start = v.length; end = v.length; insert = (v.endsWith('\\n') ? '' : '\\n') + sql; }
+      sqlEl.value = v.slice(0, start) + insert + v.slice(end);
+      sqlEl.setSelectionRange(start + (insert.length - sql.length), start + insert.length);
+      sqlEl.focus();
+    }
+
+    // --- identifier completion inside the prompt field (tables/columns only) ---
+    // Shares the #ac dropdown element with the SQL widget; pcOpen decides who owns it.
+    let pcItems = [], pcSel = 0, pcOpen = false, pcSeq = 0;
+    function pcClose(){
+      pcItems = [];
+      if (pcOpen) { pcOpen = false; if (!acOpen) acEl.style.display = 'none'; }
+    }
+    function pcWord(){
+      const caret = aiPromptEl.selectionStart, v = aiPromptEl.value;
+      let start = caret;
+      while (start > 0 && /[A-Za-z0-9_.]/.test(v[start-1])) start--;
+      return { word: v.slice(start, caret), start, caret };
+    }
+    function pcRender(){
+      if (!pcItems.length) { pcClose(); return; }
+      let h = '';
+      pcItems.forEach((it, i) => {
+        h += '<div class="row k-'+it.kind+(i===pcSel?' sel':'')+'" data-i="'+i+'">' +
+             '<span class="ico">'+(ICON[it.kind]||'•')+'</span>' +
+             '<span class="lbl">'+esc(it.label)+'</span>' +
+             (it.detail ? '<span class="det">'+esc(it.detail)+'</span>' : '') + '</div>';
+      });
+      acEl.innerHTML = h;
+      // Anchored under the input, not per-character: precision matters less in prose.
+      const box = aiPromptEl.getBoundingClientRect();
+      acEl.style.display = 'block';
+      pcOpen = true;
+      acEl.style.top = (box.bottom + 2) + 'px';
+      acEl.style.left = box.left + 'px';
+    }
+    function pcAccept(){
+      const it = pcItems[pcSel];
+      if (!it) return;
+      const { start, caret } = pcWord(), v = aiPromptEl.value;
+      aiPromptEl.value = v.slice(0, start) + it.label + v.slice(caret);
+      const pos = start + it.label.length;
+      aiPromptEl.setSelectionRange(pos, pos);
+      pcClose();
+      aiPromptEl.focus();
+    }
+    aiPromptEl.addEventListener('input', () => {
+      const { word } = pcWord();
+      if (word.length < 2) { pcClose(); return; }
+      vscode.postMessage({ type:'aiComplete', word, seq: ++pcSeq });
+    });
+    aiPromptEl.addEventListener('blur', pcClose);
+    aiPromptEl.addEventListener('keydown', (e) => {
+      if (pcOpen) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); pcSel = (pcSel+1) % pcItems.length; pcRender(); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); pcSel = (pcSel-1+pcItems.length) % pcItems.length; pcRender(); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pcAccept(); return; }
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); pcClose(); return; }
+      }
+      if (e.key === 'Enter') { e.preventDefault(); aiSend('generate'); }
     });
 
     $('prevBtn').addEventListener('click', () => pageBy(-1));
@@ -1356,6 +1628,53 @@ export class QueryPanel {
       if (m.type === 'error') {
         statusEl.textContent = 'Error';
         gridEl.innerHTML = '<pre style="color:var(--vscode-errorForeground)">'+esc(m.message)+'</pre>';
+        // A failure is what arms Fix — it carries the exact error to the AI.
+        lastError = m.message;
+        $('aiFixBtn').disabled = false;
+        return;
+      }
+      if (m.type === 'aiEnabled') { aiBar.style.display = 'flex'; return; }
+      if (m.type === 'aiCompletions') {
+        if (m.seq < pcSeq) return; // stale reply overtaken by newer typing
+        if (document.activeElement !== aiPromptEl) { pcClose(); return; }
+        pcItems = m.items || [];
+        pcSel = 0;
+        pcRender();
+        return;
+      }
+      if (m.type === 'aiResult') {
+        if (m.seq != null && m.seq !== aiSeq) return; // superseded request
+        const waited = aiSpinStop();
+        setAiBusy(false);
+        if (m.cancelled) { statusEl.textContent = 'AI request cancelled.'; return; }
+        if (m.error) {
+          aiNote.innerHTML = '<span class="aiwarn">' + esc(m.error) + '</span>' +
+                             ' <span class="aidim">(after ' + waited + 's)</span>';
+          return;
+        }
+        if (m.verb !== 'explain' && m.sql) {
+          if (m.verb === 'fix') {
+            // The buffer holds the failed statement — replace it, selected.
+            sqlEl.value = m.sql;
+            sqlEl.setSelectionRange(0, m.sql.length);
+            sqlEl.focus();
+          } else {
+            aiInsertSql(m.sql);
+          }
+        }
+        let note = esc(m.text || '');
+        if (m.destructive) {
+          note = '<span class="aiwarn">⚠ ' + esc(m.destructive) + ' — review before running</span>' +
+                 (note ? ' · ' + note : '');
+        }
+        if (m.trimmedTo) {
+          note += (note ? ' · ' : '') +
+                  '<span class="aitrim">schema context trimmed to ' + m.trimmedTo + ' table(s)</span>';
+        }
+        // What it cost, where the user is looking: seconds + tokens per answer.
+        const meta = '<span class="aidim">✓ ' + (m.ms != null ? (m.ms/1000).toFixed(1) : waited) + 's' +
+                     (m.tokens ? ' · ' + m.tokens + ' tokens' : '') + '</span>';
+        aiNote.innerHTML = meta + (note ? ' · ' + note : '');
         return;
       }
       if (m.type === 'updateResult') {
@@ -1390,6 +1709,9 @@ export class QueryPanel {
           if (m.seq < renderedSeq) return;
           renderedSeq = m.seq;
         }
+        // A successful run clears the failure Fix was armed with.
+        lastError = null;
+        $('aiFixBtn').disabled = true;
         raw = m.result; selected.clear();
         // Only reset sort/filters for a brand-new table/query, not sort/filter/page re-runs.
         if (m.fresh) { sort = { col:null, dir:1 }; filters = {}; search = ''; $('search').value = ''; }

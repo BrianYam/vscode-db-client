@@ -688,3 +688,71 @@ Requested 2026-08-03: alongside encrypt and mask, an option that shows the passw
       hover tooltip (honest UX: nothing silently hidden)
 - [x] `[SDD][M21]` Test Connection loses its `ghost` styling so it reads as a real button
       (secondary background) instead of blending into the footer
+
+## M22 — AI Query Assistance (BYOK) + Usage Monitor (requested 2026-08-05)
+
+Spec: `DISCOVERY_AI_ASSISTANT.md` (locked 2026-08-05) → `BLUEPRINT_AI_ASSISTANT.md`.
+Locked: Anthropic + OpenAI + OpenAI-compatible custom base URL; inline assist bar
+(never auto-run); Generate / Explain / Fix; Redis deferred; prompt field reuses the
+completion widget; context = full schema + relations with honest trim.
+
+### M22.1 — Provider layer (`src/ai/`) ✅ DONE 2026-08-05 (Blueprint §0, §1.1)
+- [x] `[SDD][M22]` `AiProvider.ts`: `AiProviderConfig` / `AiRequest` / `AiResult` /
+      `AiProvider` interface — exact token counts from response bodies, no SDKs
+- [x] `[SDD][M22]` `openaiCompat.ts`: one `fetch` POST to `{base}/chat/completions`;
+      covers OpenAI, Ollama, OpenRouter, Groq, Gemini-compat via base URL
+- [x] `[SDD][M22]` `anthropic.ts`: `/v1/messages` with `x-api-key` + `anthropic-version`
+- [x] `[SDD][M22]` `registry.ts#createAiProvider` — the only switch on `kind`
+- [x] `[SDD][M22]` Error normalization: 401/429/network → human-readable; raw provider
+      JSON never reaches the UI
+- [x] `[SDD][M22]` Presets as data (Anthropic / OpenAI / Ollama / OpenRouter / Custom),
+      model as free text seeded from preset default
+- [x] `[SDD][M22]` Tests: both adapters against a mock `fetch` — parsing, usage
+      extraction, error normalization
+
+### M22.2 — Context builder (`src/ai/context.ts`, pure) ✅ DONE 2026-08-05 (Blueprint §1.3)
+- [x] `[SDD][M22]` `buildSchemaContext(hints, fks, budget)` — full schema + FK relations,
+      compact rendering
+- [x] `[SDD][M22]` `trimToRelevant` — over budget → prompt-referenced tables + FK
+      neighbours, returns `trimmed: true`
+- [x] `[SDD][M22]` `estimateTokens`, `extractSql`, `isDestructive` (DROP/TRUNCATE/ALTER,
+      DELETE/UPDATE without WHERE)
+- [x] `[SDD][M22]` Tests: every export, node:test tier
+
+### M22.3 — Keys, settings, consent ✅ DONE 2026-08-05 (Blueprint §1.2, §1.7)
+- [x] `[SDD][M22]` Keys in SecretStorage (`ai:<providerId>`); AiSettings in globalState;
+      keys excluded from connection exports
+- [x] `[SDD][M22]` Settings panel "AI Assistant" section: preset picker, base URL, model,
+      masked key input, Test button (minimal completion, reports latency or error)
+- [x] `[SDD][M22]` First-use consent modal naming exactly what is sent; revocable;
+      lighter localhost notice for Ollama
+- [x] `[SDD][M22]` Per-connection "Disable AI" toggle
+- [x] `[SDD][M22]` "AI & your data" guide in Settings & Guides
+
+### M22.4 — Query panel assist bar ✅ DONE 2026-08-05 (Blueprint §1.4, §1.5)
+- [x] `[SDD][M22]` Collapsible bar above the editor: prompt input + Generate / Explain /
+      Fix (Fix armed only by a query error); hidden until a provider is configured
+- [x] `[SDD][M22]` Prompt input reuses the completion widget for tables/columns
+      (keywords/functions off)
+- [x] `[SDD][M22]` `aiGenerate`/`aiExplain`/`aiFix` messages → `handleAi*` host methods →
+      context builder → provider → post back (house webview pattern)
+- [x] `[SDD][M22]` Generated SQL inserted **selected**, never auto-run; explanation line
+      in the bar; destructive warning tag from `isDestructive`
+- [x] `[SDD][M22]` Trim notice shown when schema context was trimmed
+- [x] `[SDD][M22]` Busy state; new request cancels in-flight one
+
+### M22.5 — Usage ledger + view ✅ DONE 2026-08-05 (Blueprint §1.6)
+- [x] `[SDD][M22]` `usageStore.ts`: append per call (ts, provider, model, verb, tokens);
+      capped with the drop surfaced
+- [x] `[SDD][M22]` Cost = tokens × user-editable price table, labeled "estimated";
+      no balance display — dashboard links instead
+- [x] `[SDD][M22]` Settings view: month/all-time, per-model + per-verb, reset period
+
+### M22.6 — Phase 4 QA gate 🔴 (Blueprint §4)
+- [x] `[SDD][M22]` Unit tier green (adapters + context.ts) — 162 tests pass
+- [ ] `[SDD][M22]` Manual matrix: 3 engines × 3 verbs × Anthropic / OpenAI / Ollama-local
+- [ ] `[SDD][M22]` Security: key absent from logs/exports/webview HTML; consent once;
+      per-connection disable respected; webview CSP unchanged
+- [ ] `[SDD][M22]` Honesty checks: trim notice, destructive tag, ledger cap, cost label
+- [ ] `[SDD][M22]` Regression: Ctrl/Cmd+Enter runs, editor completion intact, panel
+      unchanged with no provider configured
