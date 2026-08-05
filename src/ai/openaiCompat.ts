@@ -1,5 +1,6 @@
 import {
   AiError,
+  type AiModelInfo,
   type AiProvider,
   type AiProviderConfig,
   type AiRequest,
@@ -107,7 +108,7 @@ export class OpenAiCompatProvider implements AiProvider {
     };
   }
 
-  async listModels(apiKey: string): Promise<string[]> {
+  async listModels(apiKey: string): Promise<AiModelInfo[]> {
     const url = `${this.config.baseUrl.replace(/\/+$/, "")}/models`;
     const host = hostOf(this.config.baseUrl);
     const headers: Record<string, string> = {};
@@ -124,16 +125,37 @@ export class OpenAiCompatProvider implements AiProvider {
     if (!res.ok) {
       throw normalizeHttpError(res.status, host, text);
     }
-    let parsed: { data?: Array<{ id?: unknown }> };
+    let parsed: {
+      data?: Array<{ id?: unknown; pricing?: { prompt?: unknown; completion?: unknown } }>;
+    };
     try {
-      parsed = JSON.parse(text) as { data?: Array<{ id?: unknown }> };
+      parsed = JSON.parse(text) as typeof parsed;
     } catch {
       throw new AiError(`${host} returned a non-JSON response`);
     }
-    const ids = (parsed.data ?? [])
-      .map((m) => m?.id)
-      .filter((id): id is string => typeof id === "string" && !NON_CHAT.test(id));
+    // OpenRouter (and compatible gateways) publish per-TOKEN USD prices in the
+    // list; scale to per-million. Plain OpenAI has no pricing field — undefined.
+    const perMTok = (v: unknown): number | undefined => {
+      if (v == null) {
+        return undefined;
+      }
+      const n = Number(v);
+      return Number.isFinite(n) ? n * 1_000_000 : undefined;
+    };
+    const seen = new Set<string>();
+    const models: AiModelInfo[] = [];
+    for (const m of parsed.data ?? []) {
+      if (typeof m?.id !== "string" || NON_CHAT.test(m.id) || seen.has(m.id)) {
+        continue;
+      }
+      seen.add(m.id);
+      models.push({
+        id: m.id,
+        inputPerMTok: perMTok(m.pricing?.prompt),
+        outputPerMTok: perMTok(m.pricing?.completion),
+      });
+    }
     // Reverse-alphabetical floats newer generations up (gpt-5… before gpt-4…).
-    return [...new Set(ids)].sort().reverse();
+    return models.sort((a, b) => b.id.localeCompare(a.id));
   }
 }

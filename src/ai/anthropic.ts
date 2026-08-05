@@ -1,5 +1,6 @@
 import {
   AiError,
+  type AiModelInfo,
   type AiProvider,
   type AiProviderConfig,
   type AiRequest,
@@ -78,7 +79,7 @@ export class AnthropicProvider implements AiProvider {
     };
   }
 
-  async listModels(apiKey: string): Promise<string[]> {
+  async listModels(apiKey: string): Promise<AiModelInfo[]> {
     const url = `${this.config.baseUrl.replace(/\/+$/, "")}/v1/models?limit=1000`;
     const host = hostOf(this.config.baseUrl);
     let res: Response;
@@ -100,9 +101,14 @@ export class AnthropicProvider implements AiProvider {
     } catch {
       throw new AiError(`${host} returned a non-JSON response`);
     }
+    // Anthropic's list carries no pricing — the settings layer annotates from
+    // the local price table instead.
     const ids = (parsed.data ?? [])
       .map((m) => m?.id)
       .filter((id): id is string => typeof id === "string");
-    return [...new Set(ids)].sort().reverse();
+    return [...new Set(ids)]
+      .sort()
+      .reverse()
+      .map((id) => ({ id }));
   }
 }

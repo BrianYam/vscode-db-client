@@ -467,12 +467,22 @@ export class SettingsPanel {
         $('aiStatus').className = m.ok ? 'aiok' : 'aierr';
       }
       else if (m.type === 'aiModels') {
-        $('aiModelList').innerHTML = m.models.map((id) => '<option value="' + esc(id) + '">').join('');
+        // Price label per option: endpoint-reported, or "~" local estimates.
+        const fmtP = (v) => v == null ? '?' : String(parseFloat(v.toFixed(3)));
+        const anyPriced = m.models.some((mo) => mo.inputPerMTok != null || mo.outputPerMTok != null);
+        $('aiModelList').innerHTML = m.models.map((mo) => {
+          const priced = mo.inputPerMTok != null || mo.outputPerMTok != null;
+          const label = priced
+            ? (mo.est ? '~' : '') + '$' + fmtP(mo.inputPerMTok) + ' in / $' + fmtP(mo.outputPerMTok) + ' out /MTok'
+            : '';
+          return '<option value="' + esc(mo.id) + '"' + (label ? ' label="' + esc(label) + '"' : '') + '>';
+        }).join('');
         // An empty model field takes the newest fetched id so "preset + key +
         // fetch" alone yields a working setup.
-        if (!$('aiModel').value && m.models.length) $('aiModel').value = m.models[0];
+        if (!$('aiModel').value && m.models.length) $('aiModel').value = m.models[0].id;
         $('aiStatus').textContent = m.models.length
-          ? m.models.length + ' models — click the Model field to choose, then Save.'
+          ? m.models.length + ' models — click the Model field to choose, then Save.' +
+            (anyPriced ? ' Prices shown where known (~ = local estimate).' : '')
           : 'The endpoint returned no models.';
         $('aiStatus').className = m.models.length ? 'aiok' : 'aierr';
       }

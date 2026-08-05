@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { Driver, ForeignKey } from "../drivers/Driver";
-import { AiError, hostOf, isLocalBaseUrl } from "./AiProvider";
+import { AiError, type AiModelInfo, hostOf, isLocalBaseUrl } from "./AiProvider";
 import type { AiStore } from "./aiStore";
 import {
   buildSchemaContext,
@@ -18,7 +18,7 @@ import {
   systemPrompt,
 } from "./prompts";
 import { createAiProvider } from "./registry";
-import type { UsageStore } from "./usageStore";
+import { matchPrice, type UsageStore } from "./usageStore";
 
 /** Keep prompts well under any provider's context floor; schema is the bulk. */
 const SCHEMA_TOKEN_BUDGET = 6000;
@@ -147,13 +147,24 @@ export class AiService {
    * Needs only base URL + key — deliberately NOT the model, since choosing
    * the model is exactly what this call exists to help with.
    */
-  async listModels(): Promise<string[]> {
+  async listModels(): Promise<AiModelInfo[]> {
     const s = this.store.get();
     if (!s.providerId || !s.baseUrl) {
       throw new AiError("Pick a preset and fill in the base URL first.");
     }
     const key = (await this.store.getKey(s.providerId)) ?? "";
-    return createAiProvider(this.store.providerConfig()).listModels(key);
+    const models = await createAiProvider(this.store.providerConfig()).listModels(key);
+    // Endpoint-reported prices win (OpenRouter). Where the list has none
+    // (OpenAI, Anthropic), annotate from the local price table — flagged as an
+    // estimate so the UI can mark it "~".
+    const prices = this.usage.prices();
+    return models.map((m) => {
+      if (m.inputPerMTok != null || m.outputPerMTok != null) {
+        return m;
+      }
+      const p = matchPrice(m.id, prices);
+      return p ? { ...m, inputPerMTok: p.input, outputPerMTok: p.output, est: true } : m;
+    });
   }
 
   /**

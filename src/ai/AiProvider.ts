@@ -34,14 +34,26 @@ export interface AiResult {
   model: string;
 }
 
+/** One model as the endpoint reports it. Pricing only where the provider
+ *  publishes it in the list (OpenRouter does; OpenAI/Anthropic do not). */
+export interface AiModelInfo {
+  id: string;
+  /** USD per million input tokens, as reported by the endpoint. */
+  inputPerMTok?: number;
+  /** USD per million output tokens, as reported by the endpoint. */
+  outputPerMTok?: number;
+  /** True when the price came from the local price table, not the endpoint. */
+  est?: boolean;
+}
+
 export interface AiProvider {
   readonly config: AiProviderConfig;
   complete(req: AiRequest, apiKey: string): Promise<AiResult>;
   /**
-   * Model ids the endpoint currently serves, newest-ish first. Lets the
-   * settings UI offer a live list instead of a hardcoded one that goes stale.
+   * Models the endpoint currently serves, newest-ish first. Lets the settings
+   * UI offer a live list instead of a hardcoded one that goes stale.
    */
-  listModels(apiKey: string): Promise<string[]>;
+  listModels(apiKey: string): Promise<AiModelInfo[]>;
 }
 
 /** Injectable fetch so adapters are unit-testable without a network. */

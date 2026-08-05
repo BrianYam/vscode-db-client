@@ -189,11 +189,35 @@ test("openai-compat: listModels filters non-chat models and sorts newest-ish fir
     ],
   });
   const models = await createAiProvider(OPENAI_CFG, fetch).listModels("sk");
-  assert.deepStrictEqual(models, ["gpt-5-mini", "gpt-4o"]);
+  assert.deepStrictEqual(
+    models.map((m) => m.id),
+    ["gpt-5-mini", "gpt-4o"],
+  );
+  // Plain OpenAI publishes no pricing in the list.
+  assert.strictEqual(models[0].inputPerMTok, undefined);
   // GET on {base}/models with the same auth scheme as completions.
   assert.strictEqual(fetch.calls[0].url, "https://api.openai.com/v1/models");
   assert.strictEqual(fetch.calls[0].init.method, "GET");
   assert.strictEqual(fetch.calls[0].init.headers.authorization, "Bearer sk");
+});
+
+test("openai-compat: OpenRouter per-token pricing scales to per-MTok", async () => {
+  const fetch = mockFetch(200, {
+    data: [
+      {
+        id: "anthropic/claude-sonnet-4.5",
+        pricing: { prompt: "0.000003", completion: "0.000015" },
+      },
+      { id: "meta-llama/llama-3.3-70b:free", pricing: { prompt: "0", completion: "0" } },
+    ],
+  });
+  const models = await createAiProvider(OPENAI_CFG, fetch).listModels("sk");
+  const claude = models.find((m) => m.id === "anthropic/claude-sonnet-4.5");
+  assert.strictEqual(claude.inputPerMTok, 3);
+  assert.strictEqual(claude.outputPerMTok, 15);
+  // Free models report an honest $0, not "unknown".
+  const free = models.find((m) => m.id === "meta-llama/llama-3.3-70b:free");
+  assert.strictEqual(free.inputPerMTok, 0);
 });
 
 test("anthropic: listModels hits /v1/models with the api-key headers", async () => {
@@ -201,7 +225,10 @@ test("anthropic: listModels hits /v1/models with the api-key headers", async () 
     data: [{ id: "claude-haiku-4-5" }, { id: "claude-sonnet-4-5" }],
   });
   const models = await createAiProvider(ANTHROPIC_CFG, fetch).listModels("sk-ant");
-  assert.deepStrictEqual(models, ["claude-sonnet-4-5", "claude-haiku-4-5"]);
+  assert.deepStrictEqual(
+    models.map((m) => m.id),
+    ["claude-sonnet-4-5", "claude-haiku-4-5"],
+  );
   assert.match(fetch.calls[0].url, /^https:\/\/api\.anthropic\.com\/v1\/models/);
   assert.strictEqual(fetch.calls[0].init.headers["x-api-key"], "sk-ant");
 });
