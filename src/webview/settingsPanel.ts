@@ -85,6 +85,14 @@ export class SettingsPanel {
       },
       hasKey: settings.providerId ? !!(await this.aiStore.getKey(settings.providerId)) : false,
       needsKey: preset ? preset.needsKey : true,
+      // Which presets already hold a key — one SecretStorage slot per provider,
+      // so the indicator can answer "does OpenRouter have a key?" on hover of
+      // the dropdown, not only after a save.
+      keyedProviders: (
+        await Promise.all(
+          AI_PRESETS.map(async (p) => ((await this.aiStore.getKey(p.id)) ? p.id : null)),
+        )
+      ).filter(Boolean),
       configured: await this.aiStore.isConfigured(),
       presets: AI_PRESETS,
       connections: this.connStore.all().map((c) => ({ id: c.id, name: c.name })),
@@ -366,7 +374,7 @@ export class SettingsPanel {
       // Don't clobber half-typed edits: only fill when the field isn't focused.
       if (document.activeElement !== $('aiBase')) $('aiBase').value = ai.settings.baseUrl;
       if (document.activeElement !== $('aiModel')) $('aiModel').value = ai.settings.model;
-      $('aiKeyStatus').textContent = !ai.needsKey ? 'no key needed (local)' : ai.hasKey ? '🔑 key stored' : 'no key stored';
+      updateKeyStatus();
       $('aiConfigured').textContent = ai.configured
         ? '✓ Configured — the assist bar appears in query panels.'
         : 'Not configured yet — the assist bar stays hidden until this is complete.';
@@ -393,11 +401,24 @@ export class SettingsPanel {
           '<td><input data-m="' + esc(m) + '" data-k="output" value="' + p.output + '"></td></tr>').join('') + '</table>';
     }
 
+    // Key status follows the preset SHOWN in the dropdown, not just the saved
+    // one — each provider has its own SecretStorage slot, and switching presets
+    // should immediately show whether that provider already holds a key.
+    function updateKeyStatus(){
+      if (!ai) return;
+      const id = $('aiPreset').value || ai.settings.providerId;
+      const p = ai.presets.find((x) => x.id === id);
+      $('aiKeyStatus').textContent = p && !p.needsKey ? 'no key needed (local)'
+        : (ai.keyedProviders || []).includes(id) ? '🔑 key stored for this provider'
+        : 'no key stored for this provider';
+    }
+
     const presetSel = $('aiPreset');
     if (presetSel) {
       presetSel.addEventListener('change', () => {
         const p = ai && ai.presets.find((x) => x.id === presetSel.value);
         if (p) { $('aiBase').value = p.baseUrl; if (p.defaultModel) $('aiModel').value = p.defaultModel; }
+        updateKeyStatus();
       });
       // Both buttons submit what is on screen — Test must never run against
       // stale stored settings while the form shows something else.

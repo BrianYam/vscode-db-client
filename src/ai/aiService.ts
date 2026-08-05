@@ -54,6 +54,10 @@ export interface AiVerbResult {
   ms: number;
   /** input + output token total, so the cost of the call is visible in place. */
   tokens: number;
+  /** Which preset answered (providerId) — shown with the result. */
+  provider: string;
+  /** Model as the server reported it, which may differ from the one requested. */
+  model: string;
 }
 
 /**
@@ -205,13 +209,13 @@ export class AiService {
 
     const ms = Date.now() - started;
     const tokens = res.inputTokens + res.outputTokens;
+    const attribution = { ms, tokens, provider: config.providerId, model: res.model };
     if (req.verb === "explain") {
       return {
         sql: "",
         text: res.text.trim(),
         trimmedTo: ctx.trimmed ? ctx.tables.length : undefined,
-        ms,
-        tokens,
+        ...attribution,
       };
     }
     const { sql, explanation } = extractSql(res.text);
@@ -220,8 +224,7 @@ export class AiService {
       text: explanation,
       trimmedTo: ctx.trimmed ? ctx.tables.length : undefined,
       destructive: isDestructive(sql) ?? undefined,
-      ms,
-      tokens,
+      ...attribution,
     };
   }
 

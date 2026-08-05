@@ -338,6 +338,8 @@ export class QueryPanel {
         destructive: res.destructive,
         ms: res.ms,
         tokens: res.tokens,
+        provider: res.provider,
+        model: res.model,
       });
     } catch (err) {
       logError("ai", err);
@@ -1703,9 +1705,11 @@ export class QueryPanel {
           note += (note ? ' · ' : '') +
                   '<span class="aitrim">schema context trimmed to ' + m.trimmedTo + ' table(s)</span>';
         }
-        // What it cost, where the user is looking: seconds + tokens per answer.
+        // What it cost and who answered, where the user is looking.
         const meta = '<span class="aidim">✓ ' + (m.ms != null ? (m.ms/1000).toFixed(1) : waited) + 's' +
-                     (m.tokens ? ' · ' + m.tokens + ' tokens' : '') + '</span>';
+                     (m.tokens ? ' · ' + m.tokens + ' tokens' : '') +
+                     (m.model ? ' · ' + esc(m.model) + (m.provider ? ' (' + esc(m.provider) + ')' : '') : '') +
+                     '</span>';
         aiNote.innerHTML = meta + (note ? ' · ' + note : '');
         return;
       }
