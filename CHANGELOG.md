@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-05
+
 ### Changed
 - **Connection form: test result shown next to the button.** The "Connection
   successful / failed" banner moved from the top of the form — where it was
