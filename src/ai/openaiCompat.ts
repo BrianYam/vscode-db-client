@@ -18,6 +18,15 @@ interface CompatResponse {
 }
 
 /**
+ * OpenAI's /models mixes chat models with embeddings, audio, image and legacy
+ * completions models — none of which can serve the assist verbs. Best-effort
+ * noise filter; the field stays free-text so a filtered-out id can still be
+ * typed by hand.
+ */
+const NON_CHAT =
+  /embed|whisper|tts|dall-e|moderation|audio|realtime|transcribe|image|davinci|babbage/i;
+
+/**
  * OpenAI-compatible /chat/completions adapter. One adapter covers OpenAI, Groq,
  * DeepSeek, Mistral, Gemini (compat endpoint), OpenRouter, Ollama and LM Studio
  * — the base URL is the only thing that differs.
@@ -96,5 +105,35 @@ export class OpenAiCompatProvider implements AiProvider {
       outputTokens: Number(parsed?.usage?.completion_tokens ?? 0),
       model: typeof parsed?.model === "string" ? parsed.model : this.config.model,
     };
+  }
+
+  async listModels(apiKey: string): Promise<string[]> {
+    const url = `${this.config.baseUrl.replace(/\/+$/, "")}/models`;
+    const host = hostOf(this.config.baseUrl);
+    const headers: Record<string, string> = {};
+    if (apiKey) {
+      headers.authorization = `Bearer ${apiKey}`;
+    }
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, { method: "GET", headers });
+    } catch (err) {
+      throw normalizeNetworkError(host, err);
+    }
+    const text = await res.text();
+    if (!res.ok) {
+      throw normalizeHttpError(res.status, host, text);
+    }
+    let parsed: { data?: Array<{ id?: unknown }> };
+    try {
+      parsed = JSON.parse(text) as { data?: Array<{ id?: unknown }> };
+    } catch {
+      throw new AiError(`${host} returned a non-JSON response`);
+    }
+    const ids = (parsed.data ?? [])
+      .map((m) => m?.id)
+      .filter((id): id is string => typeof id === "string" && !NON_CHAT.test(id));
+    // Reverse-alphabetical floats newer generations up (gpt-5… before gpt-4…).
+    return [...new Set(ids)].sort().reverse();
   }
 }

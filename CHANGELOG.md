@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **AI query assistance (bring your own key).** Configure Anthropic, OpenAI, or
   any OpenAI-compatible endpoint (Ollama locally, OpenRouter, Groq, …) in
-  Settings & Guides → AI Assistant, and the query panel gains an assist bar:
+  Settings & Guides → AI Assistant — the ↻ button fetches the models your
+  endpoint actually serves right now (no stale hardcoded list; the field still
+  accepts any id typed by hand) — and the query panel gains an assist bar:
   - **Generate** — describe the query in plain language and get dialect-correct
     SQL, grounded in the connected database's real tables, columns and
     foreign-key relations. Table/column names autocomplete inside the prompt.

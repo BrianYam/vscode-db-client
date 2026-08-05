@@ -139,6 +139,20 @@ export class AiService {
   }
 
   /**
+   * Live model list from the configured endpoint, for the settings dropdown.
+   * Needs only base URL + key — deliberately NOT the model, since choosing
+   * the model is exactly what this call exists to help with.
+   */
+  async listModels(): Promise<string[]> {
+    const s = this.store.get();
+    if (!s.providerId || !s.baseUrl) {
+      throw new AiError("Pick a preset and fill in the base URL first.");
+    }
+    const key = (await this.store.getKey(s.providerId)) ?? "";
+    return createAiProvider(this.store.providerConfig()).listModels(key);
+  }
+
+  /**
    * Run one assist verb against a live connection. Throws AiError with a
    * user-readable message on any failure; returns null when consent is refused.
    */

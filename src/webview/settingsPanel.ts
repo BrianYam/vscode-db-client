@@ -103,6 +103,20 @@ export class SettingsPanel {
       case "aiSave":
         await this.saveAiForm(msg);
         break;
+      case "aiFetchModels":
+        // Same save-first rule as Test: fetch for the endpoint on screen.
+        await this.saveAiForm(msg);
+        try {
+          const models = await this.aiService.listModels();
+          this.panel.webview.postMessage({ type: "aiModels", models });
+        } catch (err) {
+          this.panel.webview.postMessage({
+            type: "aiTestResult",
+            ok: false,
+            message: err instanceof AiError ? err.message : (err as Error).message,
+          });
+        }
+        break;
       case "aiTest":
         // Test what is on screen, not what happened to be stored — testing an
         // unsaved form is exactly the "Failed to parse URL" trap.
@@ -408,6 +422,10 @@ export class SettingsPanel {
         vscode.postMessage(aiForm('aiTest'));
       });
       $('aiResetBtn').addEventListener('click', () => vscode.postMessage({ type: 'aiResetPeriod' }));
+      $('aiModelsBtn').addEventListener('click', () => {
+        $('aiStatus').textContent = 'Fetching models…'; $('aiStatus').className = 'aimuted';
+        vscode.postMessage(aiForm('aiFetchModels'));
+      });
       $('aiSavePricesBtn').addEventListener('click', () => {
         const prices = {};
         document.querySelectorAll('#aiPricesBox input').forEach((inp) => {
@@ -426,6 +444,16 @@ export class SettingsPanel {
         clearInterval(testTimer);
         $('aiStatus').textContent = m.message;
         $('aiStatus').className = m.ok ? 'aiok' : 'aierr';
+      }
+      else if (m.type === 'aiModels') {
+        $('aiModelList').innerHTML = m.models.map((id) => '<option value="' + esc(id) + '">').join('');
+        // An empty model field takes the newest fetched id so "preset + key +
+        // fetch" alone yields a working setup.
+        if (!$('aiModel').value && m.models.length) $('aiModel').value = m.models[0];
+        $('aiStatus').textContent = m.models.length
+          ? m.models.length + ' models — click the Model field to choose, then Save.'
+          : 'The endpoint returned no models.';
+        $('aiStatus').className = m.models.length ? 'aiok' : 'aierr';
       }
     });
   </script>
@@ -637,7 +665,10 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <div class="airow"><label>Preset</label><select id="aiPreset"></select></div>
       <div class="airow"><label>Base URL</label><input id="aiBase" type="text" spellcheck="false" /></div>
       <div class="airow"><label>Model</label><input id="aiModel" type="text" spellcheck="false"
-           placeholder="free text — any model your provider serves" /></div>
+           list="aiModelList" placeholder="↻ fetch the live list, or type any model id" />
+           <datalist id="aiModelList"></datalist>
+           <button id="aiModelsBtn" class="aibtn secondary"
+                   title="Fetch the models this endpoint currently serves">↻</button></div>
       <div class="airow"><label>API key</label><input id="aiKey" type="password"
            placeholder="paste to set / replace — leave blank to keep" />
            <span id="aiKeyStatus" class="aimuted"></span></div>

@@ -177,6 +177,43 @@ test("malformed success body is a readable error, not a crash", async () => {
   );
 });
 
+test("openai-compat: listModels filters non-chat models and sorts newest-ish first", async () => {
+  const fetch = mockFetch(200, {
+    data: [
+      { id: "gpt-4o" },
+      { id: "text-embedding-3-small" },
+      { id: "whisper-1" },
+      { id: "gpt-5-mini" },
+      { id: "dall-e-3" },
+      { id: "gpt-5-mini" }, // duplicate — must collapse
+    ],
+  });
+  const models = await createAiProvider(OPENAI_CFG, fetch).listModels("sk");
+  assert.deepStrictEqual(models, ["gpt-5-mini", "gpt-4o"]);
+  // GET on {base}/models with the same auth scheme as completions.
+  assert.strictEqual(fetch.calls[0].url, "https://api.openai.com/v1/models");
+  assert.strictEqual(fetch.calls[0].init.method, "GET");
+  assert.strictEqual(fetch.calls[0].init.headers.authorization, "Bearer sk");
+});
+
+test("anthropic: listModels hits /v1/models with the api-key headers", async () => {
+  const fetch = mockFetch(200, {
+    data: [{ id: "claude-haiku-4-5" }, { id: "claude-sonnet-4-5" }],
+  });
+  const models = await createAiProvider(ANTHROPIC_CFG, fetch).listModels("sk-ant");
+  assert.deepStrictEqual(models, ["claude-sonnet-4-5", "claude-haiku-4-5"]);
+  assert.match(fetch.calls[0].url, /^https:\/\/api\.anthropic\.com\/v1\/models/);
+  assert.strictEqual(fetch.calls[0].init.headers["x-api-key"], "sk-ant");
+});
+
+test("listModels: auth failure normalizes like completions do", async () => {
+  const fetch = mockFetch(401, { error: { message: "bad key" } });
+  await assert.rejects(
+    () => createAiProvider(OPENAI_CFG, fetch).listModels("bad"),
+    /rejected by api\.openai\.com/,
+  );
+});
+
 test("presets: every preset creates a provider; Ollama is local and keyless", () => {
   for (const preset of AI_PRESETS.filter((p) => p.baseUrl)) {
     const provider = createAiProvider({

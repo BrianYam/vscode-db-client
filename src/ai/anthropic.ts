@@ -77,4 +77,32 @@ export class AnthropicProvider implements AiProvider {
       model: typeof parsed?.model === "string" ? parsed.model : this.config.model,
     };
   }
+
+  async listModels(apiKey: string): Promise<string[]> {
+    const url = `${this.config.baseUrl.replace(/\/+$/, "")}/v1/models?limit=1000`;
+    const host = hostOf(this.config.baseUrl);
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, {
+        method: "GET",
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      });
+    } catch (err) {
+      throw normalizeNetworkError(host, err);
+    }
+    const text = await res.text();
+    if (!res.ok) {
+      throw normalizeHttpError(res.status, host, text);
+    }
+    let parsed: { data?: Array<{ id?: unknown }> };
+    try {
+      parsed = JSON.parse(text) as { data?: Array<{ id?: unknown }> };
+    } catch {
+      throw new AiError(`${host} returned a non-JSON response`);
+    }
+    const ids = (parsed.data ?? [])
+      .map((m) => m?.id)
+      .filter((id): id is string => typeof id === "string");
+    return [...new Set(ids)].sort().reverse();
+  }
 }

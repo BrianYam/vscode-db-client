@@ -37,6 +37,11 @@ export interface AiResult {
 export interface AiProvider {
   readonly config: AiProviderConfig;
   complete(req: AiRequest, apiKey: string): Promise<AiResult>;
+  /**
+   * Model ids the endpoint currently serves, newest-ish first. Lets the
+   * settings UI offer a live list instead of a hardcoded one that goes stale.
+   */
+  listModels(apiKey: string): Promise<string[]>;
 }
 
 /** Injectable fetch so adapters are unit-testable without a network. */
