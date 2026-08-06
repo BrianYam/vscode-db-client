@@ -3,7 +3,8 @@ import type { AiProviderConfig, AiProviderKind } from "./AiProvider";
 import { isLocalBaseUrl } from "./AiProvider";
 import { presetById } from "./registry";
 
-const SETTINGS_KEY = "openDbClient.ai";
+export const AI_SETTINGS_KEY = "openDbClient.ai";
+const SETTINGS_KEY = AI_SETTINGS_KEY;
 // Same config/secret split as ConnectionStore: the key never touches globalState.
 const secretKey = (providerId: string) => `openDbClient.aiKey.${providerId}`;
 

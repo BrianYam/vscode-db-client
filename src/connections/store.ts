@@ -1,7 +1,8 @@
 import type * as vscode from "vscode";
 import type { ConnectionConfig } from "./types";
 
-const KEY = "openDbClient.connections";
+export const CONNECTIONS_KEY = "openDbClient.connections";
+const KEY = CONNECTIONS_KEY;
 const secretKey = (id: string) => `openDbClient.password.${id}`;
 const sshPwKey = (id: string) => `openDbClient.sshPassword.${id}`;
 const sshPassphraseKey = (id: string) => `openDbClient.sshPassphrase.${id}`;

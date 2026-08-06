@@ -2,11 +2,18 @@ import * as fs from "node:fs";
 import * as vscode from "vscode";
 import { AiError } from "../ai/AiProvider";
 import { AiService } from "../ai/aiService";
-import { AiStore } from "../ai/aiStore";
+import { AI_SETTINGS_KEY, AiStore } from "../ai/aiStore";
 import { AI_PRESETS, presetById } from "../ai/registry";
-import { summarizeAllTime, summarizePeriod, UsageStore } from "../ai/usageStore";
-import { ConnectionStore } from "../connections/store";
+import {
+  PRICES_KEY,
+  summarizeAllTime,
+  summarizePeriod,
+  USAGE_KEY,
+  UsageStore,
+} from "../ai/usageStore";
+import { CONNECTIONS_KEY, ConnectionStore } from "../connections/store";
 import { renderChangelog } from "./miniMarkdown";
+import { byteSize, formatBytes } from "./storageUsage";
 
 /** Everything a guide body may need from the running extension. */
 interface GuideCtx {
@@ -60,6 +67,10 @@ export class SettingsPanel {
     this.panel.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === "resetAllData") {
         vscode.commands.executeCommand("openDbClient.resetAllData");
+        return;
+      }
+      if (msg?.type === "storageLoad") {
+        await this.postStorageUsage();
         return;
       }
       await this.handleAiMessage(msg);
@@ -164,6 +175,68 @@ export class SettingsPanel {
         return; // not an AI message — nothing to re-post
     }
     await this.postAiState();
+  }
+
+  /**
+   * Measure everything this install persists and post it to the webview.
+   * Secrets are counted, never sized — reading keychain values just to measure
+   * them would break the "never read more than needed" promise in the guides.
+   */
+  private async postStorageUsage(): Promise<void> {
+    const stateRows = [
+      { label: "Connection configs", key: CONNECTIONS_KEY },
+      { label: "AI settings", key: AI_SETTINGS_KEY },
+      { label: "AI usage ledger", key: USAGE_KEY },
+      { label: "AI price table", key: PRICES_KEY },
+      // Mirrors extension.ts's LAST_SEEN_VERSION_KEY; importing it would cycle
+      // extension.ts ↔ settingsPanel.ts.
+      { label: "Last-seen version marker", key: "openDbClient.lastSeenVersion" },
+    ].map((r) => ({ label: r.label, bytes: byteSize(this.ctx.globalState.get(r.key)) }));
+    const queries = await this.dirUsage(vscode.Uri.joinPath(this.ctx.globalStorageUri, "queries"));
+    const totalBytes = stateRows.reduce((sum, r) => sum + r.bytes, 0) + queries.bytes;
+    this.panel.webview.postMessage({
+      type: "storageUsage",
+      rows: stateRows.map((r) => ({ label: r.label, size: formatBytes(r.bytes) })),
+      queries: { files: queries.files, size: formatBytes(queries.bytes) },
+      secretCount: await this.countSecrets(),
+      total: formatBytes(totalBytes),
+    });
+  }
+
+  /** Recursive file count + byte total of a storage folder; zeros when absent. */
+  private async dirUsage(dir: vscode.Uri): Promise<{ files: number; bytes: number }> {
+    let files = 0;
+    let bytes = 0;
+    try {
+      for (const [name, type] of await vscode.workspace.fs.readDirectory(dir)) {
+        const child = vscode.Uri.joinPath(dir, name);
+        if (type === vscode.FileType.Directory) {
+          const sub = await this.dirUsage(child);
+          files += sub.files;
+          bytes += sub.bytes;
+        } else {
+          files += 1;
+          bytes += (await vscode.workspace.fs.stat(child)).size;
+        }
+      }
+    } catch {
+      // Folder not created yet — genuinely zero.
+    }
+    return { files, bytes };
+  }
+
+  /** How many SecretStorage entries exist (presence checks only). */
+  private async countSecrets(): Promise<number> {
+    const checks: Promise<string | undefined>[] = [];
+    for (const c of this.connStore.all()) {
+      checks.push(this.connStore.getPassword(c.id));
+      checks.push(this.connStore.getSshPassword(c.id));
+      checks.push(this.connStore.getSshPassphrase(c.id));
+    }
+    for (const p of AI_PRESETS) {
+      checks.push(this.aiStore.getKey(p.id));
+    }
+    return (await Promise.all(checks)).filter(Boolean).length;
   }
 
   /** Persist the form: config to globalState, and the key (when typed) to SecretStorage. */
@@ -347,6 +420,12 @@ export class SettingsPanel {
     if (resetBtn) {
       resetBtn.addEventListener('click', () => vscode.postMessage({ type: 'resetAllData' }));
     }
+    const storageRefreshBtn = document.getElementById('storageRefreshBtn');
+    if (storageRefreshBtn) {
+      storageRefreshBtn.addEventListener('click', () => vscode.postMessage({ type: 'storageLoad' }));
+    }
+    // Requested from webview side so the reply can never race the script loading.
+    vscode.postMessage({ type: 'storageLoad' });
     document.querySelectorAll('.nav').forEach((n) => {
       n.addEventListener('click', () => {
         document.querySelectorAll('.nav').forEach((x) => x.classList.remove('active'));
@@ -548,6 +627,16 @@ export class SettingsPanel {
         clearInterval(testTimer);
         $('aiStatus').textContent = m.message;
         $('aiStatus').className = m.ok ? 'aiok' : 'aierr';
+      }
+      else if (m.type === 'storageUsage') {
+        let h = '<table><tr><th>What</th><th>Where</th><th>Size</th></tr>';
+        for (const r of m.rows)
+          h += '<tr><td>' + esc(r.label) + '</td><td>globalState</td><td>' + esc(r.size) + '</td></tr>';
+        h += '<tr><td>Saved query files (' + m.queries.files + ')</td><td>global storage folder</td><td>' +
+             esc(m.queries.size) + '</td></tr>';
+        h += '<tr><td>Secrets (' + m.secretCount + ' entries)</td><td>OS keychain</td><td>not read</td></tr>';
+        h += '<tr><th>Total measured</th><th></th><th>' + esc(m.total) + '</th></tr></table>';
+        $('storageBox').innerHTML = h;
       }
       else if (m.type === 'aiModels') {
         modelList = m.models;
@@ -869,6 +958,12 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
         <li><b>Passwords and SSH secrets</b> (DB password, SSH password, SSH passphrase) are stored in VS Code's <b>SecretStorage</b> — your OS keychain / credential vault, never in plain globalState.</li>
         <li><b>Saved query files</b> (.sql) live as real files under the extension's <b>global storage folder</b>.</li>
       </ul>
+
+      <h4>How much space it all takes</h4>
+      <p class="aimuted">Measured live from this install every time this page opens. Secrets are
+         <b>counted, never read</b> — their values stay in the keychain, so no size is shown.</p>
+      <div id="storageBox"><p class="aimuted">Measuring…</p></div>
+      <div class="airow"><button id="storageRefreshBtn" class="aibtn secondary">↻ Refresh</button></div>
 
       <div class="tip"><b>Uninstalling the extension does NOT remove any of this.</b>
         VS Code leaves your globalState, SecretStorage secrets, and the storage folder on disk

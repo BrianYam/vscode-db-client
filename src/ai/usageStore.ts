@@ -1,8 +1,8 @@
 import type * as vscode from "vscode";
 import type { AiVerb } from "./prompts";
 
-const USAGE_KEY = "openDbClient.aiUsage";
-const PRICES_KEY = "openDbClient.aiPrices";
+export const USAGE_KEY = "openDbClient.aiUsage";
+export const PRICES_KEY = "openDbClient.aiPrices";
 
 /** One provider call, recorded with the exact counts the response reported. */
 export interface UsageEntry {

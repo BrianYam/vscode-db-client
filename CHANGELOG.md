@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Storage usage readout.** Settings & Guides → "Uninstalling & your data" now
+  measures what this install actually stores, live: each globalState entry
+  (connections, AI settings, usage ledger, price table), the saved query files
+  on disk, and how many secrets sit in the OS keychain. Secrets are counted,
+  never read — no size is shown for them, by design.
+
 ## [1.1.1] - 2026-08-05
 
 ### Added

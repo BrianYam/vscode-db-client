@@ -785,3 +785,23 @@ unlock, all writes incl. DDL, auto-lock on AI output only).
       "🔒 auto-locked (VERB)"; Explain never locks
 - [ ] `[SDD][M23]` QA: generate a SELECT (no lock), an UPDATE (locks), unlock → run;
       manual lock blocks grid edits; regression on Ctrl+Enter/completion
+
+## M24 — Storage usage readout (requested 2026-08-06)
+
+Discovery (chat, 2026-08-06): user asked how to see the extension's total storage
+footprint. Buckets: globalState rows, saved query files on disk, SecretStorage
+entries (counted only — values are never read to be sized). Surfaced in
+Settings & Guides → "Uninstalling & your data", which already documents where
+data lives.
+
+### M24.0 — Measurement + UI ✅ code done 2026-08-06
+- [x] `[SDD][M24]` Pure helpers `byteSize` / `formatBytes` in
+      `src/webview/storageUsage.ts` (no vscode import, unit-testable)
+- [x] `[SDD][M24]` Host: `postStorageUsage()` in settingsPanel — per-key
+      globalState sizes (keys exported from their owning stores), recursive
+      `queries/` folder walk, secret presence count
+- [x] `[SDD][M24]` Webview: live table + ↻ Refresh in "Uninstalling & your
+      data"; honesty notes (secrets counted not sized, measured-live caption)
+- [x] `[SDD][M24]` Tests: `test/storageUsage.test.js` (byteSize, formatBytes)
+- [ ] `[SDD][M24]` Manual QA: open Settings → Uninstalling & your data; table
+      populates, Refresh re-measures, values match `state.vscdb` / `du` spot-check
