@@ -805,3 +805,38 @@ data lives.
 - [x] `[SDD][M24]` Tests: `test/storageUsage.test.js` (byteSize, formatBytes)
 - [ ] `[SDD][M24]` Manual QA: open Settings → Uninstalling & your data; table
       populates, Refresh re-measures, values match `state.vscdb` / `du` spot-check
+
+## M25 — Marketplace listing & README conversion pass (requested 2026-08-06)
+
+Discovery (chat, 2026-08-06): user wants the "introduction page" (Marketplace
+listing = README) to attract installs. Findings: no listing icon, no keywords,
+category "Other" only, README text-only with no visuals. Decision: fix metadata
++ restructure README now; hero GIF and screenshots are a follow-up needing a
+human screen recording.
+
+### M25.0 — Listing metadata + README ✅ code done 2026-08-06
+- [x] `[SDD][M25]` Marketplace icon: `media/icon.svg` authored (blue tile,
+      database glyph, green check), rendered to `media/icon.png` (256px);
+      `icon` + `galleryBanner` wired in package.json
+- [x] `[SDD][M25]` package.json: `keywords` (engine names + "sql client" etc.),
+      `categories` → Programming Languages / Visualization / Other, richer
+      `description` (Marketplace search snippet)
+- [x] `[SDD][M25]` README: hero pitch + shields.io badges, "Why this one?"
+      differentiators, features grouped by workflow, numbered Getting Started;
+      image slots left as HTML comments until assets exist
+- [x] `[SDD][M25]` Record `media/demo.gif` (add connection → browse → preview
+      table → edit cell; 26 frames, 1.8 MB) and `media/query-panel.png` —
+      captured 2026-08-06 via code-server + browser automation; README slots
+      enabled; big images excluded from the vsix via .vscodeignore (Marketplace
+      loads them from GitHub raw)
+- [x] `[SDD][M25]` Rebrand icon to company palette (black tile, white/green
+      cylinder, striped-ball logo badge in green ring) per user logo
+- [x] `[SDD][M25]` AI assistant README section: convert user-recorded
+      `ai-query-generation-sample.mp4` → `ai-query-generation.gif` (ffmpeg
+      two-pass palette, 413 KB; mp4 deleted after conversion), embed setup +
+      usage-ledger screenshots, add AI to Marketplace description/keywords;
+      all excluded from vsix. Badge stripes on icon refined (thinner, denser,
+      arc-clipped) per user feedback
+- [ ] `[SDD][M25]` QA: `npx vsce package` warning-free for listing fields;
+      preview README rendering on GitHub; verify icon crispness on the
+      Marketplace after next publish

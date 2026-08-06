@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Marketplace presence overhaul.** The extension now ships a proper listing
+  icon (`media/icon.png`, company-branded: black tile, white/green database
+  glyph, striped-ball logo badge) and a gallery banner instead of the default
+  gray placeholder, plus search `keywords` (postgresql, mysql, sqlite, redis,
+  sql client, …) and real `categories` so it can actually be found in
+  Marketplace search.
+- **Demo visuals.** `media/demo.gif` (add connection → browse → preview →
+  edit a cell, recorded against the real extension) and
+  `media/query-panel.png` now illustrate the README; both are excluded from
+  the vsix (the Marketplace serves them from GitHub).
+- **AI assistant featured in the README.** New section with
+  `media/ai-query-generation.gif` (converted from a recorded mp4 sample,
+  removed after conversion),
+  the setup screenshot, and the local usage-ledger screenshot; the
+  Marketplace description and keywords now mention the BYO-key AI assistant.
+
+### Changed
+- **README rewritten as a landing page.** Leads with the "unlimited
+  connections, forever free" hook, Marketplace badges, and a "Why this one?"
+  section; features regrouped by workflow (query & edit / browse / Redis /
+  connectivity). Commented-out image slots reference `media/demo.gif` and
+  `media/query-panel.png` — to be enabled once the assets are recorded.
+- `package.json` description expanded to mention SSH tunnels, the editable
+  results grid, and saved queries (this text is the Marketplace search
+  snippet).
+
 ## [1.1.2] - 2026-08-06
 
 ### Added

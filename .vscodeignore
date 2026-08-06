@@ -13,6 +13,12 @@ samples/**
 scripts/**
 shortcut-analysis/**
 node_modules/**
+media/demo.gif
+media/query-panel.png
+media/icon.svg
+media/ai-query-generation.gif
+media/ai-assistance-setup.png
+media/ai-usage-table.png
 esbuild.js
 **/*.ts
 **/*.map

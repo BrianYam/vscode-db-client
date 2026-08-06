@@ -1,10 +1,15 @@
 {
   "name": "open-database-client",
   "displayName": "Open DB Client",
-  "description": "Lightweight database client for VS Code with unlimited connections (PostgreSQL, MySQL/MariaDB, SQLite, Redis).",
+  "description": "Free database client with unlimited connections — browse, query, and edit PostgreSQL, MySQL/MariaDB, SQLite, and Redis. AI SQL assistant (bring your own key), SSH tunnels, editable results grid, saved queries.",
   "version": "1.1.2",
   "publisher": "brianlab",
   "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#173a8a",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/BrianYam/vscode-db-client.git"
@@ -13,7 +18,27 @@
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Programming Languages",
+    "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "database",
+    "sql",
+    "postgresql",
+    "postgres",
+    "mysql",
+    "mariadb",
+    "sqlite",
+    "redis",
+    "database client",
+    "sql client",
+    "database manager",
+    "query",
+    "ssh tunnel",
+    "ai",
+    "text to sql",
+    "db"
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
