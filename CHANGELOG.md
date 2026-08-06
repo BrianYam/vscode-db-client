@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Listing icon transparency.** `media/icon.png` was rendered with opaque
+  white corners outside the rounded tile (QuickLook flattens SVG alpha);
+  re-rendered with real transparency so the icon sits cleanly on any
+  Marketplace background. Gallery banner color aligned to the brand black
+  (`#0A0A0A`, was a leftover blue).
+
 ## [1.2.0] - 2026-08-06
 
 ### Added
