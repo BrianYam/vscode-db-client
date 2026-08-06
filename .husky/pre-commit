@@ -1,1 +1,2 @@
 npx lint-staged
+sh scripts/gitleaks-scan.sh
