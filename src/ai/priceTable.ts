@@ -29,16 +29,6 @@ export type PriceStatus = "up to date" | "stale";
 /** D2: a fetched price older than this is shown as stale. */
 export const STALE_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** The price list LiteLLM itself fetches at runtime — CI-updated on GitHub. */
-export const LITELLM_PRICES_URL =
-  "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
-
-/** Which of our presets the LiteLLM list can price, and under which name. */
-export const LITELLM_PROVIDER_IDS: Record<string, string> = {
-  openai: "openai",
-  anthropic: "anthropic",
-};
-
 export function rowStatus(row: PriceRow, now: number): PriceStatus {
   return row.fetchedAt !== undefined && now - row.fetchedAt < STALE_MS ? "up to date" : "stale";
 }
@@ -72,39 +62,6 @@ export function findPrice(
 
 /** $/MTok price pairs by lowercased model id. */
 export type PriceMap = Map<string, { input: number; output: number }>;
-
-/**
- * Extract one provider's chat-model prices from the LiteLLM JSON.
- * Costs there are per token; scale to per-million and drop non-chat entries
- * (image/audio/embedding rows would produce meaningless SQL-call estimates).
- */
-export function parseLitellmPrices(json: unknown, litellmProvider: string): PriceMap {
-  const map: PriceMap = new Map();
-  if (!json || typeof json !== "object") {
-    return map;
-  }
-  for (const [id, entry] of Object.entries(json as Record<string, unknown>)) {
-    const e = entry as {
-      litellm_provider?: unknown;
-      mode?: unknown;
-      input_cost_per_token?: unknown;
-      output_cost_per_token?: unknown;
-    };
-    if (e?.litellm_provider !== litellmProvider) {
-      continue;
-    }
-    if (e.mode !== undefined && e.mode !== "chat" && e.mode !== "responses") {
-      continue;
-    }
-    const inTok = e.input_cost_per_token;
-    const outTok = e.output_cost_per_token;
-    if (typeof inTok !== "number" || typeof outTok !== "number") {
-      continue;
-    }
-    map.set(id.toLowerCase(), { input: inTok * 1_000_000, output: outTok * 1_000_000 });
-  }
-  return map;
-}
 
 export interface MergeResult {
   rows: PriceRow[];

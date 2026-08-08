@@ -1,12 +1,12 @@
-// API-sourced price table: status thresholds, lookup precedence, the LiteLLM
-// parser, and the refresh merges (NA rows removed and reported, never silently).
+// API-sourced price table: status thresholds, lookup precedence, and the
+// refresh merges (NA rows removed and reported, never silently). The LiteLLM
+// list itself is litellmTable.test.js.
 const { test } = require("node:test");
 const assert = require("node:assert");
 const {
   findPrice,
   mergeFetched,
   mergeLitellm,
-  parseLitellmPrices,
   rowStatus,
   STALE_MS,
 } = require("../out/ai/priceTable.js");
@@ -48,43 +48,6 @@ test("findPrice: exact provider+model beats substring; wrong provider misses", (
   // No cross-provider fallback and no invented prices.
   assert.strictEqual(findPrice("anthropic", "gpt-5-mini", rows), undefined);
   assert.strictEqual(findPrice("openai", "o1-pro", rows), undefined);
-});
-
-test("parseLitellmPrices: filters provider and mode, scales per-token to $/MTok", () => {
-  const json = {
-    "gpt-5-mini": {
-      litellm_provider: "openai",
-      mode: "chat",
-      input_cost_per_token: 2.5e-7,
-      output_cost_per_token: 2e-6,
-    },
-    "o1-pro": {
-      litellm_provider: "openai",
-      mode: "responses",
-      input_cost_per_token: 1.5e-4,
-      output_cost_per_token: 6e-4,
-    },
-    "dall-e-3": {
-      litellm_provider: "openai",
-      mode: "image_generation",
-      input_cost_per_token: 1e-5,
-      output_cost_per_token: 1e-5,
-    },
-    "claude-sonnet-4-6": {
-      litellm_provider: "anthropic",
-      mode: "chat",
-      input_cost_per_token: 3e-6,
-      output_cost_per_token: 1.5e-5,
-    },
-    broken: { litellm_provider: "openai", mode: "chat", input_cost_per_token: "x" },
-  };
-  const openai = parseLitellmPrices(json, "openai");
-  assert.deepStrictEqual(openai.get("gpt-5-mini"), { input: 0.25, output: 2 });
-  assert.ok(openai.get("o1-pro")); // "responses" mode counts as chat-usable
-  assert.strictEqual(openai.get("dall-e-3"), undefined); // image rows dropped
-  assert.strictEqual(openai.get("broken"), undefined); // non-numeric dropped
-  assert.strictEqual(openai.get("claude-sonnet-4-6"), undefined); // other provider
-  assert.strictEqual(parseLitellmPrices(null, "openai").size, 0);
 });
 
 test("mergeFetched: updates api rows, removes NA models, reports them", () => {

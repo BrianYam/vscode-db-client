@@ -32,6 +32,13 @@ export interface AiPreset {
   defaultModel: string;
   /** Whether the endpoint requires an API key at all (Ollama does not). */
   needsKey: boolean;
+  /**
+   * This preset's name in the LiteLLM price list's `litellm_provider` field,
+   * scoping price lookups to it (M29). Absent for "custom": a user-supplied
+   * base URL could be anything, so the user names the mapping in settings —
+   * guessing would price a model off an unrelated host's row.
+   */
+  litellmProvider?: string;
 }
 
 export const AI_PRESETS: AiPreset[] = [
@@ -42,6 +49,7 @@ export const AI_PRESETS: AiPreset[] = [
     baseUrl: "https://api.anthropic.com",
     defaultModel: "claude-sonnet-4-5",
     needsKey: true,
+    litellmProvider: "anthropic",
   },
   {
     id: "openai",
@@ -50,6 +58,7 @@ export const AI_PRESETS: AiPreset[] = [
     baseUrl: "https://api.openai.com/v1",
     defaultModel: "gpt-5-mini",
     needsKey: true,
+    litellmProvider: "openai",
   },
   {
     id: "ollama",
@@ -58,6 +67,8 @@ export const AI_PRESETS: AiPreset[] = [
     baseUrl: "http://localhost:11434/v1",
     defaultModel: "llama3.1",
     needsKey: false,
+    // LiteLLM prices local models at 0 — a true $0.00, not an unknown.
+    litellmProvider: "ollama",
   },
   {
     id: "openrouter",
@@ -66,6 +77,7 @@ export const AI_PRESETS: AiPreset[] = [
     baseUrl: "https://openrouter.ai/api/v1",
     defaultModel: "anthropic/claude-sonnet-4.5",
     needsKey: true,
+    litellmProvider: "openrouter",
   },
   {
     id: "custom",

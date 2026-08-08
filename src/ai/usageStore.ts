@@ -1,4 +1,5 @@
 import type * as vscode from "vscode";
+import type { LitellmTable } from "./litellmTable";
 import type { PriceRow } from "./priceTable";
 import type { AiVerb } from "./prompts";
 
@@ -7,6 +8,8 @@ export const USAGE_KEY = "openDbClient.aiUsage";
 export const PRICES_KEY = "openDbClient.aiPrices";
 /** API-sourced price rows (see priceTable.ts). */
 export const PRICE_TABLE_KEY = "openDbClient.aiPriceTable";
+/** Local mirror of the LiteLLM price list (see litellmTable.ts) — ~129 KB. */
+export const LITELLM_TABLE_KEY = "openDbClient.aiLitellmPrices";
 
 /** One provider call, recorded with the exact counts the response reported. */
 export interface UsageEntry {
@@ -177,9 +180,19 @@ export class UsageStore {
     await this.ctx.globalState.update(PRICE_TABLE_KEY, rows);
   }
 
+  /** The LiteLLM mirror, or undefined until the first successful fetch. */
+  litellmTable(): LitellmTable | undefined {
+    return this.ctx.globalState.get<LitellmTable>(LITELLM_TABLE_KEY);
+  }
+
+  async saveLitellmTable(table: LitellmTable): Promise<void> {
+    await this.ctx.globalState.update(LITELLM_TABLE_KEY, table);
+  }
+
   async deleteAll(): Promise<void> {
     await this.ctx.globalState.update(USAGE_KEY, undefined);
     await this.ctx.globalState.update(PRICES_KEY, undefined);
     await this.ctx.globalState.update(PRICE_TABLE_KEY, undefined);
+    await this.ctx.globalState.update(LITELLM_TABLE_KEY, undefined);
   }
 }

@@ -8,11 +8,31 @@ const SETTINGS_KEY = AI_SETTINGS_KEY;
 // Same config/secret split as ConnectionStore: the key never touches globalState.
 const secretKey = (providerId: string) => `openDbClient.aiKey.${providerId}`;
 
+/**
+ * What the form last held for one provider. Keys already live per provider in
+ * SecretStorage; without this the endpoint config did not, so switching preset
+ * and back reset the model to the preset default and discarded a custom base URL.
+ */
+export interface AiProviderMemory {
+  baseUrl?: string;
+  model?: string;
+  litellmProvider?: string;
+}
+
 export interface AiSettings {
   providerId: string;
   kind: AiProviderKind;
   baseUrl: string;
   model: string;
+  /** Last-saved form values per providerId, so switching preset restores them. */
+  perProvider: Record<string, AiProviderMemory>;
+  /**
+   * Which LiteLLM provider a "custom" endpoint's models should be priced
+   * against (M29 D3). Empty = no LiteLLM fallback for custom, so unpriced
+   * models honestly show "—" rather than borrowing an unrelated host's price.
+   * Presets carry their own mapping in registry.ts; this only covers custom.
+   */
+  litellmProvider: string;
   /** First-use consent to send prompt + schema names to the provider. Revocable. */
   consentGiven: boolean;
   /** Connection ids where AI is switched off (regulated databases). */
@@ -24,16 +44,47 @@ const DEFAULTS: AiSettings = {
   kind: "openai-compat",
   baseUrl: "",
   model: "",
+  perProvider: {},
+  litellmProvider: "",
   consentGiven: false,
   disabledConnections: [],
 };
+
+/**
+ * Fill in the active provider's own memory entry when it has none.
+ *
+ * Settings saved before per-provider memory existed carry only one endpoint
+ * triple; without this seed the first switch to another preset and back would
+ * "forget" a model the user had, in fact, saved. Pure so it can be tested
+ * without the VS Code API.
+ */
+export function withProviderMemory(settings: AiSettings): AiSettings {
+  const { providerId, perProvider } = settings;
+  if (!providerId || perProvider[providerId]) {
+    return settings;
+  }
+  return {
+    ...settings,
+    perProvider: {
+      ...perProvider,
+      [providerId]: {
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        litellmProvider: settings.litellmProvider,
+      },
+    },
+  };
+}
 
 /** Persists AI provider settings in globalState and the API key in SecretStorage. */
 export class AiStore {
   constructor(private readonly ctx: vscode.ExtensionContext) {}
 
   get(): AiSettings {
-    return { ...DEFAULTS, ...this.ctx.globalState.get<Partial<AiSettings>>(SETTINGS_KEY, {}) };
+    return withProviderMemory({
+      ...DEFAULTS,
+      ...this.ctx.globalState.get<Partial<AiSettings>>(SETTINGS_KEY, {}),
+    });
   }
 
   async update(patch: Partial<AiSettings>): Promise<void> {

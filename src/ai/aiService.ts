@@ -11,15 +11,13 @@ import {
   schemaInputFromHints,
 } from "./context";
 import {
-  findPrice,
   LITELLM_PRICES_URL,
-  LITELLM_PROVIDER_IDS,
-  mergeFetched,
-  mergeLitellm,
-  type PriceMap,
-  type PriceRow,
-  parseLitellmPrices,
-} from "./priceTable";
+  type LitellmEntry,
+  type LitellmTable,
+  lookupLitellm,
+  parseLitellmTable,
+} from "./litellmTable";
+import { findPrice, mergeFetched, mergeLitellm, type PriceMap, type PriceRow } from "./priceTable";
 import {
   type AiExchange,
   type AiVerb,
@@ -73,6 +71,15 @@ export interface AiVerbResult {
   provider: string;
   /** Model as the server reported it, which may differ from the one requested. */
   model: string;
+}
+
+/** One row of the settings model dropdown: the price shown next to a model. */
+export interface PriceCandidate {
+  id: string;
+  /** USD per MTok. Both absent when no source prices this model — shown "—". */
+  input?: number;
+  output?: number;
+  source?: PriceRow["source"];
 }
 
 /**
@@ -146,6 +153,8 @@ export class AiService {
       { system: "Reply with the single word OK.", user: "ping", maxTokens: 512 },
       key,
     );
+    // Measured before the bookkeeping below, which may hit the network.
+    const ms = Date.now() - started;
     await this.usage.record({
       ts: Date.now(),
       providerId: config.providerId,
@@ -154,7 +163,8 @@ export class AiService {
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
     });
-    return { ms: Date.now() - started, model: res.model };
+    await this.autoPrice(config.providerId, res.model);
+    return { ms, model: res.model };
   }
 
   /**
@@ -173,11 +183,18 @@ export class AiService {
     // (OpenAI, Anthropic), annotate from the price table — the "~" marks
     // built-in fallback numbers, the only non-API source that exists.
     const table = this.priceTable();
+    const litellmId = this.litellmProviderFor(s.providerId);
+    const entries = litellmId ? await this.ensureLitellmTable().catch(() => []) : [];
     return models.map((m) => {
       if (m.inputPerMTok != null || m.outputPerMTok != null) {
         return m;
       }
-      const p = findPrice(s.providerId, m.id, table);
+      // Price table first — those are the numbers the usage ledger actually
+      // charges against — then the LiteLLM mirror, so every model LiteLLM
+      // knows shows a price in the dropdown, not just ones already added (req 4).
+      const p =
+        findPrice(s.providerId, m.id, table) ??
+        (litellmId ? lookupLitellm(entries, litellmId, m.id) : undefined);
       // est → rendered with "~": the number is from the price table (a prior
       // fetch or LiteLLM), not from this endpoint's own response.
       return p ? { ...m, inputPerMTok: p.input, outputPerMTok: p.output, est: true } : m;
@@ -189,31 +206,74 @@ export class AiService {
     return this.usage.apiPriceRows();
   }
 
-  /** One LiteLLM download per settings session — the JSON is ~1.6 MB. */
-  private litellmCache?: { at: number; json: unknown };
+  /** The stored LiteLLM mirror with its age, for the settings badge. */
+  litellmTable(): LitellmTable | undefined {
+    return this.usage.litellmTable();
+  }
 
   /**
-   * Community price list for providers whose own APIs publish no pricing
-   * (OpenAI, Anthropic). Undefined for providers LiteLLM doesn't cover here.
+   * Which LiteLLM provider prices this preset's models. Presets carry their
+   * own mapping (registry.ts); "custom" uses whatever the user named, since a
+   * user-supplied base URL could be anything. Unmapped → no LiteLLM fallback,
+   * which shows "—" rather than a price borrowed from an unrelated host.
    */
-  private async litellmPrices(providerId: string): Promise<PriceMap | undefined> {
-    const litellmId = LITELLM_PROVIDER_IDS[providerId];
+  private litellmProviderFor(providerId: string): string | undefined {
+    if (providerId === "custom") {
+      return this.store.get().litellmProvider || undefined;
+    }
+    return presetById(providerId)?.litellmProvider;
+  }
+
+  /**
+   * The local mirror, downloading once if it has never been populated.
+   * D4: no timers and no refetch-on-open — the table ages visibly instead,
+   * and ↻ is the only thing that re-downloads.
+   */
+  private async ensureLitellmTable(): Promise<LitellmEntry[]> {
+    const stored = this.usage.litellmTable();
+    if (stored?.entries.length) {
+      return stored.entries;
+    }
+    return (await this.refreshLitellmTable()).entries;
+  }
+
+  /**
+   * Re-download and replace the mirror wholesale (~129 KB stored from a
+   * ~1.6 MB file). On failure the existing table is left untouched and the
+   * error surfaces: a stale table still prices every model it knows, whereas
+   * an emptied one silently turns every estimate into "—".
+   */
+  async refreshLitellmTable(): Promise<LitellmTable> {
+    let res: Response;
+    try {
+      res = await fetch(LITELLM_PRICES_URL);
+    } catch (err) {
+      throw new AiError(`Couldn't reach the LiteLLM price list: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      throw new AiError(`LiteLLM price list fetch failed (HTTP ${res.status}).`);
+    }
+    const entries = parseLitellmTable(await res.json());
+    if (!entries.length) {
+      // Shape changed upstream — keep whatever we already had rather than
+      // replacing a working table with nothing.
+      throw new AiError("The LiteLLM price list returned no usable model prices.");
+    }
+    const table: LitellmTable = { entries, fetchedAt: Date.now() };
+    await this.usage.saveLitellmTable(table);
+    return table;
+  }
+
+  /** One model's LiteLLM price, or undefined when nothing there covers it. */
+  private async litellmPrice(
+    providerId: string,
+    modelId: string,
+  ): Promise<{ input: number; output: number } | undefined> {
+    const litellmId = this.litellmProviderFor(providerId);
     if (!litellmId) {
       return undefined;
     }
-    if (!this.litellmCache || Date.now() - this.litellmCache.at > 60 * 60 * 1000) {
-      let res: Response;
-      try {
-        res = await fetch(LITELLM_PRICES_URL);
-      } catch (err) {
-        throw new AiError(`Couldn't reach the LiteLLM price list: ${(err as Error).message}`);
-      }
-      if (!res.ok) {
-        throw new AiError(`LiteLLM price list fetch failed (HTTP ${res.status}).`);
-      }
-      this.litellmCache = { at: Date.now(), json: await res.json() };
-    }
-    return parseLitellmPrices(this.litellmCache.json, litellmId);
+    return lookupLitellm(await this.ensureLitellmTable(), litellmId, modelId);
   }
 
   /**
@@ -238,19 +298,24 @@ export class AiService {
   }
 
   /**
-   * Models a provider serves, flagged with whether a real price source covers
-   * them: the provider's own API, or the LiteLLM list for APIs that publish
-   * no pricing. `priced: false` means no verifiable price exists anywhere.
+   * Models a provider serves, each carrying the price the dropdown shows:
+   * the provider's own API price when it publishes one, else the LiteLLM
+   * table's (req 4). No `source` means nothing prices it — rendered "—",
+   * never a guessed number.
    */
-  async priceCandidates(providerId: string): Promise<Array<{ id: string; priced: boolean }>> {
+  async priceCandidates(providerId: string): Promise<PriceCandidate[]> {
     const models = await this.listModelsFor(providerId);
-    const litellm = await this.litellmPrices(providerId).catch(() => undefined);
-    return models.map((m) => ({
-      id: m.id,
-      priced:
-        (!m.est && m.inputPerMTok != null && m.outputPerMTok != null) ||
-        !!litellm?.get(m.id.toLowerCase()),
-    }));
+    const litellmId = this.litellmProviderFor(providerId);
+    // A missing table must not cost us the endpoint's own prices, which need
+    // no download at all.
+    const entries = litellmId ? await this.ensureLitellmTable().catch(() => []) : [];
+    return models.map((m) => {
+      if (!m.est && m.inputPerMTok != null && m.outputPerMTok != null) {
+        return { id: m.id, input: m.inputPerMTok, output: m.outputPerMTok, source: "api" as const };
+      }
+      const p = litellmId ? lookupLitellm(entries, litellmId, m.id) : undefined;
+      return p ? { id: m.id, ...p, source: "litellm" as const } : { id: m.id };
+    });
   }
 
   /**
@@ -267,8 +332,7 @@ export class AiService {
     if (!m.est && m.inputPerMTok != null && m.outputPerMTok != null) {
       price = { input: m.inputPerMTok, output: m.outputPerMTok, source: "api" };
     } else {
-      const litellm = await this.litellmPrices(providerId);
-      const p = litellm?.get(modelId.toLowerCase());
+      const p = await this.litellmPrice(providerId, modelId);
       if (p) {
         price = { ...p, source: "litellm" };
       }
@@ -291,6 +355,56 @@ export class AiService {
       source: price.source,
       fetchedAt: Date.now(),
     });
+    await this.usage.savePriceRows(rows);
+  }
+
+  /**
+   * D1 — file a price the moment a model is actually used, keyed on the
+   * SERVER-reported id. The server routinely reports a more versioned id than
+   * the one requested (`gpt-5-mini` → `gpt-5-mini-2025-08-07`); pricing the
+   * requested id would file the row under a name the usage table never shows.
+   *
+   * Only runs when nothing already covers the pair, so the extra model-list
+   * request happens once per new model, not once per call. Best-effort
+   * throughout: the call it follows has already succeeded, and no pricing
+   * failure may turn that into an error.
+   *
+   * D2 — this re-adds a row the user removed with ✕, so ✕ means "until next
+   * use". The price table's hint says so rather than implying permanence.
+   */
+  private async autoPrice(providerId: string, model: string): Promise<void> {
+    if (!model || findPrice(providerId, model, this.usage.apiPriceRows())) {
+      return;
+    }
+    let price: { input: number; output: number; source: PriceRow["source"] } | undefined;
+    try {
+      const m = (await this.listModelsFor(providerId)).find(
+        (mo) => mo.id.toLowerCase() === model.toLowerCase(),
+      );
+      if (m && !m.est && m.inputPerMTok != null && m.outputPerMTok != null) {
+        price = { input: m.inputPerMTok, output: m.outputPerMTok, source: "api" };
+      }
+    } catch {
+      // Endpoint unreachable or keyless — LiteLLM may still cover the model.
+    }
+    if (!price) {
+      try {
+        const p = await this.litellmPrice(providerId, model);
+        if (p) {
+          price = { ...p, source: "litellm" };
+        }
+      } catch {
+        // No local table and no network: the model stays unpriced and shows
+        // "—", which is the honest answer. ＋ Price used models retries later.
+      }
+    }
+    if (!price) {
+      return;
+    }
+    const rows = this.usage
+      .apiPriceRows()
+      .filter((r) => !(r.providerId === providerId && r.model === model));
+    rows.push({ providerId, model, ...price, fetchedAt: Date.now() });
     await this.usage.savePriceRows(rows);
   }
 
@@ -325,19 +439,22 @@ export class AiService {
     }
     for (const [pid, modelIds] of byProvider) {
       let models: AiModelInfo[] | undefined;
-      let litellm: PriceMap | undefined;
+      let entries: LitellmEntry[] | undefined;
+      const litellmId = this.litellmProviderFor(pid);
       let fetchError: string | undefined;
       try {
         models = await this.listModelsFor(pid);
       } catch (err) {
         fetchError = (err as Error).message;
       }
-      try {
-        litellm = await this.litellmPrices(pid);
-      } catch (err) {
-        fetchError = fetchError ?? (err as Error).message;
+      if (litellmId) {
+        try {
+          entries = await this.ensureLitellmTable();
+        } catch (err) {
+          fetchError = fetchError ?? (err as Error).message;
+        }
       }
-      if (!models && !litellm) {
+      if (!models && !entries) {
         errors.push(fetchError ?? `${pid}: no price source reachable`);
         continue;
       }
@@ -351,7 +468,8 @@ export class AiService {
               source: "api" as const,
             }
           : (() => {
-              const lp = litellm?.get(modelId.toLowerCase());
+              const lp =
+                entries && litellmId ? lookupLitellm(entries, litellmId, modelId) : undefined;
               return lp ? { ...lp, source: "litellm" as const } : undefined;
             })();
         if (!p) {
@@ -393,19 +511,39 @@ export class AiService {
         errors.push(err instanceof Error ? err.message : String(err));
       }
     }
-    for (const pid of [
-      ...new Set(rows.filter((r) => r.source === "litellm").map((r) => r.providerId)),
-    ]) {
+    // LiteLLM rows re-read the local mirror rather than re-downloading, so a
+    // refresh works offline. Use ↻ on the LiteLLM table itself to pull newer
+    // numbers from GitHub.
+    const litellmRows = rows.filter((r) => r.source === "litellm");
+    let entries: LitellmEntry[] | undefined;
+    if (litellmRows.length) {
       try {
-        const prices = await this.litellmPrices(pid);
-        if (!prices) {
-          continue; // mapping gone — leave rows to age into stale
+        entries = await this.ensureLitellmTable();
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    if (entries) {
+      for (const pid of new Set(litellmRows.map((r) => r.providerId))) {
+        const litellmId = this.litellmProviderFor(pid);
+        if (!litellmId) {
+          continue; // mapping gone (e.g. custom endpoint unset) — rows age into stale
+        }
+        // mergeLitellm keys on each row's own model id, so resolve per row —
+        // the table's id may be namespaced where the row's is not.
+        const prices: PriceMap = new Map();
+        for (const r of litellmRows) {
+          if (r.providerId !== pid) {
+            continue;
+          }
+          const p = lookupLitellm(entries, litellmId, r.model);
+          if (p) {
+            prices.set(r.model.toLowerCase(), p);
+          }
         }
         const res = mergeLitellm(rows, pid, prices, Date.now());
         rows = res.rows;
         removed.push(...res.removed.map((m) => `${pid}: ${m}`));
-      } catch (err) {
-        errors.push(err instanceof Error ? err.message : String(err));
       }
     }
     await this.usage.savePriceRows(rows);
@@ -464,6 +602,9 @@ export class AiService {
     });
 
     const ms = Date.now() - started;
+    // Before the estimate below, so the very first call with a new model is
+    // itself costed instead of showing "—" until the next one.
+    await this.autoPrice(config.providerId, res.model);
     const tokens = res.inputTokens + res.outputTokens;
     // Same estimate the usage ledger shows — the response carries exact tokens
     // but no dollar amount, so price comes from the price table.

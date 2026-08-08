@@ -3,9 +3,10 @@ import * as vscode from "vscode";
 import { AiError } from "../ai/AiProvider";
 import { AiService } from "../ai/aiService";
 import { AI_SETTINGS_KEY, AiStore } from "../ai/aiStore";
-import { findPrice, rowStatus } from "../ai/priceTable";
+import { findPrice, type PriceRow, rowStatus } from "../ai/priceTable";
 import { AI_PRESETS, presetById } from "../ai/registry";
 import {
+  LITELLM_TABLE_KEY,
   PRICE_TABLE_KEY,
   PRICES_KEY,
   summarizeAllTime,
@@ -87,6 +88,7 @@ export class SettingsPanel {
     const settings = this.aiStore.get();
     const state = this.usageStore.state();
     const table = this.aiService.priceTable();
+    const litellm = this.aiService.litellmTable();
     const lookup = (pid: string, model: string) => findPrice(pid, model, table);
     const preset = presetById(settings.providerId);
     this.panel.webview.postMessage({
@@ -95,6 +97,8 @@ export class SettingsPanel {
         providerId: settings.providerId,
         baseUrl: settings.baseUrl,
         model: settings.model,
+        litellmProvider: settings.litellmProvider,
+        perProvider: settings.perProvider,
         consentGiven: settings.consentGiven,
         disabledConnections: settings.disabledConnections,
       },
@@ -122,6 +126,15 @@ export class SettingsPanel {
       periodStart: state.periodStart,
       dropped: state.dropped,
       priceTable: table.map((r) => ({ ...r, status: rowStatus(r, Date.now()) })),
+      // The LiteLLM mirror's size and age — entries stay host-side (129 KB is
+      // not something to ship into a webview that only renders a count).
+      litellm: litellm
+        ? {
+            count: litellm.entries.length,
+            fetchedAt: litellm.fetchedAt,
+            status: rowStatus({ fetchedAt: litellm.fetchedAt } as PriceRow, Date.now()),
+          }
+        : null,
     });
   }
 
@@ -220,6 +233,22 @@ export class SettingsPanel {
         });
         break;
       }
+      case "aiRefreshLitellm":
+        try {
+          const t = await this.aiService.refreshLitellmTable();
+          this.panel.webview.postMessage({
+            type: "aiPriceStatus",
+            ok: true,
+            message: `LiteLLM price list updated — ${t.entries.length} models ✓`,
+          });
+        } catch (err) {
+          this.panel.webview.postMessage({
+            type: "aiPriceStatus",
+            ok: false,
+            message: (err as Error).message,
+          });
+        }
+        break;
       case "aiRefreshPrices": {
         const r = await this.aiService.refreshPrices();
         const parts: string[] = [];
@@ -251,6 +280,7 @@ export class SettingsPanel {
       { label: "AI settings", key: AI_SETTINGS_KEY },
       { label: "AI usage ledger", key: USAGE_KEY },
       { label: "AI price table", key: PRICE_TABLE_KEY },
+      { label: "AI LiteLLM price cache", key: LITELLM_TABLE_KEY },
       { label: "AI price table (legacy, purged by Reset All Data)", key: PRICES_KEY },
       // Mirrors extension.ts's LAST_SEEN_VERSION_KEY; importing it would cycle
       // extension.ts ↔ settingsPanel.ts.
@@ -305,12 +335,24 @@ export class SettingsPanel {
 
   /** Persist the form: config to globalState, and the key (when typed) to SecretStorage. */
   private async saveAiForm(msg: Record<string, unknown>): Promise<void> {
-    const preset = presetById(String(msg.providerId ?? ""));
+    const providerId = String(msg.providerId ?? "");
+    const preset = presetById(providerId);
+    const baseUrl = String(msg.baseUrl ?? "").trim();
+    const model = String(msg.model ?? "").trim();
+    const litellmProvider = String(msg.litellmProvider ?? "").trim();
+    // Remember this endpoint under its own provider, so switching preset away
+    // and back restores what the user chose instead of the preset default.
+    const perProvider = { ...this.aiStore.get().perProvider };
+    if (providerId) {
+      perProvider[providerId] = { baseUrl, model, litellmProvider };
+    }
     await this.aiStore.update({
-      providerId: String(msg.providerId ?? ""),
+      providerId,
       kind: preset?.kind ?? "openai-compat",
-      baseUrl: String(msg.baseUrl ?? "").trim(),
-      model: String(msg.model ?? "").trim(),
+      baseUrl,
+      model,
+      litellmProvider,
+      perProvider,
     });
     // A blank key field means "keep the stored one", never "delete it".
     const key = String(msg.key ?? "");
@@ -589,6 +631,7 @@ export class SettingsPanel {
       // Don't clobber half-typed edits: only fill when the field isn't focused.
       if (document.activeElement !== $('aiBase')) $('aiBase').value = ai.settings.baseUrl;
       if (document.activeElement !== $('aiModel')) $('aiModel').value = ai.settings.model;
+      if (document.activeElement !== $('aiLlmProv')) $('aiLlmProv').value = ai.settings.litellmProvider || '';
       updateKeyStatus();
       $('aiConfigured').textContent = ai.configured
         ? '✓ Configured — the assist bar appears in query panels.'
@@ -621,9 +664,16 @@ export class SettingsPanel {
             '</td><td>' + fmtP(r.input) + '</td><td>' + fmtP(r.output) +
             '</td><td class="aimuted">' + (r.source === 'api' ? 'provider API' : 'LiteLLM') +
             '</td><td class="' + (r.status === 'stale' ? 'aierr' : 'aimuted') + '">' + esc(r.status) +
-            '</td><td><button class="aibtn secondary" title="Remove this row — its usage cost reverts to —" ' +
+            '</td><td><button class="aibtn secondary" title="Remove this row — its usage cost reverts to — until the model is used again" ' +
             'data-p="' + esc(r.providerId) + '" data-m="' + esc(r.model) + '">✕</button></td></tr>').join('') + '</table>'
         : '<p class="aimuted">Empty — add models below to start estimating costs.</p>';
+      const lm = ai.litellm;
+      $('aiLitellmBox').innerHTML = lm
+        ? '<p class="' + (lm.status === 'stale' ? 'aierr' : 'aimuted') + '">' +
+          lm.count.toLocaleString() + ' models priced · updated ' +
+          new Date(lm.fetchedAt).toLocaleDateString() + ' · ' + esc(lm.status) + '</p>'
+        : '<p class="aimuted">Not downloaded yet — fetched automatically the first time a price ' +
+          'is needed, or press ↻ to fetch it now.</p>';
       const pp = $('aiPriceProv');
       if (pp && !pp.options.length) {
         pp.innerHTML = ai.presets.map((p) =>
@@ -703,6 +753,8 @@ export class SettingsPanel {
       if (!ai) return;
       const id = $('aiPreset').value || ai.settings.providerId;
       const p = ai.presets.find((x) => x.id === id);
+      // Presets carry their own LiteLLM mapping; only "custom" needs asking.
+      $('aiLlmProvRow').style.display = id === 'custom' ? '' : 'none';
       $('aiKeyStatus').textContent = p && !p.needsKey ? 'no key needed (local)'
         : (ai.keyedProviders || []).includes(id) ? '🔑 key stored for this provider'
         : 'no key stored for this provider';
@@ -712,7 +764,14 @@ export class SettingsPanel {
     if (presetSel) {
       presetSel.addEventListener('change', () => {
         const p = ai && ai.presets.find((x) => x.id === presetSel.value);
-        if (p) { $('aiBase').value = p.baseUrl; if (p.defaultModel) $('aiModel').value = p.defaultModel; }
+        // What this provider was last saved with wins over the preset default;
+        // a model id belonging to the provider we just left is never kept.
+        const mem = (ai && ai.settings.perProvider && ai.settings.perProvider[presetSel.value]) || {};
+        if (p) {
+          $('aiBase').value = mem.baseUrl || p.baseUrl;
+          $('aiModel').value = mem.model || p.defaultModel || '';
+          $('aiLlmProv').value = mem.litellmProvider || '';
+        }
         // The fetched model list belongs to the previous endpoint — drop it.
         modelList = [];
         mdClose();
@@ -722,7 +781,8 @@ export class SettingsPanel {
       // stale stored settings while the form shows something else.
       function aiForm(type){
         const payload = { type, providerId: presetSel.value,
-          baseUrl: $('aiBase').value, model: $('aiModel').value, key: $('aiKey').value };
+          baseUrl: $('aiBase').value, model: $('aiModel').value, key: $('aiKey').value,
+        litellmProvider: $('aiLlmProv').value };
         $('aiKey').value = ''; // it is stored (or kept) host-side now
         return payload;
       }
@@ -752,6 +812,10 @@ export class SettingsPanel {
       });
       $('aiPriceAddBtn').addEventListener('click', () => {
         vscode.postMessage({ type: 'aiPriceAdd', providerId: $('aiPriceProv').value, model: $('aiPriceModel').value });
+      });
+      $('aiLitellmRefreshBtn').addEventListener('click', () => {
+        priceStatus('Downloading the LiteLLM price list…', 'aimuted');
+        vscode.postMessage({ type: 'aiRefreshLitellm' });
       });
       $('aiPriceRefreshBtn').addEventListener('click', () => {
         priceStatus('Refreshing…', 'aimuted');
@@ -785,12 +849,16 @@ export class SettingsPanel {
       }
       else if (m.type === 'aiPriceModels') {
         const sel = $('aiPriceModel');
+        const money = (v) => '$' + String(parseFloat(Number(v).toPrecision(6)));
         sel.innerHTML = m.models.map((mo) =>
-          '<option value="' + esc(mo.id) + '"' + (mo.priced ? '' : ' disabled') + '>' +
-          esc(mo.id) + (mo.priced ? '' : ' — no price source') + '</option>').join('');
+          '<option value="' + esc(mo.id) + '"' + (mo.source ? '' : ' disabled') + '>' +
+          esc(mo.id) + (mo.source
+            ? '  ' + money(mo.input) + ' in / ' + money(mo.output) + ' out /MTok' +
+              (mo.source === 'litellm' ? ' (LiteLLM)' : '')
+            : ' — no price source') + '</option>').join('');
         sel.disabled = false;
         $('aiPriceAddBtn').disabled = false;
-        const priced = m.models.filter((mo) => mo.priced).length;
+        const priced = m.models.filter((mo) => mo.source).length;
         $('aiPriceStatus').textContent = m.models.length + ' models, ' + priced + ' with a price source';
         $('aiPriceStatus').className = 'aimuted';
       }
@@ -1041,6 +1109,10 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <div class="airow"><label>API key</label><input id="aiKey" type="password"
            placeholder="paste to set / replace — leave blank to keep" />
            <span id="aiKeyStatus" class="aimuted"></span></div>
+      <div class="airow" id="aiLlmProvRow" style="display:none"><label>LiteLLM prices</label>
+           <input id="aiLlmProv" type="text" spellcheck="false" autocomplete="off"
+                  placeholder="e.g. openai, groq, together_ai — blank = no price fallback" />
+           <span class="aimuted">which LiteLLM provider prices this endpoint's models</span></div>
       <div class="airow"><label></label>
         <button id="aiSaveBtn" class="aibtn">Save</button>
         <button id="aiTestBtn" class="aibtn secondary">⚡ Test</button>
@@ -1084,10 +1156,11 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <p class="aimuted">Every price is fetched, never shipped with the extension. <b>provider API</b>
          rows come from the provider's own model list (OpenRouter-style endpoints publish prices).
          OpenAI and Anthropic publish no prices via API, so their rows come from the
-         <b>LiteLLM</b> community price list (CI-updated on GitHub) — a labeled third-party
-         source, not the provider's word. <b>stale</b> = last fetched over 30 days ago. On
-         refresh, models a source no longer prices are removed — their usage then shows "—",
-         never a guessed $0.</p>
+         <b>LiteLLM</b> community price list below — a labeled third-party source, not the
+         provider's word. <b>stale</b> = last fetched over 30 days ago. On refresh, models a
+         source no longer prices are removed — their usage then shows "—", never a guessed $0.
+         Rows are added automatically the first time you use a model, so removing one with ✕
+         hides it only until that model is used again.</p>
       <div id="aiPricesBox"></div>
       <div class="airow">
         <select id="aiPriceProv" style="max-width:170px"></select>
@@ -1098,7 +1171,19 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
                 title="Fetch a price for every model in your usage tables that has no row yet">＋ Price used models</button>
         <button id="aiPriceRefreshBtn" class="aibtn secondary" title="Re-fetch every price in the table">↻ Refresh prices</button>
       </div>
-      <div id="aiPriceStatus" class="aimuted"></div>`,
+      <div id="aiPriceStatus" class="aimuted"></div>
+
+      <h4>LiteLLM price list (local copy)</h4>
+      <p class="aimuted">The community price list LiteLLM itself fetches at runtime, CI-updated on
+         GitHub. Kept locally so prices work offline and cover every provider it knows — not just
+         the one you are configuring. It is a cache: safe to delete, rebuilt on update, and never
+         edited by hand. Nothing here is charged to you directly; it only feeds the price table
+         above.</p>
+      <div id="aiLitellmBox"></div>
+      <div class="airow">
+        <button id="aiLitellmRefreshBtn" class="aibtn secondary"
+                title="Re-download the LiteLLM price list from GitHub">↻ Update price list</button>
+      </div>`,
   },
   {
     id: "ai-data",

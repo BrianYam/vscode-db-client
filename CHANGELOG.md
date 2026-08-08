@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Models are priced automatically the first time you use them.** Previously a
+  new model showed "—" in the usage tables until you opened the price table and
+  added a row by hand. Now the first call files a row itself, keyed on the model
+  id the *server* reports (often more versioned than the one you picked), so the
+  very call that introduces a model is already costed. Removing a row with ✕
+  still works — it comes back the next time that model is used.
+- **The LiteLLM price list is kept locally.** Settings → AI Assistant now shows
+  it as its own table: how many models it prices, when it was last updated, and
+  *up to date* / *stale*, with **↻ Update price list** to re-download. It is
+  fetched once automatically the first time a price is needed — there is no
+  timer and no download on opening Settings.
+- **Custom endpoints can borrow LiteLLM prices.** A custom (OpenAI-compatible)
+  provider gains a *LiteLLM prices* field naming which LiteLLM provider prices
+  its models. Left blank, its models stay unpriced and honestly show "—",
+  rather than borrowing a same-named model's price from an unrelated host.
+
+### Fixed
+- **Switching provider preset no longer resets your model.** Each provider now
+  remembers the base URL, model and LiteLLM mapping it was last saved with, so
+  moving between presets restores your own choice instead of overwriting it
+  with the preset's default — API keys were already stored per provider, the
+  rest of the endpoint now is too. Switching to a preset you have never
+  configured still offers its default, and a custom endpoint no longer inherits
+  the previous provider's model id.
+
+### Changed
+- **Cost estimates now cover every provider LiteLLM knows, not just two.** The
+  list was previously fetched per-provider into a one-hour in-memory cache
+  filtered to OpenAI and Anthropic, so it vanished when the window closed, did
+  nothing offline, and left deepseek, grok, groq, mistral, gemini and the rest
+  unpriced. The stored copy covers all 81 providers it prices (2 237 models,
+  ~129 KB from a 1.6 MB download) and is listed in Storage usage and purged by
+  Reset All Data like every other stored key.
+- **The model dropdowns show prices for anything LiteLLM prices**, not only
+  models already in the price table, and the price-table picker shows each
+  model's actual numbers and its source instead of a bare "no price source"
+  flag.
+- **↻ Refresh prices works offline** — LiteLLM-sourced rows re-read the local
+  copy instead of re-downloading. Use ↻ Update price list to pull newer numbers.
+
 ## [1.3.0] - 2026-08-08
 
 ### Changed

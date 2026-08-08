@@ -937,3 +937,103 @@ toggles provider⇄model and tokens⇄est. cost.
 - [ ] `[SDD][M28]` Manual QA: chart matches usage-table totals for the same
       window; toggles re-render instantly; cost view excludes grok/custom
       rows and says so; empty state before any calls
+
+## M29 — Local LiteLLM price table + auto-pricing (requested 2026-08-08)
+
+Discovery: `docs/DISCOVERY_LITELLM_TABLE.md` (LOCKED 2026-08-08, extends M27).
+User spec: keep **all** LiteLLM pricing locally in its own table with a
+stale/up-to-date status; estimates keep reading the price table; the model
+dropdown shows the API price or, failing that, the LiteLLM price; and using a
+new model files its price into the price list automatically. Measured: 2 237
+priced chat models trim to **129 KB** (raw file is 1.6 MB); LiteLLM ids are
+provider-namespaced inconsistently, so lookup is `<provider>/<id>` then bare
+`<id>`. D1–D5 locked at the recommended defaults.
+
+### M29.0 — LiteLLM table (storage + parse) ✅ code done 2026-08-08
+- [x] `[SDD][M29]` `litellmTable.ts`: `LitellmEntry` tuple `[id, provider,
+      inPerMTok, outPerMTok]`; `parseLitellmTable(json)` replacing
+      `parseLitellmPrices` — keeps every provider, chat/responses only, both
+      costs present, scaled ×1e6 and `toPrecision(6)`; unit tests incl. the
+      2 237/2 987 ratio shape and a rounding case
+- [x] `[SDD][M29]` `lookupLitellm(table, litellmProvider, modelId)`: try
+      `<provider>/<id>`, then bare `<id>`, scoped by the provider field;
+      unit-tested against the real id shapes (`claude-sonnet-4-5` bare vs
+      `openrouter/anthropic/claude-3.5-sonnet` prefixed vs OpenRouter's own
+      unprefixed `anthropic/claude-3.5-sonnet`)
+- [x] `[SDD][M29]` Persist under `openDbClient.aiLitellmPrices` (new key) with
+      `fetchedAt`; status via M27's `rowStatus`/`STALE_MS` (30 d)
+- [x] `[SDD][M29]` **Register the key in the storage-usage panel**
+      (`settingsPanel.ts:249`, label "AI LiteLLM price cache") and purge it in
+      Reset All Data — an unlisted 129 KB key breaks the "measure everything
+      this install persists" promise
+- [x] `[SDD][M29]` Delete the 1 h in-memory `litellmCache` and
+      `LITELLM_PROVIDER_IDS` two-provider map; replace with a
+      preset → `litellm_provider` mapping covering all presets
+
+### M29.1 — Fetch & refresh (D4: manual, plus one fetch when empty) ✅ code done 2026-08-08
+- [x] `[SDD][M29]` `refreshLitellmTable()`: fetch → parse → replace wholesale
+      → stamp `fetchedAt`; failures reported, existing table left intact
+      (a stale table still prices; an empty one is a regression)
+- [x] `[SDD][M29]` One automatic fetch when the table is empty and a price is
+      first needed. **No timer, no refetch-on-open** (M27 out-of-scope holds)
+- [x] `[SDD][M29]` Settings: LiteLLM table row — entry count, `fetchedAt`,
+      `up to date`/`stale`, ↻ button, error line. `refreshPrices` re-reads the
+      local table instead of re-downloading (now works offline)
+
+### M29.2 — Auto-price on first use (D1/D2) ✅ code done 2026-08-08
+- [x] `[SDD][M29]` On recording a usage entry, if `findPrice(providerId,
+      model, rows)` misses, add a row for the **server-reported** id:
+      endpoint price → LiteLLM table → no source (leave unpriced, never $0).
+      Must not block or fail the call, and must not throw offline
+- [x] `[SDD][M29]` D2 accepted cost: a ✕'d row returns on next use — the ✕
+      tooltip/hint must say "until next use", not imply permanence
+- [x] `[SDD][M29]` Confirm `findPrice` stays the **single** estimate path
+      (req 3) — usage ledger, trend chart cost view, per-call assist bar all
+      unchanged; the LiteLLM table is a source, not a second lookup tier
+
+### M29.3 — Dropdown prices (D5) ✅ code done 2026-08-08
+- [x] `[SDD][M29]` `priceCandidates` returns `{ id, input?, output?, source }`
+      from the local table (no per-provider download); dropdown renders
+      `$in/$out` per model, `—` when nothing prices it
+- [ ] `[SDD][M29]` Verify render cost on an ~800-model OpenRouter list
+
+### M29.4 — Human QA gate (Phase 4)
+- [ ] `[SDD][M29]` Manual QA: fresh install → table empty → first price need
+      fetches once (~129 KB stored, shown in storage usage); deepseek/grok/
+      groq/mistral now price (M27 could not); calling a new model files its
+      row automatically under the id the ledger shows; ✕ then call again
+      restores it; offline → estimates still work from the local table and ↻
+      reports the fetch error; Reset All Data purges the key
+
+Verified against the live list on 2026-08-08: the shipped parser stores
+**2 237 entries / 129 KB / 81 providers** — the Discovery's measured figures —
+and resolves `gpt-5-mini-2025-08-07`, `claude-sonnet-4-5`,
+`anthropic/claude-3.5-sonnet` (via openrouter) and `deepseek/deepseek-chat`,
+while refusing to price `llama3.1` as openai. 192 tests pass.
+
+## M30 — AI settings: per-provider endpoint memory (bug, reported 2026-08-08)
+
+Reported: changing the provider preset always reset the Model field to the
+preset's `defaultModel`, discarding a model already chosen for that provider.
+Root cause was in the store, not the handler: `AiSettings` held one
+`providerId`/`baseUrl`/`model` triple, so "the model I use with OpenAI" had
+nowhere to live — even the *saved* model was lost on preset → other → back.
+API keys were already per-provider (SecretStorage slot each); the endpoint
+config was not.
+
+### M30.0 — Remember the endpoint per provider ✅ code done 2026-08-08
+- [x] `[SDD][M30]` `AiSettings.perProvider: Record<string, AiProviderMemory>`
+      (baseUrl, model, litellmProvider) — written by `saveAiForm` on every
+      save path (Save / Test / Load models, which all persist the form)
+- [x] `[SDD][M30]` `withProviderMemory()` pure seed: an install predating this
+      still knows its active provider's endpoint, so the first switch away and
+      back doesn't lose a model the user really had saved; unit-tested
+      (5 cases, 197 pass)
+- [x] `[SDD][M30]` Preset change restores remembered baseUrl/model/LiteLLM
+      mapping, falling back to the preset defaults; a model id belonging to the
+      provider just left is cleared rather than carried over (previously
+      `custom`, having no `defaultModel`, inherited the last provider's model)
+- [ ] `[SDD][M30]` Manual QA: set openai=gpt-5-nano, anthropic=claude-opus-4,
+      switch back and forth — each returns with its own model and key status;
+      a custom endpoint keeps its typed base URL and LiteLLM mapping; a
+      never-configured preset still shows its default model
