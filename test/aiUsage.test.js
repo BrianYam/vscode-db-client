@@ -9,6 +9,7 @@ const {
   estimateCost,
   summarizeAllTime,
   summarizePeriod,
+  usedModels,
 } = require("../out/ai/usageStore.js");
 const { findPrice } = require("../out/ai/priceTable.js");
 
@@ -79,4 +80,24 @@ test("unknown model rows carry costUsd undefined, not zero", () => {
   s = applyRecord(s, entry({ model: "llama3.1", ts: 10 }));
   const rows = summarizeAllTime(s, seedLookup);
   assert.strictEqual(rows[0].costUsd, undefined);
+});
+
+test("usedModels: distinct provider+model pairs, verbs collapsed, cap-proof", () => {
+  let s = emptyUsageState(0);
+  s = applyRecord(s, entry({ ts: 1 }));
+  s = applyRecord(s, entry({ ts: 2, verb: "test" })); // same pair, other verb
+  s = applyRecord(
+    s,
+    entry({ ts: 3, providerId: "openrouter", model: "deepseek/deepseek-v4-flash" }),
+  );
+  // Totals survive the cap, so usedModels must too.
+  s = applyRecord(s, entry({ ts: 4, model: "capped-out" }), 1);
+  const pairs = usedModels(s)
+    .map((u) => u.providerId + "/" + u.model)
+    .sort();
+  assert.deepStrictEqual(pairs, [
+    "anthropic/capped-out",
+    "anthropic/claude-sonnet-4-5",
+    "openrouter/deepseek/deepseek-v4-flash",
+  ]);
 });

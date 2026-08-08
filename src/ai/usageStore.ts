@@ -51,6 +51,21 @@ export function totalsKey(e: { providerId: string; model: string; verb: string }
   return [e.providerId, e.model, e.verb].join(SEP);
 }
 
+/**
+ * Distinct (provider, model) pairs ever recorded — read from the all-time
+ * totals so the answer survives the entry cap. Feeds "price my used models".
+ */
+export function usedModels(state: UsageState): Array<{ providerId: string; model: string }> {
+  const seen = new Map<string, { providerId: string; model: string }>();
+  for (const key of Object.keys(state.totals)) {
+    const [providerId, model] = key.split(SEP);
+    if (providerId && model) {
+      seen.set([providerId, model].join(SEP), { providerId, model });
+    }
+  }
+  return [...seen.values()];
+}
+
 /** Pure append-with-cap so the ledger arithmetic is unit-testable. */
 export function applyRecord(state: UsageState, entry: UsageEntry, cap = USAGE_CAP): UsageState {
   const entries = [...state.entries, entry];

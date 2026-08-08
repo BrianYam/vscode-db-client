@@ -193,6 +193,26 @@ export class SettingsPanel {
           return;
         }
         break;
+      case "aiPriceRemove":
+        await this.aiService.removePriceRow(String(msg.providerId ?? ""), String(msg.model ?? ""));
+        break;
+      case "aiPriceFromUsage": {
+        const r = await this.aiService.addPricesFromUsage();
+        const parts: string[] = [];
+        if (r.added.length) {
+          parts.push(`added ${r.added.length}`);
+        }
+        if (r.unpriced.length) {
+          parts.push(`no price source: ${r.unpriced.join(", ")}`);
+        }
+        parts.push(...r.errors);
+        this.panel.webview.postMessage({
+          type: "aiPriceStatus",
+          ok: r.errors.length === 0,
+          message: parts.join(" · ") || "Every used model already has a price row.",
+        });
+        break;
+      }
       case "aiRefreshPrices": {
         const r = await this.aiService.refreshPrices();
         const parts: string[] = [];
@@ -530,12 +550,14 @@ export class SettingsPanel {
       // (0.19999999999999998 → 0.2) without touching the stored value.
       const fmtP = (v) => String(parseFloat(Number(v).toPrecision(6)));
       $('aiPricesBox').innerHTML = ai.priceTable.length
-        ? '<table><tr><th>Provider</th><th>Model</th><th>Input $/MTok</th><th>Output $/MTok</th><th>Source</th><th>Status</th></tr>' +
+        ? '<table><tr><th>Provider</th><th>Model</th><th>Input $/MTok</th><th>Output $/MTok</th><th>Source</th><th>Status</th><th></th></tr>' +
           ai.priceTable.map((r) =>
             '<tr><td>' + esc(r.providerId) + '</td><td>' + esc(r.model) +
             '</td><td>' + fmtP(r.input) + '</td><td>' + fmtP(r.output) +
             '</td><td class="aimuted">' + (r.source === 'api' ? 'provider API' : 'LiteLLM') +
-            '</td><td class="' + (r.status === 'stale' ? 'aierr' : 'aimuted') + '">' + esc(r.status) + '</td></tr>').join('') + '</table>'
+            '</td><td class="' + (r.status === 'stale' ? 'aierr' : 'aimuted') + '">' + esc(r.status) +
+            '</td><td><button class="aibtn secondary" title="Remove this row — its usage cost reverts to —" ' +
+            'data-p="' + esc(r.providerId) + '" data-m="' + esc(r.model) + '">✕</button></td></tr>').join('') + '</table>'
         : '<p class="aimuted">Empty — add models below to start estimating costs.</p>';
       const pp = $('aiPriceProv');
       if (pp && !pp.options.length) {
@@ -673,6 +695,15 @@ export class SettingsPanel {
       $('aiPriceProv').addEventListener('change', () => {
         const sel = $('aiPriceModel');
         sel.innerHTML = ''; sel.disabled = true; $('aiPriceAddBtn').disabled = true;
+      });
+      $('aiPriceUsageBtn').addEventListener('click', () => {
+        priceStatus('Pricing models from your usage…', 'aimuted');
+        vscode.postMessage({ type: 'aiPriceFromUsage' });
+      });
+      // Row ✕ buttons are re-rendered with the table; delegate from the box.
+      $('aiPricesBox').addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-m]');
+        if (b) vscode.postMessage({ type: 'aiPriceRemove', providerId: b.getAttribute('data-p'), model: b.getAttribute('data-m') });
       });
     }
 
@@ -981,6 +1012,8 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
         <select id="aiPriceModel" style="max-width:230px" disabled></select>
         <button id="aiPriceLoadBtn" class="aibtn secondary" title="List this provider's models (needs its API key stored)">Load models</button>
         <button id="aiPriceAddBtn" class="aibtn secondary" disabled>Add</button>
+        <button id="aiPriceUsageBtn" class="aibtn secondary"
+                title="Fetch a price for every model in your usage tables that has no row yet">＋ Price used models</button>
         <button id="aiPriceRefreshBtn" class="aibtn secondary" title="Re-fetch every price in the table">↻ Refresh prices</button>
       </div>
       <div id="aiPriceStatus" class="aimuted"></div>`,

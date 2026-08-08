@@ -38,11 +38,15 @@ to type a price into the extension. Each row records its **source**:
   word. The download (~1.6 MB) is cached in memory for 1 hour
   (`src/ai/aiService.ts#litellmPrices`).
 
-Rows enter the table only through **Add** (pick a provider → Load models →
-pick a model; the provider-API price wins, LiteLLM is the fallback, and a
-model neither source covers is refused with the reason). Providers that
-require an API key contribute nothing until a key is stored — "Load models"
-says so explicitly.
+Rows enter the table through **Add** (pick a provider → Load models → pick a
+model; the provider-API price wins, LiteLLM is the fallback, and a model
+neither source covers is refused with the reason) or **＋ Price used models**,
+which walks the usage ledger's all-time totals and fetches a price for every
+(provider, model) pair not already covered — reporting what was added, what
+has no price source anywhere, and which providers couldn't be reached.
+Providers that require an API key contribute nothing until a key is stored —
+"Load models" says so explicitly. Each row has a **✕** to remove it; that
+model's costs revert to "—".
 
 **↻ Refresh prices** re-fetches every row from its own source. Statuses:
 

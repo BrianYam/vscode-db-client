@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now visible).
 
 ### Added
+- **Price table: remove rows and bulk-price your history.** Each row has a ✕
+  (costs for that model revert to "—"), and **＋ Price used models** fetches a
+  price for every model in the usage ledger that has no row yet — reporting
+  per model what was added, what has no price source anywhere, and which
+  providers couldn't be reached (no key stored, custom endpoint inactive).
 - `docs/AI_PRICING.md` — where every AI dollar figure comes from: price table
   sources (provider API vs LiteLLM), usage ledger mechanics, dropdown price
   labels, and per-call estimation, with a code map.

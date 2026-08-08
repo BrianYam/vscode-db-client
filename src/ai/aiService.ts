@@ -29,7 +29,7 @@ import {
   systemPrompt,
 } from "./prompts";
 import { createAiProvider, presetById } from "./registry";
-import { estimateCost, type UsageStore } from "./usageStore";
+import { estimateCost, type UsageStore, usedModels } from "./usageStore";
 
 /** Keep prompts well under any provider's context floor; schema is the bulk. */
 const SCHEMA_TOKEN_BUDGET = 6000;
@@ -292,6 +292,85 @@ export class AiService {
       fetchedAt: Date.now(),
     });
     await this.usage.savePriceRows(rows);
+  }
+
+  /** Drop one row. Costs for that model revert to "—" everywhere. */
+  async removePriceRow(providerId: string, model: string): Promise<void> {
+    await this.usage.savePriceRows(
+      this.usage.apiPriceRows().filter((r) => !(r.providerId === providerId && r.model === model)),
+    );
+  }
+
+  /**
+   * Price every (provider, model) pair in the usage ledger that no current
+   * row covers. Endpoint price wins, LiteLLM fills in; pairs with no source
+   * anywhere are reported, not guessed. Provider failures (no key, custom
+   * endpoint not active, network) are reported per provider.
+   */
+  async addPricesFromUsage(): Promise<{
+    added: string[];
+    unpriced: string[];
+    errors: string[];
+  }> {
+    const rows = this.usage.apiPriceRows();
+    const added: string[] = [];
+    const unpriced: string[] = [];
+    const errors: string[] = [];
+    const pending = usedModels(this.usage.state()).filter(
+      (u) => !findPrice(u.providerId, u.model, rows),
+    );
+    const byProvider = new Map<string, string[]>();
+    for (const u of pending) {
+      byProvider.set(u.providerId, [...(byProvider.get(u.providerId) ?? []), u.model]);
+    }
+    for (const [pid, modelIds] of byProvider) {
+      let models: AiModelInfo[] | undefined;
+      let litellm: PriceMap | undefined;
+      let fetchError: string | undefined;
+      try {
+        models = await this.listModelsFor(pid);
+      } catch (err) {
+        fetchError = (err as Error).message;
+      }
+      try {
+        litellm = await this.litellmPrices(pid);
+      } catch (err) {
+        fetchError = fetchError ?? (err as Error).message;
+      }
+      if (!models && !litellm) {
+        errors.push(fetchError ?? `${pid}: no price source reachable`);
+        continue;
+      }
+      for (const modelId of modelIds) {
+        const mo = models?.find((m) => m.id.toLowerCase() === modelId.toLowerCase());
+        const endpointPriced = mo && !mo.est && mo.inputPerMTok != null && mo.outputPerMTok != null;
+        const p = endpointPriced
+          ? {
+              input: mo.inputPerMTok as number,
+              output: mo.outputPerMTok as number,
+              source: "api" as const,
+            }
+          : (() => {
+              const lp = litellm?.get(modelId.toLowerCase());
+              return lp ? { ...lp, source: "litellm" as const } : undefined;
+            })();
+        if (!p) {
+          unpriced.push(`${pid}: ${modelId}`);
+          continue;
+        }
+        rows.push({
+          providerId: pid,
+          model: modelId,
+          input: p.input,
+          output: p.output,
+          source: p.source,
+          fetchedAt: Date.now(),
+        });
+        added.push(`${pid}: ${modelId}`);
+      }
+    }
+    await this.usage.savePriceRows(rows);
+    return { added, unpriced, errors };
   }
 
   /**

@@ -903,3 +903,16 @@ D3 legacy prices discarded).
       LiteLLM (gpt-5.4 shows 2.5/15, not the old seed 1.25/10); sora/dall-e
       remain "no price source"; Refresh updates fetchedAt; offline Refresh
       reports the fetch error and rows age to stale
+
+### M27.2 — Price table: remove + bulk-add from usage ✅ code done 2026-08-08
+- [x] `[SDD][M27]` `usedModels(state)` pure helper (distinct provider+model
+      from all-time totals — survives the entry cap), unit-tested
+- [x] `[SDD][M27]` `removePriceRow`; ✕ per row (event-delegated, survives
+      re-render)
+- [x] `[SDD][M27]` `addPricesFromUsage`: skips covered pairs (findPrice),
+      endpoint price wins → LiteLLM fallback → reported as unpriced;
+      per-provider fetch failures reported; "＋ Price used models" button +
+      status line. 179 tests pass
+- [ ] `[SDD][M27]` Manual QA: ＋ Price used models adds deepseek/grok rows
+      (openrouter reachable) and reports custom-provider models as
+      unreachable/unpriced; ✕ removes a row and its usage cost reverts to —
