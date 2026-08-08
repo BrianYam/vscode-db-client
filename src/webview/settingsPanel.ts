@@ -13,6 +13,7 @@ import {
   USAGE_KEY,
   UsageStore,
 } from "../ai/usageStore";
+import { usageTrend } from "../ai/usageTrend";
 import { CONNECTIONS_KEY, ConnectionStore } from "../connections/store";
 import { renderChangelog } from "./miniMarkdown";
 import { byteSize, formatBytes } from "./storageUsage";
@@ -112,6 +113,12 @@ export class SettingsPanel {
       connections: this.connStore.all().map((c) => ({ id: c.id, name: c.name })),
       usagePeriod: summarizePeriod(state, lookup),
       usageAllTime: summarizeAllTime(state, lookup),
+      // Both groupings shipped so the chart toggle needs no round-trip; each
+      // is ~30 days × ≤7 series of numbers — a few KB.
+      trend: {
+        provider: usageTrend(state, lookup, "provider", Date.now()),
+        model: usageTrend(state, lookup, "model", Date.now()),
+      },
       periodStart: state.periodStart,
       dropped: state.dropped,
       priceTable: table.map((r) => ({ ...r, status: rowStatus(r, Date.now()) })),
@@ -434,6 +441,9 @@ export class SettingsPanel {
   .aiok { color: var(--vscode-testing-iconPassed, #3fb950); }
   .aierr { color: var(--vscode-errorForeground); }
   .aimuted { opacity: .6; font-size: 12px; }
+  .tlab { font-size: 9px; fill: currentColor; opacity: .55; }
+  .tleg { display: inline-flex; align-items: center; gap: 4px; margin-right: 12px; font-size: 11px; }
+  .tchip { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
   /* Custom model dropdown — the native datalist can't scroll a 300-model list. */
   .aimodelwrap { position: relative; flex: 1; max-width: 380px; display: flex; }
   .aimodelwrap input { flex: 1; max-width: none; }
@@ -515,6 +525,61 @@ export class SettingsPanel {
       return h;
     }
 
+    // Stacked daily bars, hand-rolled SVG (the CSP allows no chart library).
+    const TREND_COLORS = ['#4e9de6','#22c55e','#e6a23c','#c678dd','#e05561','#56b6c2','#8a8f98'];
+    function renderTrend(){
+      if (!ai || !ai.trend || !$('aiTrendBox')) return;
+      const t = ai.trend[$('aiTrendGroup').value] || ai.trend.provider;
+      const metric = $('aiTrendMetric').value;
+      if (!t.charted) {
+        $('aiTrendBox').innerHTML = '<p class="aimuted">No AI calls in the last 30 days.</p>';
+        $('aiTrendNote').textContent = '';
+        return;
+      }
+      const n = t.days.length;
+      const totals = t.days.map((_, i) => t.series.reduce((sum, s) => sum + s[metric][i], 0));
+      const yMax = Math.max(...totals) || 1;
+      const W = 720, H = 170, padL = 46, padB = 18, iw = W - padL - 6, ih = H - padB - 6;
+      const bw = Math.max(2, (iw / n) * 0.72);
+      const fmtV = metric === 'cost' ? fmtCost : fmtTokens;
+      let bars = '';
+      for (let i = 0; i < n; i++) {
+        let y = H - padB;
+        const x = padL + (iw / n) * i + ((iw / n) - bw) / 2;
+        t.series.forEach((s, si) => {
+          const v = s[metric][i];
+          if (v <= 0) return;
+          const h = Math.max(1, (v / yMax) * ih);
+          y -= h;
+          bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
+                  '" height="' + h.toFixed(1) + '" fill="' + TREND_COLORS[si % TREND_COLORS.length] + '">' +
+                  '<title>' + esc(t.days[i]) + ' · ' + esc(s.key) + ': ' + esc(fmtV(v)) + '</title></rect>';
+        });
+      }
+      // Sparse x labels (~6) and a y-axis max/mid — enough to read scale.
+      let labels = '';
+      const step = Math.ceil(n / 6);
+      for (let i = 0; i < n; i += step) {
+        labels += '<text x="' + (padL + (iw / n) * (i + 0.5)).toFixed(1) + '" y="' + (H - 4) +
+                  '" text-anchor="middle" class="tlab">' + esc(t.days[i].slice(5)) + '</text>';
+      }
+      const yLab = (frac) =>
+        '<text x="' + (padL - 4) + '" y="' + (H - padB - ih * frac + 4).toFixed(1) +
+        '" text-anchor="end" class="tlab">' + esc(fmtV(yMax * frac)) + '</text>';
+      $('aiTrendBox').innerHTML =
+        '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:760px">' +
+        '<line x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (W - 6) + '" y2="' + (H - padB) +
+        '" stroke="currentColor" stroke-opacity=".25"/>' + yLab(1) + yLab(0.5) + bars + labels + '</svg>' +
+        '<div>' + t.series.map((s, si) =>
+          '<span class="tleg"><span class="tchip" style="background:' + TREND_COLORS[si % TREND_COLORS.length] +
+          '"></span>' + esc(s.key) + '</span>').join('') + '</div>';
+      const unpriced = t.series.reduce((sum, s) => sum + s.unpriced, 0);
+      $('aiTrendNote').textContent =
+        t.charted + ' call(s) charted' +
+        (metric === 'cost' && unpriced ? ' · ' + unpriced + ' call(s) have no price row — their cost is not in the chart' : '') +
+        (ai.dropped > 0 ? ' · oldest entries beyond the ledger cap are not charted' : '');
+    }
+
     function renderAi(){
       if (!ai || !$('aiPreset')) return;
       const sel = $('aiPreset');
@@ -565,6 +630,7 @@ export class SettingsPanel {
           '<option value="' + esc(p.id) + '">' + esc(p.label) +
           ((ai.keyedProviders || []).includes(p.id) ? ' 🔑' : '') + '</option>').join('');
       }
+      renderTrend();
     }
 
     // ---- custom model dropdown (native datalist can't scroll 300+ models) ----
@@ -696,6 +762,8 @@ export class SettingsPanel {
         const sel = $('aiPriceModel');
         sel.innerHTML = ''; sel.disabled = true; $('aiPriceAddBtn').disabled = true;
       });
+      $('aiTrendGroup').addEventListener('change', renderTrend);
+      $('aiTrendMetric').addEventListener('change', renderTrend);
       $('aiPriceUsageBtn').addEventListener('click', () => {
         priceStatus('Pricing models from your usage…', 'aimuted');
         vscode.postMessage({ type: 'aiPriceFromUsage' });
@@ -997,6 +1065,20 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <b>All time</b>
       <div id="aiUsageAll"></div>
       <div id="aiDropped" class="aimuted"></div>
+
+      <h4>Usage trend (last 30 days)</h4>
+      <div class="airow">
+        <select id="aiTrendGroup" style="max-width:150px">
+          <option value="provider">By provider</option>
+          <option value="model">By model</option>
+        </select>
+        <select id="aiTrendMetric" style="max-width:150px">
+          <option value="tokens">Tokens</option>
+          <option value="cost">Est. cost</option>
+        </select>
+      </div>
+      <div id="aiTrendBox"></div>
+      <div id="aiTrendNote" class="aimuted"></div>
 
       <h4>Price table (USD per million tokens)</h4>
       <p class="aimuted">Every price is fetched, never shipped with the extension. <b>provider API</b>

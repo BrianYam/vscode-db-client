@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now visible).
 
 ### Added
+- **Usage trend chart.** Settings → AI Assistant now graphs the last 30 days
+  of AI usage as daily stacked bars — group by provider or model, metric
+  tokens or est. cost. Hand-rolled SVG (no chart library; the webview CSP
+  forbids external scripts), aggregated host-side so the webview receives a
+  few KB, not raw entries. Honesty built in: calls whose model has no price
+  row are counted and excluded from the cost view (never guessed), more than
+  six series fold into "other", and the note says when capped-out ledger
+  entries aren't charted.
 - **Price table: remove rows and bulk-price your history.** Each row has a ✕
   (costs for that model revert to "—"), and **＋ Price used models** fetches a
   price for every model in the usage ledger that has no row yet — reporting

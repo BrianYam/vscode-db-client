@@ -916,3 +916,24 @@ D3 legacy prices discarded).
 - [ ] `[SDD][M27]` Manual QA: ＋ Price used models adds deepseek/grok rows
       (openrouter reachable) and reports custom-provider models as
       unreachable/unpriced; ✕ removes a row and its usage cost reverts to —
+
+## M28 — AI usage trend chart (requested 2026-08-08)
+
+Discovery (chat): user asked whether a usage trend graph would be resource-
+heavy. Assessment: no — data already in the ledger, one O(n≤5000) pass on
+settings refresh, SVG hand-rolled (CSP forbids chart libraries), aggregates
+posted host-side (~few KB). Defaults: last 30 days, group by provider,
+toggles provider⇄model and tokens⇄est. cost.
+
+### M28.0 — Chart ✅ code done 2026-08-08
+- [x] `[SDD][M28]` `src/ai/usageTrend.ts`: pure UTC-day bucketing, per-series
+      tokens+cost via the shared PriceLookup, unpriced calls counted (never
+      cost-guessed), >6 series folded into "other"; unit tests (182 pass)
+- [x] `[SDD][M28]` Host: both groupings posted with aiState (few KB, no
+      round-trip on toggle)
+- [x] `[SDD][M28]` Webview: stacked-bar SVG with y-scale labels, sparse x
+      labels, per-rect tooltips, legend; group/metric selects; honesty note
+      (charted count, unpriced-in-cost-view, ledger-cap truncation)
+- [ ] `[SDD][M28]` Manual QA: chart matches usage-table totals for the same
+      window; toggles re-render instantly; cost view excludes grok/custom
+      rows and says so; empty state before any calls

@@ -19,6 +19,7 @@ your invoice. Always verifiable against your provider dashboard.
 | **Usage tables** (period / all-time) | requests, exact tokens, est. cost | Tokens: recorded per call. Cost: computed at render from the price table |
 | **Model dropdown** during setup | `$… in / $… out /MTok` labels | Endpoint-reported (plain) or price-table annotation (`~` prefix) |
 | **Assist bar** after Generate/Explain/Fix | `✓ 25.8s · 5263 tokens · ~$0.0021 · model` | Tokens: that call's response. Cost: price table at call time |
+| **Usage trend chart** (last 30 days) | daily stacked bars, tokens or est. cost | Ledger entries bucketed per UTC day host-side (`src/ai/usageTrend.ts`); costs via the same price-table lookup — unpriced calls are counted and excluded, never guessed |
 
 ## The price table
 
