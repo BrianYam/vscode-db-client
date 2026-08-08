@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-08
+
 ### Changed
 - **Price table is now fully fetched and read-only — no price ships with the
   extension** (was hand-editable with 8 hardcoded families, which had already
