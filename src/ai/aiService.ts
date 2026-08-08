@@ -11,6 +11,16 @@ import {
   schemaInputFromHints,
 } from "./context";
 import {
+  findPrice,
+  LITELLM_PRICES_URL,
+  LITELLM_PROVIDER_IDS,
+  mergeFetched,
+  mergeLitellm,
+  type PriceMap,
+  type PriceRow,
+  parseLitellmPrices,
+} from "./priceTable";
+import {
   type AiExchange,
   type AiVerb,
   explainUserPrompt,
@@ -18,8 +28,8 @@ import {
   generateUserPrompt,
   systemPrompt,
 } from "./prompts";
-import { createAiProvider } from "./registry";
-import { matchPrice, type UsageStore } from "./usageStore";
+import { createAiProvider, presetById } from "./registry";
+import { estimateCost, type UsageStore } from "./usageStore";
 
 /** Keep prompts well under any provider's context floor; schema is the bulk. */
 const SCHEMA_TOKEN_BUDGET = 6000;
@@ -57,6 +67,8 @@ export interface AiVerbResult {
   ms: number;
   /** input + output token total, so the cost of the call is visible in place. */
   tokens: number;
+  /** USD estimate from the local price table — absent when the model has no price. */
+  costUsd?: number;
   /** Which preset answered (providerId) — shown with the result. */
   provider: string;
   /** Model as the server reported it, which may differ from the one requested. */
@@ -158,16 +170,167 @@ export class AiService {
     const key = (await this.store.getKey(s.providerId)) ?? "";
     const models = await createAiProvider(this.store.providerConfig()).listModels(key);
     // Endpoint-reported prices win (OpenRouter). Where the list has none
-    // (OpenAI, Anthropic), annotate from the local price table — flagged as an
-    // estimate so the UI can mark it "~".
-    const prices = this.usage.prices();
+    // (OpenAI, Anthropic), annotate from the price table — the "~" marks
+    // built-in fallback numbers, the only non-API source that exists.
+    const table = this.priceTable();
     return models.map((m) => {
       if (m.inputPerMTok != null || m.outputPerMTok != null) {
         return m;
       }
-      const p = matchPrice(m.id, prices);
+      const p = findPrice(s.providerId, m.id, table);
+      // est → rendered with "~": the number is from the price table (a prior
+      // fetch or LiteLLM), not from this endpoint's own response.
       return p ? { ...m, inputPerMTok: p.input, outputPerMTok: p.output, est: true } : m;
     });
+  }
+
+  /** The full price table. Every row was fetched from a real source — nothing shipped. */
+  priceTable(): PriceRow[] {
+    return this.usage.apiPriceRows();
+  }
+
+  /** One LiteLLM download per settings session — the JSON is ~1.6 MB. */
+  private litellmCache?: { at: number; json: unknown };
+
+  /**
+   * Community price list for providers whose own APIs publish no pricing
+   * (OpenAI, Anthropic). Undefined for providers LiteLLM doesn't cover here.
+   */
+  private async litellmPrices(providerId: string): Promise<PriceMap | undefined> {
+    const litellmId = LITELLM_PROVIDER_IDS[providerId];
+    if (!litellmId) {
+      return undefined;
+    }
+    if (!this.litellmCache || Date.now() - this.litellmCache.at > 60 * 60 * 1000) {
+      let res: Response;
+      try {
+        res = await fetch(LITELLM_PRICES_URL);
+      } catch (err) {
+        throw new AiError(`Couldn't reach the LiteLLM price list: ${(err as Error).message}`);
+      }
+      if (!res.ok) {
+        throw new AiError(`LiteLLM price list fetch failed (HTTP ${res.status}).`);
+      }
+      this.litellmCache = { at: Date.now(), json: await res.json() };
+    }
+    return parseLitellmPrices(this.litellmCache.json, litellmId);
+  }
+
+  /**
+   * Model list for an arbitrary preset (price table add/refresh) — unlike
+   * `listModels`, this never touches the active form. Requires a stored key
+   * when the preset needs one (req: keyed providers only contribute prices
+   * once the user has provided a key).
+   */
+  private async listModelsFor(providerId: string): Promise<AiModelInfo[]> {
+    const preset = presetById(providerId);
+    const s = this.store.get();
+    // "custom" has no fixed base URL — usable only while it's the active form.
+    const baseUrl = preset?.baseUrl || (s.providerId === providerId ? s.baseUrl : "");
+    if (!preset || !baseUrl) {
+      throw new AiError("Unknown provider or no base URL configured.");
+    }
+    const key = (await this.store.getKey(providerId)) ?? "";
+    if (preset.needsKey && !key) {
+      throw new AiError(`${preset.label}: no API key stored — add one to fetch its prices.`);
+    }
+    return createAiProvider({ providerId, kind: preset.kind, baseUrl, model: "" }).listModels(key);
+  }
+
+  /**
+   * Models a provider serves, flagged with whether a real price source covers
+   * them: the provider's own API, or the LiteLLM list for APIs that publish
+   * no pricing. `priced: false` means no verifiable price exists anywhere.
+   */
+  async priceCandidates(providerId: string): Promise<Array<{ id: string; priced: boolean }>> {
+    const models = await this.listModelsFor(providerId);
+    const litellm = await this.litellmPrices(providerId).catch(() => undefined);
+    return models.map((m) => ({
+      id: m.id,
+      priced:
+        (!m.est && m.inputPerMTok != null && m.outputPerMTok != null) ||
+        !!litellm?.get(m.id.toLowerCase()),
+    }));
+  }
+
+  /**
+   * Add one row. The provider's own API price wins; otherwise the LiteLLM
+   * list. No source at all → refuse with the honest reason.
+   */
+  async addPriceRow(providerId: string, modelId: string): Promise<void> {
+    const models = await this.listModelsFor(providerId);
+    const m = models.find((mo) => mo.id === modelId);
+    if (!m) {
+      throw new AiError(`Model "${modelId}" is not in this provider's list.`);
+    }
+    let price: { input: number; output: number; source: PriceRow["source"] } | undefined;
+    if (!m.est && m.inputPerMTok != null && m.outputPerMTok != null) {
+      price = { input: m.inputPerMTok, output: m.outputPerMTok, source: "api" };
+    } else {
+      const litellm = await this.litellmPrices(providerId);
+      const p = litellm?.get(modelId.toLowerCase());
+      if (p) {
+        price = { ...p, source: "litellm" };
+      }
+    }
+    if (!price) {
+      throw new AiError(
+        `No price source covers "${modelId}" — ` +
+          `${presetById(providerId)?.label ?? providerId} doesn't publish prices and ` +
+          `the LiteLLM list doesn't have it. Its usage will show "—".`,
+      );
+    }
+    const rows = this.usage
+      .apiPriceRows()
+      .filter((r) => !(r.providerId === providerId && r.model === modelId));
+    rows.push({
+      providerId,
+      model: m.id,
+      input: price.input,
+      output: price.output,
+      source: price.source,
+      fetchedAt: Date.now(),
+    });
+    await this.usage.savePriceRows(rows);
+  }
+
+  /**
+   * Re-fetch every row from its own source. Rows whose source no longer
+   * prices the model are removed and reported; unreachable/keyless providers
+   * keep their rows (they age into "stale") and are reported too.
+   */
+  async refreshPrices(): Promise<{ removed: string[]; errors: string[] }> {
+    let rows = this.usage.apiPriceRows();
+    const removed: string[] = [];
+    const errors: string[] = [];
+    for (const pid of [
+      ...new Set(rows.filter((r) => r.source === "api").map((r) => r.providerId)),
+    ]) {
+      try {
+        const res = mergeFetched(rows, pid, await this.listModelsFor(pid), Date.now());
+        rows = res.rows;
+        removed.push(...res.removed.map((m) => `${pid}: ${m}`));
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    for (const pid of [
+      ...new Set(rows.filter((r) => r.source === "litellm").map((r) => r.providerId)),
+    ]) {
+      try {
+        const prices = await this.litellmPrices(pid);
+        if (!prices) {
+          continue; // mapping gone — leave rows to age into stale
+        }
+        const res = mergeLitellm(rows, pid, prices, Date.now());
+        rows = res.rows;
+        removed.push(...res.removed.map((m) => `${pid}: ${m}`));
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    await this.usage.savePriceRows(rows);
+    return { removed, errors };
   }
 
   /**
@@ -223,7 +386,14 @@ export class AiService {
 
     const ms = Date.now() - started;
     const tokens = res.inputTokens + res.outputTokens;
-    const attribution = { ms, tokens, provider: config.providerId, model: res.model };
+    // Same estimate the usage ledger shows — the response carries exact tokens
+    // but no dollar amount, so price comes from the price table.
+    const costUsd = estimateCost(
+      res.inputTokens,
+      res.outputTokens,
+      findPrice(config.providerId, res.model, this.priceTable()),
+    );
+    const attribution = { ms, tokens, costUsd, provider: config.providerId, model: res.model };
     if (req.verb === "explain") {
       return {
         sql: "",

@@ -339,6 +339,7 @@ export class QueryPanel {
         mutation: res.mutation,
         ms: res.ms,
         tokens: res.tokens,
+        costUsd: res.costUsd,
         provider: res.provider,
         model: res.model,
       });
@@ -1748,6 +1749,7 @@ export class QueryPanel {
         // What it cost and who answered, where the user is looking.
         const meta = '<span class="aidim">✓ ' + (m.ms != null ? (m.ms/1000).toFixed(1) : waited) + 's' +
                      (m.tokens ? ' · ' + m.tokens + ' tokens' : '') +
+                     (m.costUsd != null ? ' · ~$' + (m.costUsd < 0.01 ? m.costUsd.toFixed(4) : m.costUsd.toFixed(2)) : '') +
                      (m.model ? ' · ' + esc(m.model) + (m.provider ? ' (' + esc(m.provider) + ')' : '') : '') +
                      '</span>';
         aiNote.innerHTML = meta + (note ? ' · ' + note : '');

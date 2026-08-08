@@ -7,11 +7,10 @@ const {
   totalsKey,
   emptyUsageState,
   estimateCost,
-  matchPrice,
-  SEED_PRICES,
   summarizeAllTime,
   summarizePeriod,
 } = require("../out/ai/usageStore.js");
+const { findPrice } = require("../out/ai/priceTable.js");
 
 const entry = (over = {}) => ({
   ts: 1000,
@@ -44,12 +43,16 @@ test("cap drops oldest entries, counts the drop, and totals stay exact", () => {
   assert.strictEqual(s.totals[totalsKey(entry())].requests, 5);
 });
 
-test("matchPrice: longest match wins; unknown model returns undefined", () => {
-  assert.strictEqual(matchPrice("claude-sonnet-4-5", SEED_PRICES), SEED_PRICES["claude-sonnet"]);
-  assert.strictEqual(matchPrice("gpt-5-mini-2026-01", SEED_PRICES), SEED_PRICES["gpt-5-mini"]);
-  // "gpt-5" also matches gpt-5-mini strings — the longer key must win.
-  assert.notStrictEqual(matchPrice("gpt-5-mini", SEED_PRICES), SEED_PRICES["gpt-5"]);
-  assert.strictEqual(matchPrice("llama3.1", SEED_PRICES), undefined);
+// A fetched-style table standing in for real rows; summaries only need a lookup.
+const TEST_ROWS = [
+  { providerId: "anthropic", model: "claude-sonnet", input: 3, output: 15, source: "litellm" },
+];
+const seedLookup = (providerId, model) => findPrice(providerId, model, TEST_ROWS);
+
+test("lookup: provider-scoped substring match; unknown model returns undefined", () => {
+  assert.strictEqual(seedLookup("anthropic", "claude-sonnet-4-5").input, 3);
+  assert.strictEqual(seedLookup("openai", "claude-sonnet-4-5"), undefined);
+  assert.strictEqual(seedLookup("anthropic", "llama3.1"), undefined);
 });
 
 test("estimateCost computes per-MTok, and stays undefined without a price", () => {
@@ -63,10 +66,10 @@ test("summarizePeriod respects periodStart; summarizeAllTime reads totals", () =
   s = applyRecord(s, entry({ ts: 10 }));
   s = applyRecord(s, entry({ ts: 100 }));
   s = { ...s, periodStart: 50 };
-  const period = summarizePeriod(s, SEED_PRICES);
+  const period = summarizePeriod(s, seedLookup);
   assert.strictEqual(period.length, 1);
   assert.strictEqual(period[0].requests, 1);
-  const all = summarizeAllTime(s, SEED_PRICES);
+  const all = summarizeAllTime(s, seedLookup);
   assert.strictEqual(all[0].requests, 2);
   assert.ok(all[0].costUsd > 0);
 });
@@ -74,6 +77,6 @@ test("summarizePeriod respects periodStart; summarizeAllTime reads totals", () =
 test("unknown model rows carry costUsd undefined, not zero", () => {
   let s = emptyUsageState(0);
   s = applyRecord(s, entry({ model: "llama3.1", ts: 10 }));
-  const rows = summarizeAllTime(s, SEED_PRICES);
+  const rows = summarizeAllTime(s, seedLookup);
   assert.strictEqual(rows[0].costUsd, undefined);
 });

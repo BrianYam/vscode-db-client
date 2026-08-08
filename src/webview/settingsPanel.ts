@@ -3,8 +3,10 @@ import * as vscode from "vscode";
 import { AiError } from "../ai/AiProvider";
 import { AiService } from "../ai/aiService";
 import { AI_SETTINGS_KEY, AiStore } from "../ai/aiStore";
+import { findPrice, rowStatus } from "../ai/priceTable";
 import { AI_PRESETS, presetById } from "../ai/registry";
 import {
+  PRICE_TABLE_KEY,
   PRICES_KEY,
   summarizeAllTime,
   summarizePeriod,
@@ -83,7 +85,8 @@ export class SettingsPanel {
   private async postAiState(): Promise<void> {
     const settings = this.aiStore.get();
     const state = this.usageStore.state();
-    const prices = this.usageStore.prices();
+    const table = this.aiService.priceTable();
+    const lookup = (pid: string, model: string) => findPrice(pid, model, table);
     const preset = presetById(settings.providerId);
     this.panel.webview.postMessage({
       type: "aiState",
@@ -107,11 +110,11 @@ export class SettingsPanel {
       configured: await this.aiStore.isConfigured(),
       presets: AI_PRESETS,
       connections: this.connStore.all().map((c) => ({ id: c.id, name: c.name })),
-      usagePeriod: summarizePeriod(state, prices),
-      usageAllTime: summarizeAllTime(state, prices),
+      usagePeriod: summarizePeriod(state, lookup),
+      usageAllTime: summarizeAllTime(state, lookup),
       periodStart: state.periodStart,
       dropped: state.dropped,
-      prices,
+      priceTable: table.map((r) => ({ ...r, status: rowStatus(r, Date.now()) })),
     });
   }
 
@@ -164,13 +167,46 @@ export class SettingsPanel {
       case "aiResetPeriod":
         await this.usageStore.resetPeriod();
         break;
-      case "aiSavePrices":
-        if (msg.prices && typeof msg.prices === "object") {
-          await this.usageStore.savePrices(
-            msg.prices as Record<string, { input: number; output: number }>,
-          );
+      case "aiPriceModels":
+        // Fetch-only: no state change, so answer directly instead of re-posting.
+        try {
+          const models = await this.aiService.priceCandidates(String(msg.providerId ?? ""));
+          this.panel.webview.postMessage({ type: "aiPriceModels", models });
+        } catch (err) {
+          this.panel.webview.postMessage({
+            type: "aiPriceStatus",
+            ok: false,
+            message: (err as Error).message,
+          });
+        }
+        return;
+      case "aiPriceAdd":
+        try {
+          await this.aiService.addPriceRow(String(msg.providerId ?? ""), String(msg.model ?? ""));
+          this.panel.webview.postMessage({ type: "aiPriceStatus", ok: true, message: "Added ✓" });
+        } catch (err) {
+          this.panel.webview.postMessage({
+            type: "aiPriceStatus",
+            ok: false,
+            message: (err as Error).message,
+          });
+          return;
         }
         break;
+      case "aiRefreshPrices": {
+        const r = await this.aiService.refreshPrices();
+        const parts: string[] = [];
+        if (r.removed.length) {
+          parts.push(`removed (price no longer published): ${r.removed.join(", ")}`);
+        }
+        parts.push(...r.errors);
+        this.panel.webview.postMessage({
+          type: "aiPriceStatus",
+          ok: r.errors.length === 0,
+          message: parts.join(" · ") || "Prices refreshed ✓",
+        });
+        break;
+      }
       default:
         return; // not an AI message — nothing to re-post
     }
@@ -187,7 +223,8 @@ export class SettingsPanel {
       { label: "Connection configs", key: CONNECTIONS_KEY },
       { label: "AI settings", key: AI_SETTINGS_KEY },
       { label: "AI usage ledger", key: USAGE_KEY },
-      { label: "AI price table", key: PRICES_KEY },
+      { label: "AI price table", key: PRICE_TABLE_KEY },
+      { label: "AI price table (legacy, purged by Reset All Data)", key: PRICES_KEY },
       // Mirrors extension.ts's LAST_SEEN_VERSION_KEY; importing it would cycle
       // extension.ts ↔ settingsPanel.ts.
       { label: "Last-seen version marker", key: "openDbClient.lastSeenVersion" },
@@ -377,9 +414,6 @@ export class SettingsPanel {
   .aiok { color: var(--vscode-testing-iconPassed, #3fb950); }
   .aierr { color: var(--vscode-errorForeground); }
   .aimuted { opacity: .6; font-size: 12px; }
-  #aiPricesBox input { width: 70px; padding: 2px 6px; border-radius: 3px;
-         background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-         border: 1px solid var(--vscode-input-border, #4443); }
   /* Custom model dropdown — the native datalist can't scroll a 300-model list. */
   .aimodelwrap { position: relative; flex: 1; max-width: 380px; display: flex; }
   .aimodelwrap input { flex: 1; max-width: none; }
@@ -447,16 +481,16 @@ export class SettingsPanel {
 
     function usageTable(rows){
       if (!rows.length) return '<p class="aimuted">No AI calls recorded yet.</p>';
-      let h = '<table><tr><th>Model</th><th>Action</th><th>Requests</th><th>Tokens in</th><th>Tokens out</th><th>Est. cost</th></tr>';
+      let h = '<table><tr><th>Provider</th><th>Model</th><th>Action</th><th>Requests</th><th>Tokens in</th><th>Tokens out</th><th>Est. cost</th></tr>';
       let ti = 0, to = 0, tc = 0, priced = true;
       for (const r of rows) {
-        h += '<tr><td>' + esc(r.model) + '</td><td>' + esc(r.verb) + '</td><td>' + r.requests +
+        h += '<tr><td>' + esc(r.providerId) + '</td><td>' + esc(r.model) + '</td><td>' + esc(r.verb) + '</td><td>' + r.requests +
              '</td><td>' + fmtTokens(r.inputTokens) + '</td><td>' + fmtTokens(r.outputTokens) +
              '</td><td>' + fmtCost(r.costUsd) + '</td></tr>';
         ti += r.inputTokens; to += r.outputTokens;
         if (r.costUsd === undefined || r.costUsd === null) priced = false; else tc += r.costUsd;
       }
-      h += '<tr><th>Total</th><th></th><th></th><th>' + fmtTokens(ti) + '</th><th>' + fmtTokens(to) +
+      h += '<tr><th>Total</th><th></th><th></th><th></th><th>' + fmtTokens(ti) + '</th><th>' + fmtTokens(to) +
            '</th><th>' + (priced ? fmtCost(tc) : fmtCost(tc) + ' +?') + '</th></tr></table>';
       return h;
     }
@@ -491,10 +525,24 @@ export class SettingsPanel {
       $('aiDropped').textContent = ai.dropped > 0
         ? 'Note: ' + ai.dropped + ' oldest entries were dropped by the ledger cap — all-time totals above remain exact.'
         : '';
-      $('aiPricesBox').innerHTML = '<table><tr><th>Model matches</th><th>Input $/MTok</th><th>Output $/MTok</th></tr>' +
-        Object.entries(ai.prices).map(([m, p]) =>
-          '<tr><td>' + esc(m) + '</td><td><input data-m="' + esc(m) + '" data-k="input" value="' + p.input + '"></td>' +
-          '<td><input data-m="' + esc(m) + '" data-k="output" value="' + p.output + '"></td></tr>').join('') + '</table>';
+      // Read-only by design: every price was fetched from a real source.
+      // toPrecision trims the per-token → per-MTok float artifacts
+      // (0.19999999999999998 → 0.2) without touching the stored value.
+      const fmtP = (v) => String(parseFloat(Number(v).toPrecision(6)));
+      $('aiPricesBox').innerHTML = ai.priceTable.length
+        ? '<table><tr><th>Provider</th><th>Model</th><th>Input $/MTok</th><th>Output $/MTok</th><th>Source</th><th>Status</th></tr>' +
+          ai.priceTable.map((r) =>
+            '<tr><td>' + esc(r.providerId) + '</td><td>' + esc(r.model) +
+            '</td><td>' + fmtP(r.input) + '</td><td>' + fmtP(r.output) +
+            '</td><td class="aimuted">' + (r.source === 'api' ? 'provider API' : 'LiteLLM') +
+            '</td><td class="' + (r.status === 'stale' ? 'aierr' : 'aimuted') + '">' + esc(r.status) + '</td></tr>').join('') + '</table>'
+        : '<p class="aimuted">Empty — add models below to start estimating costs.</p>';
+      const pp = $('aiPriceProv');
+      if (pp && !pp.options.length) {
+        pp.innerHTML = ai.presets.map((p) =>
+          '<option value="' + esc(p.id) + '">' + esc(p.label) +
+          ((ai.keyedProviders || []).includes(p.id) ? ' 🔑' : '') + '</option>').join('');
+      }
     }
 
     // ---- custom model dropdown (native datalist can't scroll 300+ models) ----
@@ -609,14 +657,22 @@ export class SettingsPanel {
         $('aiStatus').textContent = 'Fetching models…'; $('aiStatus').className = 'aimuted';
         vscode.postMessage(aiForm('aiFetchModels'));
       });
-      $('aiSavePricesBtn').addEventListener('click', () => {
-        const prices = {};
-        document.querySelectorAll('#aiPricesBox input').forEach((inp) => {
-          const m = inp.getAttribute('data-m'), k = inp.getAttribute('data-k'), v = Number(inp.value);
-          if (!prices[m]) prices[m] = { input: 0, output: 0 };
-          if (isFinite(v) && v >= 0) prices[m][k] = v;
-        });
-        vscode.postMessage({ type: 'aiSavePrices', prices });
+      const priceStatus = (msg, cls) => { $('aiPriceStatus').textContent = msg; $('aiPriceStatus').className = cls; };
+      $('aiPriceLoadBtn').addEventListener('click', () => {
+        priceStatus('Fetching models…', 'aimuted');
+        vscode.postMessage({ type: 'aiPriceModels', providerId: $('aiPriceProv').value });
+      });
+      $('aiPriceAddBtn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'aiPriceAdd', providerId: $('aiPriceProv').value, model: $('aiPriceModel').value });
+      });
+      $('aiPriceRefreshBtn').addEventListener('click', () => {
+        priceStatus('Refreshing…', 'aimuted');
+        vscode.postMessage({ type: 'aiRefreshPrices' });
+      });
+      // Switching provider invalidates the loaded model list.
+      $('aiPriceProv').addEventListener('change', () => {
+        const sel = $('aiPriceModel');
+        sel.innerHTML = ''; sel.disabled = true; $('aiPriceAddBtn').disabled = true;
       });
     }
 
@@ -627,6 +683,21 @@ export class SettingsPanel {
         clearInterval(testTimer);
         $('aiStatus').textContent = m.message;
         $('aiStatus').className = m.ok ? 'aiok' : 'aierr';
+      }
+      else if (m.type === 'aiPriceModels') {
+        const sel = $('aiPriceModel');
+        sel.innerHTML = m.models.map((mo) =>
+          '<option value="' + esc(mo.id) + '"' + (mo.priced ? '' : ' disabled') + '>' +
+          esc(mo.id) + (mo.priced ? '' : ' — no price source') + '</option>').join('');
+        sel.disabled = false;
+        $('aiPriceAddBtn').disabled = false;
+        const priced = m.models.filter((mo) => mo.priced).length;
+        $('aiPriceStatus').textContent = m.models.length + ' models, ' + priced + ' with a price source';
+        $('aiPriceStatus').className = 'aimuted';
+      }
+      else if (m.type === 'aiPriceStatus') {
+        $('aiPriceStatus').textContent = m.message;
+        $('aiPriceStatus').className = m.ok ? 'aiok' : 'aierr';
       }
       else if (m.type === 'storageUsage') {
         let h = '<table><tr><th>What</th><th>Where</th><th>Size</th></tr>';
@@ -897,8 +968,22 @@ console.log(Buffer.concat([d.update(Buffer.from(b.data, "base64")), d.final()]).
       <div id="aiDropped" class="aimuted"></div>
 
       <h4>Price table (USD per million tokens)</h4>
+      <p class="aimuted">Every price is fetched, never shipped with the extension. <b>provider API</b>
+         rows come from the provider's own model list (OpenRouter-style endpoints publish prices).
+         OpenAI and Anthropic publish no prices via API, so their rows come from the
+         <b>LiteLLM</b> community price list (CI-updated on GitHub) — a labeled third-party
+         source, not the provider's word. <b>stale</b> = last fetched over 30 days ago. On
+         refresh, models a source no longer prices are removed — their usage then shows "—",
+         never a guessed $0.</p>
       <div id="aiPricesBox"></div>
-      <div class="airow"><button id="aiSavePricesBtn" class="aibtn secondary">Save prices</button></div>`,
+      <div class="airow">
+        <select id="aiPriceProv" style="max-width:170px"></select>
+        <select id="aiPriceModel" style="max-width:230px" disabled></select>
+        <button id="aiPriceLoadBtn" class="aibtn secondary" title="List this provider's models (needs its API key stored)">Load models</button>
+        <button id="aiPriceAddBtn" class="aibtn secondary" disabled>Add</button>
+        <button id="aiPriceRefreshBtn" class="aibtn secondary" title="Re-fetch every price in the table">↻ Refresh prices</button>
+      </div>
+      <div id="aiPriceStatus" class="aimuted"></div>`,
   },
   {
     id: "ai-data",

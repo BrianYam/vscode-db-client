@@ -1,8 +1,12 @@
 import type * as vscode from "vscode";
+import type { PriceRow } from "./priceTable";
 import type { AiVerb } from "./prompts";
 
 export const USAGE_KEY = "openDbClient.aiUsage";
+/** Legacy hand-edited table — purged on delete, no longer written. */
 export const PRICES_KEY = "openDbClient.aiPrices";
+/** API-sourced price rows (see priceTable.ts). */
+export const PRICE_TABLE_KEY = "openDbClient.aiPriceTable";
 
 /** One provider call, recorded with the exact counts the response reported. */
 export interface UsageEntry {
@@ -27,22 +31,11 @@ export interface UsageState {
   totals: Record<string, { inputTokens: number; outputTokens: number; requests: number }>;
 }
 
-/** USD per million tokens. User-editable in settings; these only seed it. */
+/** USD per million tokens. */
 export interface ModelPrice {
   input: number;
   output: number;
 }
-
-export const SEED_PRICES: Record<string, ModelPrice> = {
-  "claude-opus": { input: 15, output: 75 },
-  "claude-sonnet": { input: 3, output: 15 },
-  "claude-haiku": { input: 1, output: 5 },
-  "gpt-5-mini": { input: 0.25, output: 2 },
-  "gpt-5-nano": { input: 0.05, output: 0.4 },
-  "gpt-5": { input: 1.25, output: 10 },
-  "gpt-4o-mini": { input: 0.15, output: 0.6 },
-  "gpt-4o": { input: 2.5, output: 10 },
-};
 
 /** Cap keeps globalState bounded; totals above preserve the long-run truth. */
 export const USAGE_CAP = 5000;
@@ -79,25 +72,6 @@ export function applyRecord(state: UsageState, entry: UsageEntry, cap = USAGE_CA
   };
 }
 
-/**
- * Longest matching price key wins, so "claude-sonnet-4-5" finds "claude-sonnet"
- * without a per-version table. Returns undefined for unknown models — the view
- * shows "—" rather than a fake $0 (estimates must not pretend to be exact).
- */
-export function matchPrice(
-  model: string,
-  prices: Record<string, ModelPrice>,
-): ModelPrice | undefined {
-  const m = model.toLowerCase();
-  let best: string | undefined;
-  for (const key of Object.keys(prices)) {
-    if (m.includes(key.toLowerCase()) && (!best || key.length > best.length)) {
-      best = key;
-    }
-  }
-  return best ? prices[best] : undefined;
-}
-
 /** USD estimate for token counts, or undefined when the model has no price. */
 export function estimateCost(
   inputTokens: number,
@@ -121,7 +95,10 @@ export interface UsageRow {
 }
 
 /** Aggregate rows for the view — from capped entries (period) or totals (all time). */
-export function summarizePeriod(state: UsageState, prices: Record<string, ModelPrice>): UsageRow[] {
+/** Resolves a call's price; undefined means "no estimate" (shown as —). */
+export type PriceLookup = (providerId: string, model: string) => ModelPrice | undefined;
+
+export function summarizePeriod(state: UsageState, lookup: PriceLookup): UsageRow[] {
   const acc: Record<string, UsageRow> = {};
   for (const e of state.entries) {
     if (e.ts < state.periodStart) {
@@ -141,23 +118,20 @@ export function summarizePeriod(state: UsageState, prices: Record<string, ModelP
     row.inputTokens += e.inputTokens;
     row.outputTokens += e.outputTokens;
   }
-  return priceRows(Object.values(acc), prices);
+  return priceRows(Object.values(acc), lookup);
 }
 
-export function summarizeAllTime(
-  state: UsageState,
-  prices: Record<string, ModelPrice>,
-): UsageRow[] {
+export function summarizeAllTime(state: UsageState, lookup: PriceLookup): UsageRow[] {
   const rows = Object.entries(state.totals).map(([key, t]) => {
     const [providerId, model, verb] = key.split(SEP);
     return { providerId, model, verb, ...t };
   });
-  return priceRows(rows, prices);
+  return priceRows(rows, lookup);
 }
 
-function priceRows(rows: UsageRow[], prices: Record<string, ModelPrice>): UsageRow[] {
+function priceRows(rows: UsageRow[], lookup: PriceLookup): UsageRow[] {
   for (const r of rows) {
-    r.costUsd = estimateCost(r.inputTokens, r.outputTokens, matchPrice(r.model, prices));
+    r.costUsd = estimateCost(r.inputTokens, r.outputTokens, lookup(r.providerId, r.model));
   }
   return rows.sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens));
 }
@@ -179,16 +153,18 @@ export class UsageStore {
     await this.ctx.globalState.update(USAGE_KEY, { ...this.state(), periodStart: Date.now() });
   }
 
-  prices(): Record<string, ModelPrice> {
-    return this.ctx.globalState.get<Record<string, ModelPrice>>(PRICES_KEY) ?? { ...SEED_PRICES };
+  /** Stored API-sourced price rows (built-in fallback rows are composed by callers). */
+  apiPriceRows(): PriceRow[] {
+    return this.ctx.globalState.get<PriceRow[]>(PRICE_TABLE_KEY) ?? [];
   }
 
-  async savePrices(prices: Record<string, ModelPrice>): Promise<void> {
-    await this.ctx.globalState.update(PRICES_KEY, prices);
+  async savePriceRows(rows: PriceRow[]): Promise<void> {
+    await this.ctx.globalState.update(PRICE_TABLE_KEY, rows);
   }
 
   async deleteAll(): Promise<void> {
     await this.ctx.globalState.update(USAGE_KEY, undefined);
     await this.ctx.globalState.update(PRICES_KEY, undefined);
+    await this.ctx.globalState.update(PRICE_TABLE_KEY, undefined);
   }
 }

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Price table is now fully fetched and read-only — no price ships with the
+  extension** (was hand-editable with 8 hardcoded families, which had already
+  drifted: e.g. gpt-5.4 really costs $2.50/$15, not the seeded $1.25/$10).
+  Every row records its source: **provider API** (OpenRouter-style endpoints
+  publish real prices) or **LiteLLM** (the community price list LiteLLM
+  itself fetches at runtime, CI-updated on GitHub) for OpenAI/Anthropic,
+  whose APIs publish no pricing — a labeled third-party source, never
+  presented as the provider's word. Add a model by picking a provider and one
+  of its models (providers that need an API key only contribute once a key is
+  stored); **↻ Refresh prices** re-fetches every row from its own source.
+  Each row shows *up to date* or *stale* (fetched >30 days ago); models a
+  source no longer prices are removed and reported, and their cost shows "—"
+  again — never a guessed $0. Cost estimates everywhere (usage ledger,
+  per-call assist bar) read this table with provider-aware matching.
+  Hand-edited prices from the old table are discarded, and models without a
+  row show no estimate until added.
+- **Usage tables show the provider** alongside each model (always recorded,
+  now visible).
+
+### Added
+- `docs/AI_PRICING.md` — where every AI dollar figure comes from: price table
+  sources (provider API vs LiteLLM), usage ledger mechanics, dropdown price
+  labels, and per-call estimation, with a code map.
+
+### Added
+- **Per-call cost in the assist bar.** The result line now shows the estimated
+  cost next to the token count (e.g. `✓ 25.8s · 5263 tokens · ~$0.0021 · model`),
+  using the same price-table estimate as the usage ledger — providers return
+  exact token counts but no dollar amount. Shown with a `~` and omitted
+  entirely when the model has no entry in the price table (no fake zeros).
+
 ## [1.2.1] - 2026-08-06
 
 ### Fixed

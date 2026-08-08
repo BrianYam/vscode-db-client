@@ -840,3 +840,66 @@ human screen recording.
 - [ ] `[SDD][M25]` QA: `npx vsce package` warning-free for listing fields;
       preview README rendering on GitHub; verify icon crispness on the
       Marketplace after next publish
+
+## M26 — Per-call cost in assist bar (requested 2026-08-07)
+
+Discovery (chat): user asked whether the LLM response contains cost. It doesn't
+(OpenAI-compatible responses carry exact token counts only; OpenRouter can
+return cost but only on request) — so the assist bar reuses the ledger's
+price-table estimate instead of a provider figure.
+
+### M26.0 — Implementation ✅ done 2026-08-07
+- [x] `[SDD][M26]` `AiVerbResult.costUsd?` computed in `aiService.run()` via
+      existing `estimateCost`/`matchPrice`; absent when model unpriced
+- [x] `[SDD][M26]` `queryPanel` forwards `costUsd` in `aiResult`; webview meta
+      line renders `~$x` with ledger formatting (4dp under a cent, else 2dp),
+      omitted when undefined
+- [x] `[SDD][M26]` `npm run typecheck` + `npm test` green
+- [ ] `[SDD][M26]` Manual QA: Generate with a priced model shows `~$`;
+      unpriced model shows no cost segment; value matches ledger row delta
+
+## M27 — API-sourced price table (requested 2026-08-08, Discovery locked)
+
+Discovery: docs/DISCOVERY_PRICE_TABLE.md (D1 built-in fallback, D2 30 days,
+D3 legacy prices discarded).
+
+### M27.0 — Core + wiring ✅ code done 2026-08-08
+- [x] `[SDD][M27]` `src/ai/priceTable.ts`: PriceRow (provider, model, $/MTok,
+      source api|builtin, fetchedAt), rowStatus (30d stale), findPrice
+      (exact → same-provider substring → builtin substring), mergeFetched
+      (NA rows removed + reported)
+- [x] `[SDD][M27]` usageStore: PRICE_TABLE_KEY storage, summaries take a
+      PriceLookup; legacy aiPrices no longer written, purged by deleteAll
+- [x] `[SDD][M27]` aiService: priceTable(), listModelsFor (keyed providers
+      only), priceCandidates, addPriceRow (rejects unpriced models with the
+      reason), refreshPrices (per-provider errors kept, rows age to stale);
+      per-call + ledger costs via findPrice
+- [x] `[SDD][M27]` Settings UI: read-only table with Provider/Model/prices/
+      Status, add-model flow (provider → Load models → Add; unpriced models
+      disabled "— no API price"), ↻ Refresh prices, status line; usage tables
+      gain Provider column; storage panel lists new + legacy keys
+- [x] `[SDD][M27]` Tests: test/priceTable.test.js (status boundary, lookup
+      precedence, merge/NA); aiUsage tests updated to lookup signature —
+      176 pass
+- [ ] `[SDD][M27]` Manual QA: add an OpenRouter model → row "up to date" and
+      assist bar shows ~$ for it; OpenAI/Anthropic models fall to built-in
+      rows; keyless provider Load models fails with the key message; Refresh
+      after key removal reports the error and rows age to stale
+
+### M27.1 — No hardcoded prices: LiteLLM source ✅ code done 2026-08-08
+- [x] `[SDD][M27]` Research: OpenAI + Anthropic have no pricing API
+      (verified); LiteLLM model_prices_and_context_window.json chosen
+      (CI-updated, exact dated ids verified against live file)
+- [x] `[SDD][M27]` SEED_PRICES + matchPrice + builtinRows deleted; PriceRow
+      source now "api" | "litellm"; parseLitellmPrices (chat/responses only,
+      per-token → $/MTok), mergeLitellm; findPrice provider-scoped only
+- [x] `[SDD][M27]` aiService: litellmPrices() with 1 h in-memory cache;
+      add flow prefers provider-API price, falls back to LiteLLM, refuses
+      with reason when neither covers; refresh re-fetches per source
+- [x] `[SDD][M27]` UI: Source column (provider API / LiteLLM), price display
+      rounded via toPrecision(6) (FP-junk fix), "no price source" labels,
+      empty-table hint; tests rewritten — 178 pass
+- [ ] `[SDD][M27]` Manual QA: OpenAI Load models → gpt-5* addable via
+      LiteLLM (gpt-5.4 shows 2.5/15, not the old seed 1.25/10); sora/dall-e
+      remain "no price source"; Refresh updates fetchedAt; offline Refresh
+      reports the fetch error and rows age to stale
