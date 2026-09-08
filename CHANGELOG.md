@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-09-08
+
 ### Added
 - **A column picker for results.** A **Columns ▾** button in the results toolbar
   lists every column with a checkbox — all on by default — plus a search box for
