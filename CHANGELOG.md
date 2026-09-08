@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **AWS Athena support.** Connect with an AWS profile (SSO, `credential_process`
+  and assume-role chains all resolve through the SDK), static access keys, or the
+  machine's own role. Browse catalog → database → table → column, and run
+  queries. Athena runs Trino, so SQL formatting and editor completion use the
+  Trino dialect.
+- Results footer reports **bytes scanned** alongside elapsed time, since Athena
+  bills per terabyte scanned rather than per second.
+
+### Changed
+
+- `Driver.connect()` now takes a secrets object rather than a bare password
+  string — Athena's access-key mode needs two secrets, and a driver must never
+  reach into SecretStorage itself.
+- "Select Top 200" is now **Preview Rows**, which is what it does on every engine.
+
+### Notes on Athena and cost
+
+- Browsing the tree runs no queries: the tree, autocomplete and DDL all come
+  from Athena's metadata APIs, which scan nothing. `information_schema` is
+  never used, because querying it is billed DML.
+- Clicking a table does **not** preview it — on a billed engine a stray click
+  should not start a scan. Preview Rows is an explicit action, capped at 500
+  rows, and the statement shown in the editor is exactly the one that ran.
+- Previews do not page server-side, so no "next page" click can silently start
+  a second scan of the same table.
+- Row counts are not offered: `COUNT(*)` means a full scan, which on a
+  terabyte-scale table is real money for a number nobody asked for.
+- A failed or cancelled query reports the bytes it scanned before stopping —
+  AWS bills those either way.
+- Athena tables have no primary key, so grid editing is unavailable and says so.
+
 ## [1.3.2] - 2026-09-08
 
 ### Added

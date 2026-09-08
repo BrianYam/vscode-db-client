@@ -1,6 +1,13 @@
 import Redis from "ioredis";
 import { type ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
-import type { ColumnMeta, Driver, QueryResult, SchemaHints, TreeItemData } from "./Driver";
+import type {
+  ColumnMeta,
+  ConnectSecrets,
+  Driver,
+  QueryResult,
+  SchemaHints,
+  TreeItemData,
+} from "./Driver";
 import { buildTls } from "./ssl";
 
 /** Max keys listed under one db node before the list is marked truncated. */
@@ -61,7 +68,8 @@ export class RedisDriver implements Driver {
 
   constructor(public readonly config: ConnectionConfig) {}
 
-  async connect(password?: string): Promise<void> {
+  async connect(secrets?: ConnectSecrets): Promise<void> {
+    const password = secrets?.password;
     const tls = buildTls(this.config);
     const options = {
       lazyConnect: true,

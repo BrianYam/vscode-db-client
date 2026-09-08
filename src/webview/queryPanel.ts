@@ -1105,6 +1105,12 @@ ${COLUMN_VIEW_HELPERS}
     // Filter/sort/page round-trips can overlap, and a slow one landing last would
     // otherwise repaint the grid with rows that no longer match the boxes.
     let reqSeq = 0, renderedSeq = 0;
+    function fmtBytes(n) {
+      const u = ['B','KB','MB','GB','TB','PB'];
+      let v = n, i = 0;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return i === 0 ? v + ' B' : v.toFixed(1) + ' ' + u[i];
+    }
     const serverBacked = () => !!(raw && raw.page);
     function scheduleServerFilter(){
       clearTimeout(filterTimer);
@@ -2413,7 +2419,15 @@ ${COLUMN_VIEW_HELPERS}
         $('addBtn').disabled = !raw.editable;
         updateTtl();
         const p = raw.page;
-        $('cost').textContent = raw.elapsedMs != null ? ('Cost: ' + (raw.elapsedMs/1000).toFixed(2) + 's') : '';
+        // On a billed engine, wall-clock time is not the cost that matters —
+        // Athena charges per byte scanned. Show the bytes when the driver
+        // reports them, deliberately without a dollar figure: that would need a
+        // per-region price table that goes stale silently and is wrong under
+        // reserved capacity.
+        const timePart = raw.elapsedMs != null ? (raw.elapsedMs/1000).toFixed(2) + 's' : '';
+        const scanPart = raw.bytesScanned != null ? fmtBytes(raw.bytesScanned) + ' scanned' : '';
+        const costParts = [timePart, scanPart].filter(Boolean);
+        $('cost').textContent = costParts.length ? 'Cost: ' + costParts.join(' · ') : '';
         if (p) {
           const from = p.total ? p.offset + 1 : 0, to = Math.min(p.offset + p.limit, p.total);
           $('pageLbl').textContent = from + '–' + to;

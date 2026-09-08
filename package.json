@@ -31,6 +31,11 @@
     "mariadb",
     "sqlite",
     "redis",
+    "athena",
+    "aws athena",
+    "aws",
+    "trino",
+    "presto",
     "database client",
     "sql client",
     "database manager",
@@ -93,7 +98,8 @@
       },
       {
         "command": "openDbClient.previewTable",
-        "title": "Select Top 200"
+        "title": "Preview Rows",
+        "icon": "$(table)"
       },
       {
         "command": "openDbClient.showDDL",
@@ -269,6 +275,11 @@
           "group": "1_query@1"
         },
         {
+          "command": "openDbClient.previewTable",
+          "when": "view == openDbClient.connections && viewItem =~ /noclick/",
+          "group": "inline"
+        },
+        {
           "command": "openDbClient.showDDL",
           "when": "view == openDbClient.connections && viewItem =~ /table|view/",
           "group": "1_query@2"
@@ -388,6 +399,8 @@
     "*.{ts,js,mjs,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
+    "@aws-sdk/client-athena": "^3.1115.0",
+    "@aws-sdk/credential-providers": "^3.1115.0",
     "ioredis": "^5.4.1",
     "mysql2": "^3.11.0",
     "pg": "^8.12.0",

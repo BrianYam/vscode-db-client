@@ -1,4 +1,4 @@
-import { formatDialect, mysql, postgresql, sqlite } from "sql-formatter";
+import { formatDialect, mysql, postgresql, sqlite, trino } from "sql-formatter";
 import type { DatabaseType } from "./connections/types";
 
 /**
@@ -18,6 +18,9 @@ const DIALECTS: Partial<Record<DatabaseType, Dialect>> = {
   postgres: postgresql,
   mysql,
   sqlite,
+  // Athena runs Trino (it started as Presto), so the Trino dialect is the
+  // correct one for both formatting and completion vocabulary.
+  athena: trino,
 };
 
 /** Dialect vocabulary for completion. Every list is upper-case and de-duplicated. */

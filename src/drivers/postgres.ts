@@ -2,6 +2,7 @@ import { type QueryResult as PgResult, Pool } from "pg";
 import { type ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
 import type {
   ColumnMeta,
+  ConnectSecrets,
   Driver,
   ForeignKey,
   PreviewOptions,
@@ -36,8 +37,8 @@ export class PostgresDriver implements Driver {
     return !!(this.config.useConnectionString && this.config.connectionString);
   }
 
-  async connect(password?: string): Promise<void> {
-    this.password = password;
+  async connect(secrets?: ConnectSecrets): Promise<void> {
+    this.password = secrets?.password;
     const client = await this.entryPool().connect();
     client.release();
   }

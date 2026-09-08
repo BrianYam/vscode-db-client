@@ -101,6 +101,13 @@ export interface QueryResult {
   foreignKeys?: ForeignKey[];
   /** Server round-trip time in milliseconds. */
   elapsedMs?: number;
+  /**
+   * Bytes the engine scanned to answer this. Athena bills per terabyte
+   * scanned, so on that engine this is what the statement cost — the grid
+   * shows it rather than leaving the user to find out on the invoice. Absent
+   * on engines where a query has no per-run price.
+   */
+  bytesScanned?: number;
   /** The equivalent SQL for a table preview (shown, editable, in the editor). */
   sql?: string;
   /**
@@ -141,6 +148,18 @@ export interface TreeItemData {
 }
 
 /**
+ * Secrets for `connect()`, fetched by the host from SecretStorage. An object
+ * rather than a bare password because Athena's `keys` mode needs two of them,
+ * and a driver must never reach for SecretStorage (or any VS Code API) itself.
+ */
+export interface ConnectSecrets {
+  password?: string;
+  /** Athena `keys` mode. The access key ID is not secret and lives in config. */
+  awsSecretAccessKey?: string;
+  awsSessionToken?: string;
+}
+
+/**
  * Every database engine implements this interface. The tree, query panel, and
  * commands are written against Driver only — they never import pg/mysql2/etc.
  * directly. Add a new engine by adding one file that implements Driver.
@@ -148,7 +167,7 @@ export interface TreeItemData {
 export interface Driver {
   readonly config: ConnectionConfig;
 
-  connect(password?: string): Promise<void>;
+  connect(secrets?: ConnectSecrets): Promise<void>;
   dispose(): Promise<void>;
 
   /**

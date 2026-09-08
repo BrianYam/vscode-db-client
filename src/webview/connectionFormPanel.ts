@@ -4,6 +4,7 @@ import type { ConnectionManager } from "../connections/manager";
 import { openTunnelForConfig, type SshTunnel } from "../connections/sshTunnel";
 import { type ConnectionStore, newId, type Secrets } from "../connections/store";
 import {
+  type AwsAuthMode,
   type ConnectionConfig,
   type DatabaseType,
   DEFAULT_PORTS,
@@ -36,12 +37,19 @@ interface FormPayload {
   sshAuth?: SshAuth;
   sshPrivateKeyPath?: string;
   sshConnectTimeout?: number;
+  awsAuthMode?: AwsAuthMode;
+  awsRegion?: string;
+  awsProfile?: string;
+  awsAccessKeyId?: string;
+  athenaWorkgroup?: string;
+  athenaOutputLocation?: string;
 }
 
 interface FormSecrets {
   password?: string;
   sshPassword?: string;
   sshPassphrase?: string;
+  awsSecretAccessKey?: string;
 }
 
 type Refresh = () => void;
@@ -133,6 +141,17 @@ export class ConnectionFormPanel {
       sshAuth: payload.sshAuth,
       sshPrivateKeyPath: payload.sshPrivateKeyPath?.trim() || undefined,
       sshConnectTimeout: payload.sshConnectTimeout,
+      awsAuthMode: payload.awsAuthMode,
+      awsRegion: payload.awsRegion?.trim() || undefined,
+      awsProfile: payload.awsProfile?.trim() || undefined,
+      awsAccessKeyId: payload.awsAccessKeyId?.trim() || undefined,
+      athenaWorkgroup: payload.athenaWorkgroup?.trim() || undefined,
+      athenaOutputLocation: payload.athenaOutputLocation?.trim() || undefined,
+      // Not offered by this form, but persisted records may carry them and a
+      // round-trip through here must not silently drop what the user saved.
+      athenaCatalog: this.existing?.athenaCatalog,
+      awsEndpoint: this.existing?.awsEndpoint,
+      awsUseFips: this.existing?.awsUseFips,
     };
   }
 
@@ -140,6 +159,12 @@ export class ConnectionFormPanel {
     const config = this.toConfig(payload);
     const pw =
       secrets.password || (this.existing ? await this.store.getPassword(config.id) : undefined);
+    const awsSecretAccessKey =
+      secrets.awsSecretAccessKey ||
+      (this.existing ? await this.store.getAwsSecret(config.id) : undefined);
+    const awsSessionToken = this.existing
+      ? await this.store.getAwsSessionToken(config.id)
+      : undefined;
     const start = Date.now();
     let tunnel: SshTunnel | undefined;
     let driver: ReturnType<typeof createDriver> | undefined;
@@ -157,7 +182,7 @@ export class ConnectionFormPanel {
         effective = opened.effectiveConfig;
       }
       driver = createDriver(effective);
-      await driver.connect(pw);
+      await driver.connect({ password: pw, awsSecretAccessKey, awsSessionToken });
       this.post({
         type: "testResult",
         ok: true,
@@ -193,6 +218,9 @@ export class ConnectionFormPanel {
       password: secrets.password || undefined,
       sshPassword: secrets.sshPassword || undefined,
       sshPassphrase: secrets.sshPassphrase || undefined,
+      // Blank means "keep what is stored" — storeSecret skips empty values, so
+      // editing an Athena connection without retyping the secret preserves it.
+      awsSecretAccessKey: secrets.awsSecretAccessKey || undefined,
     };
     await this.store.save(config, secretBundle);
     this.refresh();
@@ -253,6 +281,12 @@ export class ConnectionFormPanel {
       database: e?.database ?? "",
       filePath: e?.filePath ?? "",
       redisDb: e?.redisDb ?? 0,
+      awsAuthMode: e?.awsAuthMode ?? "profile",
+      awsRegion: e?.awsRegion ?? "",
+      awsProfile: e?.awsProfile ?? "",
+      awsAccessKeyId: e?.awsAccessKeyId ?? "",
+      athenaWorkgroup: e?.athenaWorkgroup ?? "",
+      athenaOutputLocation: e?.athenaOutputLocation ?? "",
       ssl: e?.ssl ?? false,
       allowInvalidCert: e?.allowInvalidCert ?? false,
       sslCA: e?.sslCA ?? "",
@@ -406,6 +440,7 @@ export class ConnectionFormPanel {
       <div class="type" data-t="mysql">${this.iconSvg("mysql")} MySQL / MariaDB</div>
       <div class="type" data-t="sqlite">${this.iconSvg("sqlite")} SQLite</div>
       <div class="type" data-t="redis">${this.iconSvg("redis")} Redis</div>
+      <div class="type" data-t="athena">${this.iconSvg("athena")} AWS Athena</div>
     </div>
 
     <!-- Network engines -->
@@ -523,6 +558,50 @@ export class ConnectionFormPanel {
         <button id="browseBtn" type="button">Browse…</button>
       </div>
     </div>
+
+    <!-- Athena -->
+    <div id="athenaFields" class="hidden">
+      <div class="slabel">Connection</div>
+      <div class="grid">
+        <div><label class="req">Region</label><input type="text" id="awsRegion" placeholder="ap-southeast-1" /></div>
+        <div><label>Workgroup</label><input type="text" id="athenaWorkgroup" placeholder="primary" /></div>
+        <div class="full"><label>Database <span class="opt">(optional)</span></label><input type="text" id="athenaDatabase" placeholder="default" /></div>
+      </div>
+
+      <div class="slabel">Credentials</div>
+      <div id="awsModeBtns" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        <div class="type" data-aws="profile">Profile</div>
+        <div class="type" data-aws="keys">Access keys</div>
+        <div class="type" data-aws="ambient">This machine's role</div>
+      </div>
+      <div id="awsProfileBox">
+        <label>Profile name</label>
+        <input type="text" id="awsProfile" placeholder="default" />
+        <div class="hint">Reads <code>~/.aws/config</code>. Covers SSO, <code>credential_process</code> and assume-role chains. A profile that needs an interactive MFA code is not supported here — use access keys instead.</div>
+      </div>
+      <div id="awsKeysBox" class="hidden">
+        <div class="grid">
+          <div><label class="req">Access key ID</label><input type="text" id="awsAccessKeyId" placeholder="AKIA…" /></div>
+          <div><label class="req">Secret access key</label>
+            <div class="pwwrap">
+              <input type="password" id="awsSecretAccessKey" />
+              <span class="eye" id="awsEye" title="Show/hide secret">👁</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slabel">Options</div>
+      <label>Results location <span class="opt">(optional)</span></label>
+      <input type="text" id="athenaOutputLocation" placeholder="s3://bucket/prefix/" />
+      <div class="hint">Leave blank to use the workgroup's own. If the workgroup enforces its configuration, anything typed here is <b>silently overridden</b> by AWS — we read the effective location back after connecting and use that.</div>
+
+      <div class="hint" style="margin-top:14px">
+        <b>Queries cost money.</b> Athena bills per terabyte scanned, and a cancelled query is
+        still billed for what it scanned before it stopped. Browsing the tree runs no queries,
+        and clicking a table does not preview it — use the Preview Rows action to run one.
+      </div>
+    </div>
   </div>
 
   <div class="footer">
@@ -630,20 +709,49 @@ export class ConnectionFormPanel {
       el.addEventListener('click', () => selectAuth(el.getAttribute('data-auth'))));
     selectAuth(state.sshAuth);
 
+    // Athena
+    $('awsRegion').value = state.awsRegion;
+    $('awsProfile').value = state.awsProfile;
+    $('awsAccessKeyId').value = state.awsAccessKeyId;
+    $('athenaWorkgroup').value = state.athenaWorkgroup;
+    $('athenaOutputLocation').value = state.athenaOutputLocation;
+    $('athenaDatabase').value = state.database;
+    if (state.isEdit) $('awsSecretAccessKey').placeholder = '(unchanged — leave blank to keep)';
+    $('awsEye').addEventListener('click', () => {
+      const p = $('awsSecretAccessKey');
+      p.type = p.type === 'password' ? 'text' : 'password';
+      $('awsEye').textContent = p.type === 'password' ? '👁' : '🙈';
+    });
+    function selectAwsMode(m) {
+      state.awsAuthMode = m;
+      document.querySelectorAll('#awsModeBtns .type').forEach((el) =>
+        el.classList.toggle('active', el.getAttribute('data-aws') === m));
+      $('awsProfileBox').classList.toggle('hidden', m !== 'profile');
+      $('awsKeysBox').classList.toggle('hidden', m !== 'keys');
+    }
+    document.querySelectorAll('#awsModeBtns .type').forEach((el) =>
+      el.addEventListener('click', () => selectAwsMode(el.getAttribute('data-aws'))));
+    selectAwsMode(state.awsAuthMode);
+
     function selectType(t) {
       state.type = t;
-      document.querySelectorAll('.type').forEach((el) =>
+      document.querySelectorAll('#types .type').forEach((el) =>
         el.classList.toggle('active', el.getAttribute('data-t') === t));
       const isSqlite = t === 'sqlite';
       const isRedis = t === 'redis';
-      $('netFields').classList.toggle('hidden', isSqlite);
+      const isAthena = t === 'athena';
+      // Athena has no host, port, TLS or tunnel — it is signed HTTPS to a
+      // regional endpoint — so it replaces the network block rather than
+      // extending it.
+      $('netFields').classList.toggle('hidden', isSqlite || isAthena);
       $('fileFields').classList.toggle('hidden', !isSqlite);
+      $('athenaFields').classList.toggle('hidden', !isAthena);
       $('dbField').classList.toggle('hidden', isRedis || isSqlite);
       $('redisDbField').classList.toggle('hidden', !isRedis);
       $('connectionString').placeholder = CS_PLACEHOLDER[t] || CS_PLACEHOLDER.postgres;
-      if (!isSqlite && (!$('port').value || Number($('port').value) === 0)) $('port').value = PORTS[t];
+      if (!isSqlite && !isAthena && (!$('port').value || Number($('port').value) === 0)) $('port').value = PORTS[t];
     }
-    document.querySelectorAll('.type').forEach((el) =>
+    document.querySelectorAll('#types .type').forEach((el) =>
       el.addEventListener('click', () => selectType(el.getAttribute('data-t'))));
     selectType(state.type);
 
@@ -672,7 +780,9 @@ export class ConnectionFormPanel {
         host: $('host').value,
         port: Number($('port').value) || undefined,
         username: $('username').value,
-        database: $('database').value,
+        // Athena keeps its database in its own input, since the network block
+        // it normally lives in is hidden for that engine.
+        database: state.type === 'athena' ? $('athenaDatabase').value : $('database').value,
         filePath: $('filePath').value,
         redisDb: Number($('redisDb').value) || 0,
         ssl: $('ssl').checked,
@@ -689,6 +799,12 @@ export class ConnectionFormPanel {
         sshAuth: state.sshAuth,
         sshPrivateKeyPath: $('sshPrivateKeyPath').value,
         sshConnectTimeout: Number($('sshConnectTimeout').value) || 5000,
+        awsAuthMode: state.awsAuthMode,
+        awsRegion: $('awsRegion').value,
+        awsProfile: $('awsProfile').value,
+        awsAccessKeyId: $('awsAccessKeyId').value,
+        athenaWorkgroup: $('athenaWorkgroup').value,
+        athenaOutputLocation: $('athenaOutputLocation').value,
       };
     }
     function secrets() {
@@ -696,11 +812,21 @@ export class ConnectionFormPanel {
         password: $('password').value,
         sshPassword: $('sshPassword').value,
         sshPassphrase: $('sshPassphrase').value,
+        awsSecretAccessKey: $('awsSecretAccessKey').value,
       };
     }
     function validate() {
       if (!$('name').value.trim()) return 'Name is required';
       if (state.type === 'sqlite') { if (!$('filePath').value.trim()) return 'SQLite file path is required'; }
+      else if (state.type === 'athena') {
+        if (!$('awsRegion').value.trim()) return 'AWS region is required';
+        if (state.awsAuthMode === 'keys') {
+          if (!$('awsAccessKeyId').value.trim()) return 'Access key ID is required';
+          // On an edit the stored secret stands in for a blank box; on a new
+          // connection there is nothing to fall back to.
+          if (!$('awsSecretAccessKey').value && !state.isEdit) return 'Secret access key is required';
+        }
+      }
       else if (!$('host').value.trim()) return 'Host is required';
       return null;
     }

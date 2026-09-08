@@ -25,7 +25,17 @@ const DND_MIME = "application/vnd.code.tree.opendbclient.connections";
 // Node kinds the table-search box narrows by label. Everything else in a list
 // (the "Query" folder, error rows) is always kept. "database-redis" is absent:
 // Redis has its own server-side key search.
-const STRUCTURAL = new Set(["database", "schema", "table", "view"]);
+// Context values the client-side table filter is allowed to hide. The
+// "-noclick" variants are Athena's tables and views, which are structural in
+// exactly the same way — they only differ in not previewing on click.
+const STRUCTURAL = new Set([
+  "database",
+  "schema",
+  "table",
+  "view",
+  "table-noclick",
+  "view-noclick",
+]);
 
 // A node expansion (children query) that never returns leaves the tree spinning
 // with no way out. Cap it so it fails to a visible error node instead.
@@ -185,8 +195,10 @@ export class DatabaseTreeProvider
       if (!wasConnected && element.nodePath.length === 0) {
         this._onDidChange.fire(undefined);
       }
-      const isRedis = this.store.get(element.connectionId)?.type === "redis";
-      let nodes = kids.map((k) => this.toNode(element.connectionId, k, isRedis));
+      const engine = this.store.get(element.connectionId)?.type;
+      const isRedis = engine === "redis";
+      const isAthena = engine === "athena";
+      let nodes = kids.map((k) => this.toNode(element.connectionId, k, isRedis, isAthena));
       // Give each database AND schema a "Query" folder for saved .sql files.
       if (element.contextValue === "database" || element.contextValue === "schema") {
         nodes.unshift(this.queryRootNode(element.connectionId, element.nodePath));
@@ -304,14 +316,24 @@ export class DatabaseTreeProvider
     });
   }
 
-  private toNode(connectionId: string, data: TreeItemData, isRedis = false): DbNode {
+  private toNode(
+    connectionId: string,
+    data: TreeItemData,
+    isRedis = false,
+    isAthena = false,
+  ): DbNode {
     const collapsible = data.expandable
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None;
     // Redis db nodes get their own context value so key-search menus can target
     // them without appearing on PostgreSQL/MySQL databases. It still contains
     // "database", so the generic database menus keep matching.
-    const contextValue = isRedis && data.kind === "database" ? "database-redis" : contextFor(data);
+    let contextValue = isRedis && data.kind === "database" ? "database-redis" : contextFor(data);
+    // Athena tables carry a "noclick" marker so the Preview Rows menu item can
+    // target exactly the nodes that no longer preview on click (see below).
+    if (isAthena && (data.kind === "table" || data.kind === "view")) {
+      contextValue = `${contextValue}-noclick`;
+    }
     const node = new DbNode(connectionId, data.path, data.label, contextValue, collapsible);
     node.id = `${connectionId}#${this.genOf(connectionId)}:${data.path.join("/")}`;
     node.iconPath = data.icon
@@ -325,7 +347,10 @@ export class DatabaseTreeProvider
     if (data.tooltip) {
       node.tooltip = data.tooltip;
     }
-    if (data.kind === "table" || data.kind === "view" || data.kind === "key") {
+    // A preview is a billed, potentially terabyte-scale scan on Athena, so a
+    // stray click in the tree must not start one. Everywhere else a click
+    // previews; on Athena it only expands, and previewing is an explicit action.
+    if (!isAthena && (data.kind === "table" || data.kind === "view" || data.kind === "key")) {
       node.command = {
         command: "openDbClient.previewTable",
         title: "Preview",

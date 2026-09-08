@@ -1387,30 +1387,30 @@ Spec: `docs/BLUEPRINT_ATHENA.md`. Prior attempt preserved at `feat/athena-fat`
 (cherry-pick source, not a rebase source).
 
 ### Contract
-- [ ] [SDD][M-ATH-1] Add `"athena"` to `DatabaseType` and the seven frozen `aws*`/
+- [x] [SDD][M-ATH-1] Add `"athena"` to `DatabaseType` and the seven frozen `aws*`/
       `athena*` fields to `ConnectionConfig`, byte-identical to `feat/athena-fat`.
       `DEFAULT_PORTS.athena = 0`.
-- [ ] [SDD][M-ATH-2] Add `awsSecret`/`awsSessionToken` SecretStorage keys to `store.ts`,
+- [x] [SDD][M-ATH-2] Add `awsSecret`/`awsSessionToken` SecretStorage keys to `store.ts`,
       exact names preserved.
-- [ ] [SDD][M-ATH-3] Regression test: both saved `schemaVersion: 1` records load and
+- [x] [SDD][M-ATH-3] Regression test: both saved `schemaVersion: 1` records load and
       resolve credentials without re-entry. **Gate — nothing ships until this passes.**
 
 ### Driver
-- [ ] [SDD][M-ATH-4] `src/drivers/athena.ts` implementing `Driver`: `connect`
+- [x] [SDD][M-ATH-4] `src/drivers/athena.ts` implementing `Driver`: `connect`
       (profile / keys / ambient via `@aws-sdk/credential-providers`), `dispose`.
-- [ ] [SDD][M-ATH-5] `children()` — catalog → database → table → column, metadata APIs
+- [x] [SDD][M-ATH-5] `children()` — catalog → database → table → column, metadata APIs
       only, zero billed queries.
-- [ ] [SDD][M-ATH-6] `query()` — StartQueryExecution, backoff poll, paged
+- [x] [SDD][M-ATH-6] `query()` — StartQueryExecution, backoff poll, paged
       GetQueryResults to the row cap; populate `bytesScanned` on `QueryResult`.
-- [ ] [SDD][M-ATH-7] `tableColumns()`, `previewTable()` (explicit action only).
-- [ ] [SDD][M-ATH-8] Adopt `main`'s `cancel?(token)` signature. Do not reintroduce
+- [x] [SDD][M-ATH-7] `tableColumns()`, `previewTable()` (explicit action only).
+- [x] [SDD][M-ATH-8] Adopt `main`'s `cancel?(token)` signature. Do not reintroduce
       `Cancellable` or `capabilities.ts`.
-- [ ] [SDD][M-ATH-9] Registry case in `registry.ts`.
+- [x] [SDD][M-ATH-9] Registry case in `registry.ts`.
 
 ### Surface
-- [ ] [SDD][M-ATH-10] Form section: region, credential mode, profile / access key,
+- [x] [SDD][M-ATH-10] Form section: region, credential mode, profile / access key,
       workgroup, database, results location. No catalog, endpoint, or FIPS inputs.
-- [ ] [SDD][M-ATH-11] Tree icons + `contextValue` so a table click never auto-previews.
-- [ ] [SDD][M-ATH-12] Results footer: bytes scanned. No price estimate.
-- [ ] [SDD][M-ATH-13] Port `test/athena.test.js` for the surviving pure helpers only.
-- [ ] [SDD][M-ATH-14] `CHANGELOG.md` under `[Unreleased]`; minor bump at release.
+- [x] [SDD][M-ATH-11] Tree icons + `contextValue` so a table click never auto-previews.
+- [x] [SDD][M-ATH-12] Results footer: bytes scanned. No price estimate.
+- [x] [SDD][M-ATH-13] Port `test/athena.test.js` for the surviving pure helpers only.
+- [x] [SDD][M-ATH-14] `CHANGELOG.md` under `[Unreleased]`; minor bump at release.

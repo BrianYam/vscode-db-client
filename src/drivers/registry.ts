@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from "../connections/types";
+import { AthenaDriver } from "./athena";
 import type { Driver } from "./Driver";
 import { MySqlDriver } from "./mysql";
 import { PostgresDriver } from "./postgres";
@@ -16,6 +17,8 @@ export function createDriver(config: ConnectionConfig): Driver {
       return new SqliteDriver(config);
     case "redis":
       return new RedisDriver(config);
+    case "athena":
+      return new AthenaDriver(config);
     default:
       throw new Error(`Unsupported database type: ${(config as ConnectionConfig).type}`);
   }

@@ -213,6 +213,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
               password: await store.getPassword(config.id),
               sshPassword: await store.getSshPassword(config.id),
               sshPassphrase: await store.getSshPassphrase(config.id),
+              awsSecretAccessKey: await store.getAwsSecret(config.id),
+              awsSessionToken: await store.getAwsSessionToken(config.id),
             }
           : undefined,
       });
