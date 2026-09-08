@@ -620,15 +620,27 @@ export class AthenaDriver implements Driver {
 
   async getDDL(path: string[]): Promise<string> {
     const meta = await this.tableMetadata(path[0], path[1], path[2]);
-    const cols = (meta.Columns ?? []).map((c) => `  ${c.Name} ${c.Type}`);
-    const parts = (meta.PartitionKeys ?? []).map((c) => `  ${c.Name} ${c.Type}`);
-    const lines = [`CREATE EXTERNAL TABLE ${path[1]}.${path[2]} (`, cols.join(",\n"), ")"];
+    const col = (c: { Name?: string; Type?: string }) =>
+      `  ${qDdl(c.Name ?? "")} ${c.Type ?? "string"}`;
+    const cols = (meta.Columns ?? []).map(col);
+    const parts = (meta.PartitionKeys ?? []).map(col);
+    const lines = [
+      // Labelled approximate for the same reason the Postgres reconstruction is:
+      // this is the SHAPE of the table, not a statement that would recreate it.
+      // The SerDe, row format and table properties Athena needs are not in the
+      // metadata we read, so pretending otherwise would hand the user DDL that
+      // looks runnable and is not.
+      "-- Reconstructed from table metadata (approximate — no SerDe or row format)",
+      `CREATE EXTERNAL TABLE ${qDdl(path[1])}.${qDdl(path[2])} (`,
+      cols.join(",\n"),
+      ")",
+    ];
     if (parts.length) {
       lines.push(`PARTITIONED BY (\n${parts.join(",\n")}\n)`);
     }
     const location = meta.Parameters?.location;
     if (location) {
-      lines.push(`LOCATION '${location}'`);
+      lines.push(`LOCATION ${hiveStr(location)}`);
     }
     return lines.join("\n");
   }
@@ -659,6 +671,27 @@ function sleep(ms: number): Promise<void> {
 function q(ident: string): string {
   // Trino quotes identifiers with double quotes; embedded quotes double up.
   return `"${ident.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Identifier quoting for Athena DDL, which is HIVE syntax and quotes with
+ * BACKTICKS — not the double quotes `q()` emits for Trino DML. Athena splits
+ * the two: DDL like CREATE EXTERNAL TABLE goes to Hive, SELECT goes to Trino.
+ * Reusing q() here would look correct and emit DDL Athena rejects, so the two
+ * quoters stay separate on purpose. A literal backtick is doubled.
+ */
+export function qDdl(ident: string): string {
+  return "`" + ident.replace(/`/g, "``") + "`";
+}
+
+/**
+ * String literal for Hive DDL, which escapes with a BACKSLASH rather than by
+ * doubling the quote as Trino does — so `lit()` is wrong here for the same
+ * reason `q()` is. Reached by S3 locations, and an S3 key may legally contain
+ * a quote or a backslash.
+ */
+export function hiveStr(v: string): string {
+  return `'${v.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
 function lit(v: string): string {

@@ -6,7 +6,9 @@ const {
   AthenaDriver,
   describeDml,
   formatBytes,
+  hiveStr,
   pageSize,
+  qDdl,
   stripHeaderRow,
 } = require("../out/drivers/athena.js");
 
@@ -204,4 +206,26 @@ test("Athena declines countRows rather than answering 0", () => {
   // that cannot answer cheaply omits it and callers guard.
   const d = new AthenaDriver(SAVED_PROFILE_MODE);
   assert.strictEqual(d.countRows, undefined);
+});
+
+// ---- DDL quoting (Copilot review, PR #9) ----------------------------------
+
+test("DDL identifiers are quoted with BACKTICKS, not Trino double quotes", () => {
+  // Athena splits its dialects: CREATE EXTERNAL TABLE is Hive, SELECT is Trino.
+  // Emitting q()'s double quotes here would look right and be rejected.
+  assert.strictEqual(qDdl("reports_parquet"), "`reports_parquet`");
+  assert.strictEqual(qDdl("Mixed-Case Name"), "`Mixed-Case Name`");
+  // A reserved word is exactly the case backticks exist for.
+  assert.strictEqual(qDdl("table"), "`table`");
+});
+
+test("a literal backtick in an identifier is doubled, not dropped", () => {
+  assert.strictEqual(qDdl("we`ird"), "`we``ird`");
+});
+
+test("Hive string literals escape with a backslash, not by doubling", () => {
+  assert.strictEqual(hiveStr("s3://bucket/prefix/"), "'s3://bucket/prefix/'");
+  // An S3 key may legally contain either of these.
+  assert.strictEqual(hiveStr("s3://b/it's"), "'s3://b/it\\'s'");
+  assert.strictEqual(hiveStr("s3://b/a\\b"), "'s3://b/a\\\\b'");
 });

@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The SDK is imported at module scope, so it loads for every user rather than
   only Athena users; leaving the floor at 1.85 would have claimed support for
   builds where the whole extension could fail to activate.
+- Athena `getDDL()` now quotes identifiers and escapes the S3 location. It uses
+  **backticks**, because Athena's DDL is Hive while its SELECT is Trino — the
+  driver's existing `q()`/`lit()` are the Trino pair and would emit DDL Athena
+  rejects. Output is also labelled approximate, as the Postgres reconstruction
+  already is: it is the shape of the table, not a runnable statement.
 - `countRows()` is now **optional** on `Driver`. Athena does not implement it:
   counting there means a full table scan, and returning `0` reads as "empty
   table" and would quietly break any pager that trusted it. Callers must guard,
