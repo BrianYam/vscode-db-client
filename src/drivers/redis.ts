@@ -55,6 +55,9 @@ export function scanPattern(filter?: string): string | undefined {
 /** Redis driver backed by ioredis. Queries are raw command lines, e.g. "GET foo". */
 export class RedisDriver implements Driver {
   private client?: Redis;
+  /** Tokens of runs `cancel()` has abandoned, so a pending `query()` knows not
+   *  to hand back a reply the user has already walked away from. */
+  private abandoned = new Set<string>();
 
   constructor(public readonly config: ConnectionConfig) {}
 
@@ -87,6 +90,18 @@ export class RedisDriver implements Driver {
   async dispose(): Promise<void> {
     this.client?.disconnect();
     this.client = undefined;
+  }
+
+  /**
+   * False on purpose: ioredis cannot cancel an in-flight command, and killing
+   * the client connection to stop one would take the whole panel down with it.
+   * `cancel()` here only stops *us* waiting — a slow KEYS still runs on the
+   * server — so the UI must say "stop waiting", not "abort".
+   */
+  readonly canCancel = false;
+
+  async cancel(token: string): Promise<void> {
+    this.abandoned.add(token);
   }
 
   private get c(): Redis {
@@ -240,7 +255,7 @@ export class RedisDriver implements Driver {
     });
   }
 
-  async query(sql: string, database?: string): Promise<QueryResult> {
+  async query(sql: string, database?: string, token?: string): Promise<QueryResult> {
     const parts = tokenize(sql.trim());
     if (parts.length === 0) {
       return { columns: [], rows: [], rowCount: 0, message: "Empty command" };
@@ -249,8 +264,21 @@ export class RedisDriver implements Driver {
       await this.c.select(Number(database));
     }
     const [cmd, ...args] = parts;
-    const raw = await this.c.call(cmd, ...args);
-    return formatReply(raw);
+    try {
+      const raw = await this.c.call(cmd, ...args);
+      // Abandoned while we were waiting: the server finished (or is still going)
+      // either way, so the only honest thing left is to not paint a stale grid.
+      if (token && this.abandoned.has(token)) {
+        throw new Error("Stopped waiting for the command.");
+      }
+      return formatReply(raw);
+    } finally {
+      // Clear the mark either way, so a command that failed on its own does not
+      // leave a token behind for the next run to trip over.
+      if (token) {
+        this.abandoned.delete(token);
+      }
+    }
   }
 
   async previewTable(path: string[]): Promise<QueryResult> {

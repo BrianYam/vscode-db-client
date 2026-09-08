@@ -31,8 +31,18 @@ export class ConnectionStore {
   }
 
   async save(config: ConnectionConfig, secrets: Secrets = {}): Promise<void> {
-    const list = this.all().filter((c) => c.id !== config.id);
-    list.push({ ...config, schemaVersion: CURRENT_SCHEMA_VERSION });
+    const list = this.all();
+    const stamped = { ...config, schemaVersion: CURRENT_SCHEMA_VERSION };
+    const at = list.findIndex((c) => c.id === config.id);
+    // Replace in place rather than remove-and-append. List order is deliberate
+    // user state — `reorder()` exists precisely so connections can be dragged
+    // into an order that means something — and appending on every edit silently
+    // threw that away, sending the connection you just edited to the bottom.
+    if (at >= 0) {
+      list[at] = stamped;
+    } else {
+      list.push(stamped);
+    }
     await this.ctx.globalState.update(KEY, list);
     await this.storeSecret(secretKey(config.id), secrets.password);
     await this.storeSecret(sshPwKey(config.id), secrets.sshPassword);

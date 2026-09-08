@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { type QueryResult as PgResult, Pool } from "pg";
 import { type ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
 import type {
   ColumnMeta,
@@ -26,6 +26,9 @@ const CS_KEY = "\u0000cs";
 export class PostgresDriver implements Driver {
   private pools = new Map<string, Pool>();
   private password?: string;
+  /** Backend PID + pool per in-flight run, keyed by the caller's token. One
+   *  driver instance serves every panel on the connection, so this is a map. */
+  private inFlight = new Map<string, { pid?: number; dbKey: string }>();
 
   constructor(public readonly config: ConnectionConfig) {}
 
@@ -42,6 +45,22 @@ export class PostgresDriver implements Driver {
   async dispose(): Promise<void> {
     await Promise.all([...this.pools.values()].map((p) => p.end().catch(() => undefined)));
     this.pools.clear();
+  }
+
+  /**
+   * `pg_cancel_backend` asks the server to stop the statement, which is a real
+   * cancellation rather than us walking away from the reply.
+   */
+  readonly canCancel = true;
+
+  async cancel(token: string): Promise<void> {
+    const target = this.inFlight.get(token);
+    if (target?.pid === undefined) {
+      return;
+    }
+    // Deliberately a separate connection: the one running the query is blocked
+    // on it and cannot carry the cancel request.
+    await this.poolFor(target.dbKey).query("SELECT pg_cancel_backend($1)", [target.pid]);
   }
 
   private makePool(key: string): Pool {
@@ -288,10 +307,34 @@ export class PostgresDriver implements Driver {
     }));
   }
 
-  async query(sql: string, database?: string): Promise<QueryResult> {
+  /**
+   * `query()` runs on an explicitly checked-out client, not `pool.query()`, for
+   * one reason: cancellation. A pooled query hands back an anonymous client and
+   * never exposes its backend PID, so there is nothing to cancel. Holding the
+   * client lets us record `processID` and ask a *second* connection to cancel it.
+   * Previews and metadata calls keep using `pool.query` — they are short and the
+   * checkout would be pure overhead.
+   */
+  async query(sql: string, database?: string, token?: string): Promise<QueryResult> {
     const dbKey = database || this.entryKey();
     const pool = this.poolFor(dbKey);
-    const res = await pool.query(sql);
+    const client = await pool.connect();
+    // `processID` is set by pg from the backend key-data message but is missing
+    // from @types/pg's PoolClient, hence the narrow cast rather than `any`.
+    const pid = (client as unknown as { processID?: number }).processID;
+    // Cancelling needs a free slot in the same pool, so record where to send it.
+    if (token) {
+      this.inFlight.set(token, { pid: pid ?? undefined, dbKey });
+    }
+    let res: PgResult;
+    try {
+      res = await client.query(sql);
+    } finally {
+      if (token) {
+        this.inFlight.delete(token);
+      }
+      client.release();
+    }
     const result: QueryResult = {
       columns: res.fields?.map((f) => f.name) ?? [],
       rows: (res.rows as Array<Record<string, unknown>>) ?? [],

@@ -7,6 +7,7 @@ import {
   type ConnectionConfig,
   type DatabaseType,
   DEFAULT_PORTS,
+  NOTES_MAX_CHARS,
   type SshAuth,
 } from "../connections/types";
 import { createDriver } from "../drivers/registry";
@@ -14,6 +15,7 @@ import { createDriver } from "../drivers/registry";
 interface FormPayload {
   type: DatabaseType;
   name: string;
+  notes?: string;
   host?: string;
   port?: number;
   username?: string;
@@ -108,6 +110,9 @@ export class ConnectionFormPanel {
       id: this.existing?.id ?? newId(),
       type: payload.type,
       name: payload.name.trim(),
+      // Capped here because this is the single funnel every save goes through;
+      // the form's counter warns first, so this is a backstop, not the UX.
+      notes: payload.notes?.trim().slice(0, NOTES_MAX_CHARS) || undefined,
       host: payload.host?.trim() || undefined,
       port: payload.port,
       username: payload.username?.trim() || undefined,
@@ -240,6 +245,8 @@ export class ConnectionFormPanel {
     const initial = JSON.stringify({
       type: e?.type ?? "postgres",
       name: e?.name ?? "",
+      notes: e?.notes ?? "",
+      notesMax: NOTES_MAX_CHARS,
       host: e?.host ?? "127.0.0.1",
       port: e?.port ?? DEFAULT_PORTS.postgres,
       username: e?.username ?? "",
@@ -290,6 +297,16 @@ export class ConnectionFormPanel {
             color: var(--vscode-errorForeground, #f85149); }
   label { display: block; font-size: 12px; margin-bottom: 6px; opacity: .8; }
   label .opt { opacity: .5; font-weight: 400; }
+  textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 56px;
+             font-family: inherit; font-size: 13px; padding: 6px 8px;
+             background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+             border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; }
+  /* The warning is not decorative: a free-text box is where people paste
+     credentials, and this field is neither encrypted nor redacted on export. */
+  .notehint { display: flex; gap: 8px; align-items: baseline; font-size: 11px;
+              opacity: .65; margin: 4px 0 2px; }
+  .notehint #notesCount { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .notehint #notesCount.over { color: var(--vscode-editorWarning-foreground); opacity: 1; }
   .req::before { content: "*"; color: var(--vscode-errorForeground); margin-right: 5px; }
   input[type=text], input[type=password], input[type=number] {
     width: 100%; height: 34px; padding: 0 12px; border-radius: var(--r); font-size: 13px;
@@ -375,6 +392,13 @@ export class ConnectionFormPanel {
 
     <label class="req">Name</label>
     <input type="text" id="name" placeholder="my-database" />
+
+    <label>Notes <span class="opt">(optional)</span></label>
+    <textarea id="notes" rows="3" placeholder="What is this connection for? e.g. read-replica — safe to query, writes go to primary"></textarea>
+    <div class="notehint">
+      <span id="notesCount"></span>
+      <span>Stored unencrypted with the connection and included in exports — don't put passwords here.</span>
+    </div>
 
     <div class="slabel">Server Type</div>
     <div class="types" id="types">
@@ -527,6 +551,7 @@ export class ConnectionFormPanel {
 
     // hydrate
     $('name').value = state.name;
+    $('notes').value = state.notes;
     $('host').value = state.host;
     $('port').value = state.port;
     $('username').value = state.username;
@@ -625,12 +650,25 @@ export class ConnectionFormPanel {
     $('portMinus').addEventListener('click', () => $('port').value = Math.max(0, Number($('port').value||0) - 1));
     $('portPlus').addEventListener('click', () => $('port').value = Number($('port').value||0) + 1);
     $('browseBtn').addEventListener('click', () => vscode.postMessage({ type:'browse', field:'filePath' }));
+    // Notes counter. Only appears once the note is long enough to be worth
+    // watching, and turns warning-coloured past the cap — the save trims, so the
+    // user is told before it happens rather than after.
+    function syncNotesCount(){
+      const n = $('notes').value.length, max = state.notesMax, el = $('notesCount');
+      const over = n > max;
+      el.textContent = (over || n > max * 0.75) ? (n + ' / ' + max) : '';
+      el.classList.toggle('over', over);
+    }
+    $('notes').addEventListener('input', syncNotesCount);
+    syncNotesCount();
+
     $('closeBtn').addEventListener('click', () => vscode.postMessage({ type:'close' }));
 
     function payload() {
       return {
         type: state.type,
         name: $('name').value,
+        notes: $('notes').value,
         host: $('host').value,
         port: Number($('port').value) || undefined,
         username: $('username').value,

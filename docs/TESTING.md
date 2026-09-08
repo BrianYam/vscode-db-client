@@ -190,6 +190,64 @@ Teardown: `docker rm -f odbc-redis`
 
 ---
 
+## Part 7 — Large / awkward data fixtures (M31, M32, M33)
+
+Some checks need data you would not have lying around: 50,000 rows to prove the grid
+render cap, a 5 MB JSON document, a 5,000-element array, and a payload full of quotes and
+`<script>` tags. Two seed scripts build all of it. Both are **safe to re-run** (they drop
+and recreate their tables) and both have been run end to end against the containers below.
+
+**Do not load these into a real or staging database** — 50,000 rows and a 5 MB document
+are deliberately abusive. Use a throwaway container.
+
+### PostgreSQL
+```bash
+docker run --name odbc-qa -e POSTGRES_USER=shortcut -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=qa -p 55432:5432 -d postgres:16
+sleep 5
+PGPASSWORD=test psql -h 127.0.0.1 -p 55432 -U shortcut -d qa -f scripts/qa-fixtures.sql
+```
+Connect the extension to `127.0.0.1:55432`, user `shortcut`, password `test`, database `qa`.
+
+### MySQL
+```bash
+docker run --name odbc-qa-my -e MYSQL_ROOT_PASSWORD=test -e MYSQL_DATABASE=qa \
+  -p 53306:3306 -d mysql:8
+sleep 20
+docker exec -i odbc-qa-my mysql -uroot -ptest qa < scripts/qa-fixtures.mysql.sql
+```
+
+### What the fixtures are for
+
+`qa_big_rows` — 50,000 rows with a JSON column.
+- **M32**: `SELECT * FROM qa_big_rows;` must render instantly and show
+  *"Showing the first 2,000 of 50,000 rows"*. Export CSV and Copy as JSON must still
+  cover all 50,000.
+- **M31**: big enough that Abort has something to cancel. `SELECT pg_sleep(30);` (or
+  `SELECT SLEEP(30);`) is the cleaner abort test.
+
+`qa_json` — one row per JSON edge case, each labelled with what it is for.
+
+| Label | Checks |
+|---|---|
+| small object | tree opens expanded to depth 2 |
+| empty object / empty array | chip reads `{}` / `[]` |
+| deep nesting | collapsed past depth 2, expands on click |
+| null document | no chip, no `⤢` |
+| array of 5000 | node cap: 1,000 rows + *"Showing the first 1,000 of 5,000"* |
+| object with 3000 keys | the same cap on the object branch (Postgres only) |
+| ~5 MB document | opens on **Raw** with an explanation, does not freeze |
+| hostile payload | quotes, `'`, `<script>`, `<img onerror>`, `&`, unicode — all must render as literal text |
+| not JSON despite the brace | stays plain text, no chip |
+
+The `ts` and `blob` columns are there on purpose: both are `typeof 'object'` in the
+webview, and must render normally rather than as an empty JSON document.
+
+### Cleanup
+```bash
+docker rm -f odbc-qa odbc-qa-my
+```
+
 ## QA Gate checklist (maps to `task.md`)
 
 - [ ] SQLite: open sample.db → browse → SELECT works

@@ -1037,3 +1037,346 @@ config was not.
       switch back and forth — each returns with its own model and key status;
       a custom endpoint keeps its typed base URL and LiteLLM mapping; a
       never-configured preset still shows its default model
+
+## M31 — Query run indication & abort (requested 2026-09-08)
+
+Spec: `DISCOVERY_QUERY_RUN_UX.md` (§5 locked 2026-09-08 — shared braille spinner on the
+Run button, danger-styled Abort beside Run, **true** server-side cancel on Postgres/MySQL,
+no Abort at all on SQLite, "Stop waiting" on Redis, one query in flight per panel).
+
+### M31.0 — Shared spinner ✅ DONE 2026-09-08 (Discovery §3.1)
+- [x] `[SDD][M31]` Extract the AI bar's spinner into `makeSpinner(el, label)` in the
+      webview script — same `AI_FRAMES`, 120ms interval, elapsed-seconds format;
+      `stop()` still returns the elapsed total
+- [x] `[SDD][M31]` Refactor `aiSpinStart`/`aiSpinStop` onto it; AI bar behaviour unchanged
+- [x] `[SDD][M31]` Run button animates in place while running (`⠋ Running… 4s`), armed on
+      a 150ms delay so fast queries never flicker
+
+### M31.1 — Driver cancellation contract ✅ DONE 2026-09-08 (Discovery §3.3)
+- [x] `[SDD][M31]` `Driver.cancel?(): Promise<void>` + `readonly canCancel?: boolean` in
+      `Driver.ts`, documented as optional the way `setTtl?` is
+- [x] `[SDD][M31]` **postgres**: `query()` onto a checked-out client (`pool.connect()` →
+      record `client.processID` → `finally release()`); `cancel()` runs
+      `SELECT pg_cancel_backend($1)` on a second connection; `canCancel = true`
+- [x] `[SDD][M31]` **mysql**: `query()` onto `pool.getConnection()` → record
+      `conn.threadId` → `finally release()`; `cancel()` runs `KILL QUERY <threadId>` on a
+      second connection; `canCancel = true`
+- [x] `[SDD][M31]` **redis**: `cancel()` abandons the in-flight call only;
+      `canCancel = false`
+- [x] `[SDD][M31]` **sqlite**: no `cancel()` — synchronous WASM blocks the host thread
+      (Discovery §2 Finding A). Comment says *why*, so it is not re-litigated later
+
+### M31.2 — Abort control ✅ DONE 2026-09-08 (Discovery §3.2)
+- [x] `[SDD][M31]` `#abortBtn` immediately right of `#runBtn`; hidden when idle; danger
+      style from `--vscode-inputValidation-errorBackground` so it reads red in every theme
+- [x] `[SDD][M31]` Host advertises `canAbort` at panel open; SQLite panels never render
+      the button; Redis renders it labelled `■ Stop waiting` with a status line saying the
+      server may still be working
+- [x] `[SDD][M31]` Esc aborts while a query is running (autocomplete already
+      `stopPropagation()`s its own Esc, so the two cannot collide)
+
+### M31.3 — Run/abort state machine ✅ DONE 2026-09-08 (Discovery §3.4)
+- [x] `[SDD][M31]` Monotonic `runSeq` on the host; `result`/`error` echo it; the webview
+      drops responses from a superseded run
+- [x] `[SDD][M31]` `abort` message type → `handleAbort()` → `driver.cancel?.()` guarded
+- [x] `[SDD][M31]` One query in flight per panel: Run disabled while running; composes
+      with the M23 query lock (unlocking must not re-enable Run mid-flight)
+- [x] `[SDD][M31]` Aborted run reports `Aborted after 12.4s.` as plain status, not an
+      error — the user asked for it
+
+### M31.4 — Human QA gate (Phase 4) 🟡 code done 2026-09-08, manual QA open
+- [ ] `[SDD][M31]` Postgres: `SELECT pg_sleep(30)` → Abort → query stops server-side
+      (verify with `pg_stat_activity`, not just the UI)
+- [ ] `[SDD][M31]` MySQL: `SELECT SLEEP(30)` → Abort → gone from `SHOW PROCESSLIST`
+- [ ] `[SDD][M31]` Race: Abort a query that completes in the same instant — no stale grid
+      paint, no double status line
+- [ ] `[SDD][M31]` SQLite panel shows no Abort button; Redis shows `■ Stop waiting`
+- [ ] `[SDD][M31]` Regression: 50ms query shows no spinner flicker; query lock still
+      blocks Run; Ctrl/Cmd+Enter, highlight-to-run, and the AI bar spinner all unchanged
+- [ ] `[SDD][M31]` Two panels on the *same* connection, both running: aborting one must
+      not cancel the other (the run-token fix — see Discovery §2 Finding B)
+- [ ] `[SDD][M31]` Abort a query the server refuses to stop: panel releases after 8s with
+      "Cancel sent, but the query has not stopped yet"
+- [ ] `[SDD][M31]` Re-run the QA above only after M32 lands — a large result froze the
+      panel before Abort could be exercised at all
+
+## M32 — Grid render cap (hang, reported 2026-09-08)
+
+Found during M31.4 QA: `select * from price_ticks LIMIT 50000` froze the whole window.
+**Not an M31 regression** — `renderGrid`/`computeView` are untouched by M31 (`git diff`
+shows zero changes there); the panel has never capped what it paints.
+
+Cause: `renderGrid()` builds one HTML string for every returned row and assigns it to
+`innerHTML`. At 50k rows x 7 columns that is ~40 MB of HTML and ~400k DOM elements
+(measured), which blocks the webview thread outright. Because the thread never yields,
+the browser never repaints — which is why the spinner in the report is frozen mid-word at
+"Running… 0s" even though the query had already returned. The Abort button cannot help
+here: the freeze is in the *render*, after the query completed.
+
+### M32.0 — Cap what the grid paints ✅ DONE 2026-09-08
+- [x] `[SDD][M32]` `RENDER_CAP = 2000` painted rows (measured: 1.6 MB / 16k cells, instant;
+      50k = 40 MB / 400k cells, hangs). Rows stay in memory — only painting is capped
+- [x] `[SDD][M32]` `cappedView()` is the single source for both the painted grid and
+      select-all, so the two cannot drift
+- [x] `[SDD][M32]` Select-all means the *painted* rows — otherwise Delete would reach rows
+      that were never shown
+- [x] `[SDD][M32]` Honest scope note: "Showing the first 2,000 of 50,000 rows — add a LIMIT
+      or filter to narrow it; Export and Copy still cover all 50,000."
+- [x] `[SDD][M32]` Search/match counts report against the full filtered set, not the cap
+
+### M32.1 — QA  *(fixtures: `scripts/qa-fixtures.sql` → `qa_big_rows`, 50k rows)*
+- [ ] `[SDD][M32]` `select * from <big table> LIMIT 50000` renders instantly, no freeze,
+      scope note visible and accurate
+- [ ] `[SDD][M32]` Export CSV/JSON and Copy as JSON still return all 50,000 rows
+- [ ] `[SDD][M32]` Select-all + Delete only ever touches painted rows
+- [ ] `[SDD][M32]` Regression: 100-row previews and Redis key lists show no scope note
+
+### M32.2 — Known gap (not fixed here)
+- [ ] `[SDD][M32]` The *fetch* is still uncapped: a bare `SELECT *` on a huge table pulls
+      every row into extension-host memory and ships it over postMessage before the cap
+      applies. Painting is now safe; memory is not. Needs a host-side row ceiling with the
+      same honesty note — separate change, own discovery
+
+## M33 — JSON viewer for JSONB columns (requested 2026-09-08)
+
+Spec: `DISCOVERY_JSON_VIEWER.md` (§5 locked 2026-09-08 — value-shaped detection, viewer
+on any result not just editable ones, summary chip in the grid, Tree + Raw tabs hand-rolled
+under the CSP, editing stays on Raw, bounded by a node cap).
+
+
+**Build notes.** Two things the spec did not anticipate:
+- *Where the helpers live.* `jsonShape` has to run **in** the webview (per cell, per
+  render), so the `miniMarkdown` precedent — pure logic on the host, HTML injected — does
+  not apply. Injecting the functions via `Function.prototype.toString()` is a trap: the
+  shipped build minifies (`vscode:prepublish` → `--production`), so any module-scope
+  reference would pass typecheck and tests and then throw only in the packaged extension.
+  They ship instead as a source **string** (`src/webview/jsonView.ts`), which the minifier
+  passes through untouched — verified in `dist/extension.js` after `--production` — and
+  the test evaluates that same string, so what is tested is what ships.
+- *Dates and byte arrays are objects too.* `typeof v === 'object'` alone renders every
+  Postgres timestamp as `{}` and every `bytea` as a document. Both survive
+  `structuredClone` into the webview, so `jsonShape` excludes `Date` and `ArrayBuffer`
+  views explicitly; there is a regression test for exactly this.
+
+### M33.0 — Detection helper ✅ DONE 2026-09-08 (Discovery §3.1)
+- [x] `[SDD][M33]` `jsonShape(v)` → `null | {kind,count,value}`: real objects/arrays, plus
+      strings that trim to `{`/`[` and `JSON.parse`. Exported for test
+- [x] `[SDD][M33]` Tests: object, array, empty object/array, JSON string (SQLite/Redis
+      shape), non-JSON string starting with `{`, null/undefined, number, deeply nested
+
+### M33.1 — Grid cell summary ✅ DONE 2026-09-08 (Discovery §3.2)
+- [x] `[SDD][M33]` JSON cells render a summary chip (`{…} 12 keys` / `[…] 40 items` /
+      `{}` / `[]`) instead of minified text — fixes one cell blowing out the row
+- [x] `[SDD][M33]` `⤢` affordance rendered whenever the cell holds JSON, **independent of
+      `editable`** (Discovery §2 Finding A — today's 🔍 is missing on JOINs/views entirely)
+- [x] `[SDD][M33]` Regression: `cellText()` unchanged, so search / column filters / sort
+      still match against the full JSON text
+
+### M33.2 — Tree viewer ✅ DONE 2026-09-08 (Discovery §3.3)
+- [x] `[SDD][M33]` Modal gains Tree / Raw tabs, replacing the `#mfmt` plain/json select
+- [x] `[SDD][M33]` Collapsible nodes; collapsed past depth 2 on open; type colouring from
+      VS Code theme tokens (string/number/boolean/null/key)
+- [x] `[SDD][M33]` Per-node copy value + copy path (`$.items[3].sku`) via the existing host
+      `copy` message, so the size gate still applies
+- [x] `[SDD][M33]` Key/value filter box dims non-matching nodes
+
+### M33.3 — Safety & bounds ✅ DONE 2026-09-08 (Discovery §3.5, §3.6)
+- [x] `[SDD][M33]` **Escaping**: JSON keys/values never reach an HTML attribute — node
+      identity is a JS-side index, text goes through text nodes; `escAttr()` (adds `"`/`'`
+      to `esc()`) where an attribute is unavoidable. Review this hardest
+- [x] `[SDD][M33]` Lazy expansion; `JSON_NODE_CAP = 1000` children per expansion with an
+      honest inline note naming the true count
+- [x] `[SDD][M33]` Documents over ~2 MB open on Raw with a one-line explanation, no tree
+
+### M33.4 — Editing ✅ DONE 2026-09-08 (Discovery §3.4)
+- [x] `[SDD][M33]` Save stays on the Raw tab and is disabled on Tree; existing round-trip
+      (string bound as a parameter, engine casts to jsonb) is unchanged
+- [x] `[SDD][M33]` Optimistic update writes back a string where the original was an object
+      — re-render the cell from the parsed value so the chip stays correct after a save
+
+### M33.6 — Viewer fixes ✅ DONE 2026-09-08 (reported in QA)
+- [x] `[SDD][M33]` **Modal painted under the grid header.** `#overlay` had no `z-index` at
+      all, so the sticky `th` (z-index 3), the filter row (2) and the completion dropdown
+      (50) all painted over it. Overlay + add-row overlay now sit at 100.
+      **Pre-existing** — the Edit Data modal had the same defect; the JSON tree just made
+      it impossible to miss
+- [x] `[SDD][M33]` **Escape did not close the modal** — there was never a handler. Added,
+      with explicit precedence: completion dropdown (stops propagation) → open modal →
+      abort a running query. Closing what is in front of you is never the surprising choice
+- [x] `[SDD][M33]` Inline cell editor's Escape now `stopPropagation()`s, matching the
+      dropdowns — cancelling an edit could otherwise also abort a running query
+- [x] `[SDD][M33]` `#modal.json` widens to `min(980px, 94vw)`: nested keys plus a long
+      string value wrapped badly at 680px. Plain Edit Data keeps its original width
+
+### M33.5 — Human QA gate (Phase 4) 🟡 code done 2026-09-08, manual QA open
+*(fixtures: `scripts/qa-fixtures.sql` / `.mysql.sql` → `qa_json`, one row per case;
+setup in `docs/TESTING.md` Part 7. Both scripts run end to end, verified 2026-09-08.)*
+- [ ] `[SDD][M33]` Postgres jsonb + json columns; MySQL JSON column; SQLite TEXT holding
+      JSON; Redis string holding JSON — all four open the tree
+- [ ] `[SDD][M33]` A JOIN returning jsonb (non-editable result) still offers the viewer
+- [ ] `[SDD][M33]` A 5 MB document opens on Raw without freezing the panel
+- [x] `[SDD][M33]` Hostile payload: keys/values containing `"`, `'`, `<script>`, `&` render
+      as text and break nothing — **pre-verified 2026-09-08**: the fixture's real payload
+      was pushed through the actual `buildNode` against a DOM stub; zero `innerHTML`
+      assignments during the tree build, and `<script>`, `<img`, `onerror`, `onmouseover`
+      all present only as text-node content. Worth a visual confirm too
+- [ ] `[SDD][M33]` Edit a jsonb value on Raw → saves; malformed JSON → engine error shown
+- [ ] `[SDD][M33]` Regression: non-JSON columns unchanged; M32 scope note still accurate
+- [ ] `[SDD][M33]` Escape closes the JSON modal; a second Escape aborts a still-running
+      query; Escape in an inline cell edit cancels only the edit
+- [ ] `[SDD][M33]` Modal renders above the sticky grid header at every scroll position
+- [ ] `[SDD][M33]` Perf sanity: a SQLite/Redis text column of large JSON strings re-parses
+      on every render (search keystrokes included). Bounded by the M32 2,000-row cap and
+      fine in principle — confirm it feels responsive on a real table
+
+## M34 — Optional description / notes per connection (requested 2026-09-08)
+
+Spec: `DISCOVERY_CONNECTION_NOTES.md` (§5 locked 2026-09-08 — optional `notes` capped at
+2,000 chars, no schema migration, added to the import allowlist, honest about being stored
+and exported in the clear, plain-string tooltip only).
+
+
+**Build note — the cap needed a second home.** §3.1 put the 2,000-character cap in
+`toConfig()`, "the one funnel". It is not: **import never passes through the form**, so an
+export file — untrusted input — could have put a multi-megabyte note straight into
+globalState. The cap is now applied in `sanitize()` too, and reports the truncation as an
+import warning rather than trimming in silence. Verified end to end: the field survives
+export spread → import allowlist → `mergeConnections` spread → saved config, and
+`store.save`/`upcast` pass it through untouched, so §5.2's "no migration" holds as checked
+rather than assumed.
+
+### M34.0 — Data & form ✅ DONE 2026-09-08 (Discovery §3.1, §3.2)
+- [x] `[SDD][M34]` `notes?: string` on `ConnectionConfig`; documented as plaintext in
+      `globalState`, unlike password/ssh secrets which live in SecretStorage
+- [x] `[SDD][M34]` **No** `CURRENT_SCHEMA_VERSION` bump and no `migrate()` branch — an
+      absent optional field needs neither. Note the reasoning so it is not "fixed" later
+- [x] `[SDD][M34]` `<textarea>` under Name, `Notes (optional)`, with the one-line warning:
+      stored unencrypted with the connection and included in exports
+- [x] `[SDD][M34]` 2,000-character cap enforced in `toConfig()` with a live counter in the
+      form — surfaced, never silently truncated
+
+### M34.1 — Where it shows ✅ DONE 2026-09-08 (Discovery §3.3)
+- [x] `[SDD][M34]` Tree connection node `tooltip` (the node has none today) — a plain
+      `string`, **never** a `MarkdownString`: markdown tooltips render links including
+      `command:` URIs, and this is user-supplied text
+- [x] `[SDD][M34]` Appended to the query panel's `contextTooltip()` so it is in reach while
+      writing SQL
+- [x] `[SDD][M34]` `description` stays the engine name — notes do not go on that line
+
+### M34.2 — Portability ✅ DONE 2026-09-08 (Discovery §3.4, Finding A)
+- [x] `[SDD][M34]` Add `notes` to `STRING_FIELDS` in `portability.ts` — export uses a blind
+      spread and includes it automatically, while import is allowlisted and would **drop
+      it silently**. Without this, export → import loses every note with no warning
+- [x] `[SDD][M34]` Test in `portability.test.js`: notes survive a full round-trip; a note
+      longer than the cap is handled; a non-string `notes` in an import file is rejected
+- [x] `[SDD][M34]` The export-without-secrets confirmation names notes among the file's
+      contents, so its promise stays true (Finding B)
+
+### M34.4 — Editing a connection sent it to the bottom of the tree ✅ DONE 2026-09-08
+Found while QA-ing M34; **pre-existing, not an M34 regression** — `store.ts` is untouched
+by this milestone (`git diff` is empty for it).
+
+`save()` did `all().filter(c => c.id !== config.id)` then `push(...)`, so *every* edit
+removed the entry and re-appended it. That silently discarded list order — which is
+deliberate user state, since `reorder()` exists precisely so connections can be dragged
+into a meaningful arrangement.
+
+- [x] `[SDD][M34]` `save()` replaces in place when the id already exists; only a genuinely
+      new connection is appended
+- [x] `[SDD][M34]` `test/connectionStore.test.js` — new: `store.ts` imports vscode as a
+      *type* only, so it runs against a fake context. Covers position on edit, on rename,
+      append-if-new, schema stamping, notes round-trip, and repeated edits. **Verified the
+      tests fail against the old code** (3 of 6 fail) before restoring the fix
+
+### M34.3 — Human QA gate (Phase 4) 🟡 code done 2026-09-08, manual QA open
+- [x] `[SDD][M34]` Add a note, reopen the form → it is still there; clear it → it goes
+- [x] `[SDD][M34]` Hover the connection in the tree → note shows; a note containing
+      `[click](command:workbench.action.quit)` renders as literal text, not a link
+- [x] `[SDD][M34]` Export with secrets omitted → re-import → notes intact
+- [x] `[SDD][M34]` A pre-existing connection saved before this change still loads and
+      edits fine with no note
+- [x] `[SDD][M34]` Paste 5,000 characters → counter warns, cap applies visibly
+- [x] `[SDD][M34]` Import a file whose note exceeds the cap → truncated *and* a warning is
+      shown in the import summary
+
+## M35 — Column picker (show / hide result columns) (requested 2026-09-08)
+
+Spec: `DISCOVERY_COLUMN_PICKER.md` (§5 locked 2026-09-08 — `Columns ▾` dropdown with
+search and Show all, everything visible by default, per-consumer behaviour explicit,
+export reports the count, no persistence across reopens).
+
+
+**Build note — a backtick nearly shipped a broken helper.** The first draft of
+`columnView.ts` used a backtick inside the `String.raw` comment, which silently split the
+literal into `String.raw\`…\` + "…" + \`…\`` — a *normal* template literal for the tail, so
+`'\n'` in `columnsKey` became a raw newline and the helper stopped parsing. Typecheck
+passed throughout; only evaluating the emitted string caught it. The source strings are now
+checked by parsing them in their tests, and the same class of bug bit a webview comment in
+`queryPanel.ts` (comments inside the HTML template must not contain backticks).
+
+### M35.0 — Pure logic ✅ DONE 2026-09-08 (Discovery §3.5)
+- [x] `[SDD][M35]` `visibleColumns(all, hidden)` + `projectRows(rows, columns)` in a small
+      exported module, shipped into the webview as a source string — same reason as
+      `jsonView.ts`: it runs in the webview and the shipped build minifies
+- [x] `[SDD][M35]` Tests: nothing hidden, some hidden, unknown names in the hidden set,
+      order preserved, projection drops only the hidden keys
+
+### M35.1 — The control ✅ DONE 2026-09-08 (Discovery §3.1, §3.2)
+- [x] `[SDD][M35]` `Columns ▾` button in the results toolbar, left of Export; label shows
+      `Columns 5/9` whenever anything is hidden — hidden columns are never silent state
+- [x] `[SDD][M35]` Hand-rolled dropdown at z-index 60 (above the sticky header at 3, below
+      modals at 100): filter box, one checkbox per column, **Show all** (disabled when
+      nothing is hidden)
+- [x] `[SDD][M35]` The last visible column cannot be unchecked — its checkbox disables
+- [x] `[SDD][M35]` Visibility resets when the result's column set changes (compared as a
+      joined key), so re-running the same query keeps the choice
+
+### M35.2 — Per-consumer behaviour ✅ DONE 2026-09-08 (Discovery §3.3 — the table is the spec)
+- [x] `[SDD][M35]` Grid header, body and filter row render visible columns only
+- [x] `[SDD][M35]` Global search matches **visible columns only** — matching a row on
+      invisible text is the exact "why is my grid empty" trap this must avoid
+- [x] `[SDD][M35]` Hiding a column **clears that column's filter** (and re-queries when
+      server-backed); the status line says what happened
+- [x] `[SDD][M35]` `copyAsJson` projects to visible columns — the comment above it already
+      promises the clipboard matches what you were looking at
+- [x] `[SDD][M35]` **Add Row keeps every column**, hidden or not: it is a data-entry form,
+      and omitting a NOT NULL column would fail an insert for an invisible reason
+- [x] `[SDD][M35]` Cell editing and Delete unaffected — they read `raw.rows`, not the DOM
+
+### M35.3 — Export ✅ DONE 2026-09-08 (Discovery §3.4)
+- [x] `[SDD][M35]` `export` message carries `columns: string[]`; absent means all, so no
+      other caller changes
+- [x] `[SDD][M35]` `handleExport` projects `lastResult` before `toCsv` / `JSON.stringify`
+- [x] `[SDD][M35]` Success message reports `12 row(s), 5 of 9 columns` when hiding is active
+      — never a silently narrower file
+
+### M35.4 — Human QA gate (Phase 4) 🟡 code-verified 2026-09-08; visual pass open
+
+Verified by driving the **real** functions from `queryPanel.ts` (pulled out by brace
+matching, not paraphrased) against a DOM stub, plus unit tests where the logic could be
+extracted. Harnesses live in the session scratchpad; the extracted-module tests are
+committed as `test/exportView.test.js` and `test/columnView.test.js`.
+
+- [x] `[SDD][M35]` Hide columns → grid narrows; button reads `Columns 5/9`; Show all
+      restores *(driven: order preserved, button label and flag asserted)*
+- [x] `[SDD][M35]` Hide a column with an active filter → filter clears *(driven: the filter
+      key is gone and the status line reads `Hid "name" and cleared its column filter.`)*
+- [x] `[SDD][M35]` Search matches nothing that lives only in a hidden column *(driven: a
+      term matching one row returns it while visible and returns nothing once hidden)*
+- [x] `[SDD][M35]` **PK hidden → edit and delete still work** *(driven through the real
+      `saveCell` / `deleteSelected`: the posted messages still carry `{id: 2}` and
+      `[{id:1},{id:2}]` with the PK column not rendered)*
+- [x] `[SDD][M35]` Add Row lists every column while some are hidden *(driven through the
+      real `openAddModal`: all four `data-col` fields present)*
+- [x] `[SDD][M35]` Export CSV + JSON contain only visible columns, and the message says so
+      *(unit-tested — the export path was extracted to `src/webview/exportView.ts` to make
+      this testable; also covers CSV quote/comma/newline escaping, which had **no tests at
+      all** before)*
+- [x] `[SDD][M35]` Different query resets visibility; the same one keeps it *(driven)*
+- [x] `[SDD][M35]` Regression: M32 scope note still says `2000 of 5000`; M33 JSON chips
+      still render; a 40-column table filters to 6 matches and shows "No column matches."
+      rather than a blank box *(driven on a 5,000-row result with a JSON column)*
+
+**Not covered by any of the above — needs eyes in a running window:** dropdown placement
+and theming, hover/click feel, the save dialog and the bytes actually written to disk, and
+behaviour against a live database. The logic is verified; the pixels are not.

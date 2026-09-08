@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A column picker for results.** A **Columns ▾** button in the results toolbar
+  lists every column with a checkbox — all on by default — plus a search box for
+  wide tables and **Show all**. `SELECT *` on a table with a dozen columns is
+  readable again without hand-writing a column list.
+  - The button reads `Columns 5/9` whenever something is hidden, so a narrowed
+    view is never a mystery.
+  - Search and **Copy as JSON** follow what you can see; hiding a column also
+    clears that column's filter, so nothing filters your rows invisibly.
+  - **Export** writes only the visible columns and says so — *"12 row(s), 5 of 9
+    columns"* — rather than quietly producing a narrower file.
+  - **Add Row** still lists every column, hidden or not: it is a data-entry form,
+    and a missing required column would fail the insert for an invisible reason.
+  - Editing and deleting rows work with the primary key hidden.
+- **Connections can carry notes.** An optional **Notes** field on the connection
+  form — what the connection is for, what not to run against it. It shows when
+  you hover the connection in the tree, and again in the query panel's context
+  tooltip, so it is in front of you while you type SQL rather than only at the
+  moment you set it up. Notes travel with **Export / Import**.
+  - Notes are stored **unencrypted** alongside the connection and are included in
+    exports, *including* the "Without passwords" export. The form says so plainly
+    and that export option now names notes among what the file carries — so
+    don't keep credentials there.
+- **JSON and JSONB columns have a proper viewer.** A JSON cell used to be a wall
+  of minified text that stretched its column past the edge of the window and made
+  the whole row unreadable. It now shows a compact summary — `{…} 12 keys`,
+  `[…] 40 items` — and `⤢` opens a collapsible tree with syntax colouring, a
+  filter box, and copy buttons for both a value and its path (`$.items[3].sku`).
+  **Raw** is one click away, and is still where you edit.
+  - It works on **any** result, not just editable table previews — a JOIN or a
+    view returning JSONB previously had no way to inspect a cell at all.
+  - It covers all four engines: Postgres `json`/`jsonb` and MySQL `JSON` arrive
+    already parsed, and JSON kept as text in SQLite or Redis is detected too.
+  - Big documents stay safe: the tree expands lazily, one expansion paints at most
+    1,000 children and says how many it withheld, and anything over ~2 MB opens on
+    Raw with an explanation rather than freezing the panel.
+- **A running query now looks like it is running.** The Run button itself animates
+  with the same braille spinner and live elapsed-seconds counter the AI assist bar
+  uses — a 40-second query and a stuck one are no longer indistinguishable. The
+  animation is armed on a short delay, so a fast query never flashes it.
+- **Long queries can be aborted.** An **■ Abort** button appears beside Run the
+  moment a query starts, styled red so it is impossible to miss, and **Esc** does
+  the same. On PostgreSQL and MySQL this is a *real* cancellation — the statement
+  is stopped on the server (`pg_cancel_backend` / `KILL QUERY`), not merely
+  abandoned. An aborted query reports "Aborted after 12.4s." rather than an error,
+  because you asked for it.
+- Honest about what it can do: **SQLite shows no Abort button at all** — its engine
+  runs synchronously and cannot be interrupted, so a button there would be a lie —
+  and **Redis** offers **■ Stop waiting**, which says plainly that the server may
+  still be working on the command.
+
+### Changed
+- Only one query runs per panel at a time; Run is unavailable while one is in
+  flight. A result arriving from a query you already aborted is discarded instead
+  of appearing in the grid.
+
+### Fixed
+- **Editing a connection no longer moves it to the bottom of the list.** Saving
+  removed the connection and re-added it at the end, so any order you had dragged
+  your connections into was quietly lost every time you edited one. It now keeps
+  its place; only genuinely new connections are appended.
+- **Pop-up dialogs no longer render underneath the results header.** The overlay
+  had no stacking order of its own, so the sticky column headers and filter boxes
+  painted straight over the top of it. This affected the Edit Data dialog too, not
+  only the new JSON viewer. **Esc** now closes an open dialog as well.
+- **A large result no longer freezes the window.** The grid painted every row it
+  was given, so a query returning tens of thousands of rows built a DOM large
+  enough to lock the panel up completely. It now paints the first 2,000 and says
+  so — *"Showing the first 2,000 of 50,000 rows"* — while search, sort, Export and
+  Copy still cover the whole result. Select-all now means the rows you can
+  actually see, so Delete can no longer reach rows that were never shown.
+
 ## [1.3.1] - 2026-08-08
 
 ### Added

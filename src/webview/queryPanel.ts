@@ -18,6 +18,9 @@ import type {
 import { logError } from "../log";
 import { suggest } from "../sqlComplete";
 import { canFormat, formatSql, vocabularyFor } from "../sqlDialect";
+import { COLUMN_VIEW_HELPERS } from "./columnView";
+import { projectResult, toCsv } from "./exportView";
+import { JSON_VIEW_HELPERS } from "./jsonView";
 
 interface PanelOptions {
   initialSql?: string;
@@ -40,6 +43,9 @@ const PAGE_SIZE = 100;
 
 /** Past this the OS clipboard — and whatever you paste into — is what stalls, so we ask first. */
 const COPY_WARN_CHARS = 5 * 1024 * 1024;
+
+/** Gives each panel a stable identity in the run tokens it hands the driver. */
+let panelCounter = 0;
 
 /** A SQL/command editor + a rich results grid, one webview per invocation. */
 export class QueryPanel {
@@ -97,6 +103,18 @@ export class QueryPanel {
   private aiBarShown = false;
   /** Recent Generate exchanges in this panel, oldest first — follow-up context. */
   private aiHistory: Array<{ prompt: string; sql: string }> = [];
+  /** Sequence of the hand-typed run currently in flight (echoed to the webview). */
+  private runSeq = 0;
+  /** Set by `handleAbort` to the run being cancelled; cleared once reported. */
+  private abortedSeq?: number;
+  /** Distinguishes this panel's runs from another panel's on the same driver —
+   *  `getDriver` hands every panel on a connection the same instance. */
+  private readonly panelId = `p${++panelCounter}`;
+
+  /** Token identifying one run to the driver, unique across panels. */
+  private runToken(seq: number): string {
+    return `${this.panelId}r${seq}`;
+  }
 
   private rerun(sql: string, database?: string): void {
     this.previewPath = undefined;
@@ -128,11 +146,15 @@ export class QueryPanel {
   }
 
   private contextTooltip(): string {
-    const name = this.store.get(this.connectionId)?.name ?? "this connection";
-    return (
+    const config = this.store.get(this.connectionId);
+    const name = config?.name ?? "this connection";
+    const base =
       `Queries in this panel run against "${this.contextLabel()}" on ${name}. ` +
-      `To target another database, use New Query on that database in the tree.`
-    );
+      `To target another database, use New Query on that database in the tree.`;
+    // The note is why this connection is different — "read replica", "prod, do
+    // not write" — so it belongs where the SQL is being typed, not only in the
+    // tree hover the user saw once.
+    return config?.notes ? `${base}\n\n${config.notes}` : base;
   }
 
   private constructor(
@@ -181,7 +203,10 @@ export class QueryPanel {
           this.previewPath = undefined;
           this.sort = undefined;
           this.columnFilters = undefined;
-          await this.run(msg.sql);
+          await this.run(msg.sql, Number(msg.seq ?? 0));
+          break;
+        case "abort":
+          await this.handleAbort();
           break;
         case "page":
           if (this.previewPath) {
@@ -224,7 +249,7 @@ export class QueryPanel {
           this.openRelated(msg.column, msg.value);
           break;
         case "export":
-          await this.handleExport(msg.format);
+          await this.handleExport(msg.format, msg.columns);
           break;
         case "copy":
           await this.handleCopy(String(msg.text ?? ""), msg.rows);
@@ -262,6 +287,7 @@ export class QueryPanel {
     }
 
     void this.syncAiBar();
+    void this.advertiseAbort();
     // A provider configured in settings after this panel opened should still
     // light the bar up — re-check whenever the panel comes back into view.
     this.panel.onDidChangeViewState((e) => {
@@ -407,28 +433,95 @@ export class QueryPanel {
     }
   }
 
-  private async run(sql: string): Promise<void> {
+  /**
+   * `runSeq` rides along on the reply so the webview can drop a result from a
+   * run the user has already aborted — cancellation is a race, and the statement
+   * may well finish before the cancel reaches the server.
+   */
+  private async run(sql: string, runSeq = 0): Promise<void> {
     const trimmed = (sql ?? "").trim();
     if (!trimmed) {
       return;
     }
+    this.runSeq = runSeq;
+    const start = Date.now();
     try {
       const driver = await this.manager.getDriver(this.connectionId);
-      const start = Date.now();
-      const result = await driver.query(trimmed, this.database);
+      const result = await driver.query(trimmed, this.database, this.runToken(runSeq));
       result.elapsedMs = Date.now() - start;
-      this.show(result, true);
+      if (this.aborted(runSeq, start)) {
+        return;
+      }
+      this.show(result, true, undefined, runSeq);
     } catch (err) {
+      // A cancelled statement surfaces as a driver error (Postgres and MySQL both
+      // report the kill). Reporting it as a failure would be a lie — the user
+      // asked for it — so an aborted run always reports as aborted.
+      if (this.aborted(runSeq, start)) {
+        return;
+      }
       logError("query", err);
-      this.post({ type: "error", message: (err as Error).message });
+      this.post({ type: "error", message: (err as Error).message, runSeq });
     }
   }
 
-  /** `seq` echoes the webview's request counter so it can drop an out-of-order response. */
-  private show(result: QueryResult, fresh = false, seq?: number): void {
+  /**
+   * True when this exact run was cancelled while in flight; also sends the
+   * webview its "Aborted after Ns" confirmation, so both the success and the
+   * failure path can simply return afterwards.
+   */
+  private aborted(runSeq: number, start: number): boolean {
+    if (this.abortedSeq !== runSeq) {
+      return false;
+    }
+    this.abortedSeq = undefined;
+    this.post({ type: "aborted", runSeq, secs: ((Date.now() - start) / 1000).toFixed(1) });
+    return true;
+  }
+
+  /**
+   * Ask the driver to cancel. Engines without `cancel()` never get an Abort
+   * button in the first place (see `advertiseAbort`), so reaching here with no
+   * implementation means nothing to do rather than an error.
+   */
+  private async handleAbort(): Promise<void> {
+    const seq = this.runSeq;
+    this.abortedSeq = seq;
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      await driver.cancel?.(this.runToken(seq));
+    } catch (err) {
+      // Best-effort by nature: the statement may have finished a millisecond
+      // before the cancel landed. Say what happened rather than failing loudly.
+      logError("cancel", err);
+      this.post({ type: "status", message: `Could not cancel: ${(err as Error).message}` });
+    }
+  }
+
+  /**
+   * Tell the webview whether to render an Abort button, and whether it may
+   * honestly call it "Abort" — sql.js cannot be cancelled at all, and Redis can
+   * only stop us waiting. See DISCOVERY_QUERY_RUN_UX.md §2 Finding A.
+   */
+  private async advertiseAbort(): Promise<void> {
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      this.post({
+        type: "abortCaps",
+        canAbort: typeof driver.cancel === "function",
+        hard: driver.canCancel === true,
+      });
+    } catch {
+      /* not connected yet — the panel simply shows no Abort button */
+    }
+  }
+
+  /** `seq` echoes the webview's request counter so it can drop an out-of-order response.
+   *  `runSeq` does the same for hand-typed runs, which can be aborted mid-flight. */
+  private show(result: QueryResult, fresh = false, seq?: number, runSeq?: number): void {
     this.lastResult = result;
     this.lastEditable = result.editable;
-    this.post({ type: "result", result, fresh, seq });
+    this.post({ type: "result", result, fresh, seq, runSeq });
   }
 
   private async handleUpdate(msg: {
@@ -584,11 +677,19 @@ export class QueryPanel {
     );
   }
 
-  private async handleExport(format: "csv" | "json"): Promise<void> {
+  /**
+   * `columns` is the webview's visible set. Absent means "all", so anything else
+   * posting an export needs no change. The file follows what was on screen, and
+   * the confirmation says so — a silently narrower file is the failure mode here.
+   */
+  private async handleExport(format: "csv" | "json", columns?: unknown): Promise<void> {
     if (!this.lastResult?.columns.length) {
       vscode.window.showWarningMessage("Nothing to export — run a query first.");
       return;
     }
+    const all = this.lastResult.columns;
+    const result = projectResult(this.lastResult, columns);
+    const hiddenCount = all.length - result.columns.length;
     const uri = await vscode.window.showSaveDialog({
       filters: format === "csv" ? { CSV: ["csv"] } : { JSON: ["json"] },
       saveLabel: `Export ${format.toUpperCase()}`,
@@ -596,11 +697,12 @@ export class QueryPanel {
     if (!uri) {
       return;
     }
-    const content =
-      format === "csv" ? toCsv(this.lastResult) : JSON.stringify(this.lastResult.rows, null, 2);
+    const content = format === "csv" ? toCsv(result) : JSON.stringify(result.rows, null, 2);
     fs.writeFileSync(uri.fsPath, content, "utf8");
     vscode.window.showInformationMessage(
-      `Exported ${this.lastResult.rowCount} row(s) to ${uri.fsPath}`,
+      `Exported ${result.rowCount} row(s)` +
+        (hiddenCount > 0 ? `, ${result.columns.length} of ${all.length} columns` : "") +
+        ` to ${uri.fsPath}`,
     );
   }
 
@@ -807,7 +909,68 @@ export class QueryPanel {
   #lockBtn.locked { background: transparent;
                     border: 1px solid var(--vscode-editorWarning-foreground);
                     color: var(--vscode-editorWarning-foreground); }
+  /* Abort only exists while a query is in flight, and has to read as "stop" at a
+     glance — hence the error palette, which is red in every shipped theme. The
+     pulse keeps it alive next to the Run button's spinner. */
+  #abortBtn { display: none; background: var(--vscode-inputValidation-errorBackground);
+              color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground));
+              border: 1px solid var(--vscode-inputValidation-errorBorder,
+                                   var(--vscode-editorError-foreground));
+              font-weight: 600; animation: abortPulse 1.6s ease-in-out infinite; }
+  #abortBtn:not(:disabled):hover { background: var(--vscode-inputValidation-errorBorder,
+                                   var(--vscode-editorError-foreground)); }
+  @keyframes abortPulse { 0%, 100% { opacity: 1; } 50% { opacity: .72; } }
+  /* The running Run button carries the spinner, so it must not dim to the
+     generic :disabled opacity or the animation reads as switched-off. */
+  #runBtn.running { opacity: 1; font-variant-numeric: tabular-nums;
+                    color: var(--vscode-textLink-foreground);
+                    background: var(--vscode-button-secondaryBackground); }
+  @media (prefers-reduced-motion: reduce) { #abortBtn { animation: none; } }
+  /* ---- column picker ---- */
+  #colsMenu { position: fixed; z-index: 60; display: none; min-width: 220px; max-width: 320px;
+              background: var(--vscode-editorWidget-background);
+              border: 1px solid var(--border); border-radius: 4px; padding: 6px;
+              box-shadow: 0 4px 12px #0006; }
+  #colsMenu #colsFilter { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+  #colsList { max-height: 300px; overflow-y: auto; }
+  #colsList label { display: flex; align-items: center; gap: 6px; padding: 3px 4px;
+                    cursor: pointer; border-radius: 3px; white-space: nowrap; }
+  #colsList label:hover { background: var(--vscode-list-hoverBackground); }
+  /* The last visible column disables rather than disappearing, so the reason the
+     click did nothing is visible rather than mysterious. */
+  #colsList label.locked { opacity: .5; cursor: default; }
+  #colsList .none { opacity: .6; padding: 4px; }
+  .colsfoot { display: flex; justify-content: flex-end; margin-top: 6px;
+              border-top: 1px solid var(--border); padding-top: 6px; }
+  #colsBtn.filtered { color: var(--vscode-textLink-foreground); }
   .null { opacity: .5; font-style: italic; }
+  /* ---- JSON viewer ---- */
+  /* A JSON cell shows a summary chip, never the raw document: td is white-space:pre
+     with no truncation, so one 5 KB value used to push every other column off screen. */
+  .jsonchip { font-family: var(--vscode-editor-font-family, monospace); opacity: .9;
+              border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; }
+  td.jsoncell { position: relative; }
+  .jsonopen { position: absolute; right: 2px; top: 2px; opacity: 0; cursor: pointer; }
+  td.jsoncell:hover .jsonopen { opacity: .8; }
+  #mtree { display: none; overflow: auto; max-height: 55vh; padding: 6px;
+           font-family: var(--vscode-editor-font-family, monospace);
+           background: var(--vscode-input-background);
+           border: 1px solid var(--border); }
+  .jrow { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .jrow.branch { cursor: pointer; }
+  .jrow.dim { opacity: .25; }
+  .jtog { display: inline-block; width: 12px; opacity: .7; }
+  .jkey { color: var(--vscode-symbolIcon-propertyForeground, var(--vscode-textLink-foreground)); }
+  .jpeek { opacity: .6; }
+  .jstring { color: var(--vscode-debugTokenExpression-string, #ce9178); }
+  .jnumber { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
+  .jboolean { color: var(--vscode-debugTokenExpression-boolean, #569cd6); }
+  .jnull { color: var(--vscode-debugTokenExpression-error, #808080); font-style: italic; }
+  .jnote { opacity: .8; color: var(--vscode-editorWarning-foreground); }
+  .jcopy { opacity: 0; cursor: pointer; margin-left: 6px; font-size: 11px; }
+  .jrow:hover .jcopy { opacity: .75; }
+  #mtabs button.on { background: var(--vscode-button-background);
+                     color: var(--vscode-button-foreground); }
   .chk { width: 22px; text-align: center; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
   /* Second sticky header row, pinned directly below the name row. This was
@@ -820,11 +983,17 @@ export class QueryPanel {
   .filterRow th { position: sticky; top: var(--hdr-h, 0px); z-index: 2; padding: 2px; }
   .filterRow input { width: 100%; box-sizing: border-box; }
   /* cell-detail modal */
+  /* Above everything that is positioned: the sticky header th (z-index 3), the
+     filter row (2), and the completion dropdown (50). Without this the overlay
+     sits at z-index auto and the grid header paints straight over the modal. */
   #overlay { position: fixed; inset: 0; background: #0008; display: none;
-             align-items: center; justify-content: center; }
+             align-items: center; justify-content: center; z-index: 100; }
   #modal { background: var(--vscode-editorWidget-background);
            border: 1px solid var(--border); border-radius: 6px; padding: 14px;
            width: min(680px, 90vw); }
+  /* A JSON tree earns more room than a single-value edit box: nested keys plus a
+     long string value wrap badly at 680px. */
+  #modal.json { width: min(980px, 94vw); }
   #modal h3 { margin: 0 0 10px; text-align: center; }
   #modal .mbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   #modal textarea { width: 100%; box-sizing: border-box; min-height: 220px;
@@ -849,6 +1018,7 @@ export class QueryPanel {
   <div id="ainote"></div>
   <div class="bar">
     <button id="runBtn" title="Run (Ctrl/Cmd+Enter) — runs the highlighted text only, when something is highlighted">Run ▶</button>
+    <button id="abortBtn" title="Stop the running query (Esc)">■ Abort</button>
     <button id="lockBtn" class="secondary" title="Query lock — blocks running queries and editing data in this panel. Engages by itself when the AI generates a mutation. One click toggles.">🔓</button>
     ${hasFile ? '<button id="saveBtn" class="secondary" title="Save to file (Cmd/Ctrl+S)">💾 Save</button>' : ""}
     <button id="refreshBtn" class="secondary" title="Refresh">⟳</button>
@@ -856,6 +1026,7 @@ export class QueryPanel {
     ${formattable ? '<button id="formatBtn" class="secondary" title="Format SQL (Shift+Alt+F)">Format</button>' : ""}
     <button id="addBtn" class="secondary" title="Add row" disabled>＋ Row</button>
     <button id="delBtn" class="secondary" title="Delete selected rows" disabled>🗑 Delete</button>
+    <button id="colsBtn" class="secondary" title="Show or hide result columns">Columns ▾</button>
     <button id="csvBtn" class="secondary">Export CSV</button>
     <button id="jsonBtn" class="secondary">Export JSON</button>
     <button id="copyJsonBtn" class="secondary" title="Copy checked rows as JSON — all rows in view if none are checked">Copy as JSON</button>
@@ -873,6 +1044,11 @@ export class QueryPanel {
     <button id="nextBtn" class="secondary" disabled>›</button>
     <span id="total"></span>
   </div>
+  <div id="colsMenu">
+    <input id="colsFilter" class="filter" placeholder="Search columns…" />
+    <div id="colsList"></div>
+    <div class="colsfoot"><button id="colsAll" class="secondary">Show all</button></div>
+  </div>
   <div id="ac"></div>
   <div id="status">Ctrl/Cmd+Enter to run — highlight to run only that${
     commentable ? " · Ctrl/Cmd+/ to comment" : ""
@@ -882,12 +1058,17 @@ export class QueryPanel {
 
   <div id="overlay">
     <div id="modal">
-      <h3>Edit Data</h3>
+      <h3 id="mtitle">Edit Data</h3>
       <div class="mbar">
-        <select id="mfmt"><option value="plain">Plain</option><option value="json">JSON</option></select>
+        <span id="mtabs" style="display:none; gap:6px;">
+          <button id="mtabTree" class="secondary">Tree</button>
+          <button id="mtabRaw" class="secondary">Raw</button>
+        </span>
         <button id="mcopy" class="secondary">Copy</button>
+        <input id="mfilter" class="filter" placeholder="Filter shown nodes…" style="display:none; width:180px;">
         <span class="spacer"></span>
       </div>
+      <div id="mtree"></div>
       <textarea id="mtext"></textarea>
       <div class="mfoot">
         <button id="mclose" class="secondary">Close</button>
@@ -896,7 +1077,7 @@ export class QueryPanel {
     </div>
   </div>
 
-  <div id="addOverlay" style="position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;">
+  <div id="addOverlay" style="position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:100;">
     <div id="modal" style="max-height:86vh;overflow:auto;">
       <h3>Add Row</h3>
       <div style="opacity:.7;margin-bottom:8px;">Leave a field blank to use the column default / NULL.</div>
@@ -911,6 +1092,8 @@ export class QueryPanel {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const $ = (id) => document.getElementById(id);
+${JSON_VIEW_HELPERS}
+${COLUMN_VIEW_HELPERS}
     const sqlEl = $('sql'), statusEl = $('status'), gridEl = $('grid');
     let raw = null;                 // last QueryResult
     let sort = { col: null, dir: 1 };
@@ -931,6 +1114,32 @@ export class QueryPanel {
       }, 350);
     }
 
+    // ---------------- shared spinner ----------------
+    // Braille frames + live elapsed seconds. show() paints the element (the AI
+    // bar's own span, or the Run button's label); stop() returns the elapsed
+    // total so callers can report how long the wait actually was.
+    const SPIN_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+    function makeSpinner(el, label, show){
+      let timer = null, t0 = 0, frame = 0;
+      const paint = () => {
+        const secs = Math.floor((Date.now() - t0) / 1000);
+        const text = SPIN_FRAMES[frame] + ' ' + label + ' ' + secs + 's';
+        if (show) show(text); else { el.textContent = text; el.style.display = 'inline'; }
+      };
+      return {
+        start(){
+          t0 = Date.now(); frame = 0; paint();
+          clearInterval(timer);
+          timer = setInterval(() => { frame = (frame + 1) % SPIN_FRAMES.length; paint(); }, 120);
+        },
+        stop(){
+          clearInterval(timer); timer = null;
+          if (!show) el.style.display = 'none';
+          return ((Date.now() - t0) / 1000).toFixed(1);
+        },
+      };
+    }
+
     // ---------------- query lock ----------------
     // Manual via the toolbar 🔒, automatic when the AI generates a mutation.
     // Locked = read-only panel: no runs, no cell/row edits, no TTL changes.
@@ -942,7 +1151,9 @@ export class QueryPanel {
       const b = $('lockBtn');
       b.textContent = on ? '🔒' : '🔓';
       b.classList.toggle('locked', on);
-      $('runBtn').disabled = on;
+      // Unlocking must not hand Run back while a query is still in flight —
+      // the run/abort state machine owns the button for as long as it is busy.
+      $('runBtn').disabled = on || running;
       statusEl.textContent = on
         ? '🔒 Query lock on — running and editing are blocked in this panel.'
         : '🔓 Unlocked.';
@@ -954,12 +1165,88 @@ export class QueryPanel {
     // Ctrl/Cmd+Enter — one rule, not two. A whitespace-only selection is ignored.
     function run() {
       if (qlock) { lockNudge(); return; }
+      // One query in flight per panel: a second Run would orphan the first and
+      // leave the Abort button pointing at the wrong statement.
+      if (running) { statusEl.textContent = 'A query is already running — abort it first.'; return; }
       const sel = sqlEl.value.slice(sqlEl.selectionStart, sqlEl.selectionEnd);
       const partial = !!sel.trim();
+      const sql = partial ? sel : sqlEl.value;
+      // Nothing to run means nothing to abort — don't enter the running state at
+      // all, or Run would sit disabled waiting for a reply that never comes.
+      if (!sql.trim()) { statusEl.textContent = 'Nothing to run — the editor is empty.'; return; }
       statusEl.textContent = partial ? 'Running selection…' : 'Running…';
-      vscode.postMessage({ type:'run', sql: partial ? sel : sqlEl.value });
+      setRunning(true);
+      vscode.postMessage({ type:'run', sql, seq: ++runSeq });
     }
     $('runBtn').addEventListener('click', run);
+
+    // ---------------- run / abort state ----------------
+    // runSeq is the staleness guard: aborting is a race, so a result that
+    // arrives from a run the user has already walked away from is dropped rather
+    // than painted over the grid.
+    let running = false, runSeq = 0, aborting = false, spinArm = null, abortGuard = null;
+    // Set by the host at panel open. canAbort = the engine offers cancellation
+    // at all (sql.js cannot, so it never gets a button); hardAbort = that
+    // cancellation actually stops the server, rather than just stopping us
+    // waiting (Redis). The label has to tell the truth about which one it is.
+    let canAbort = false, hardAbort = false;
+    const runBtn = $('runBtn'), abortBtn = $('abortBtn');
+    const RUN_LABEL = runBtn.textContent;
+    const runSpin = makeSpinner(null, 'Running…', (t) => { runBtn.textContent = t; });
+
+    function setRunning(on){
+      running = on;
+      if (on) {
+        aborting = false;
+        runBtn.disabled = true;
+        // Armed on a delay: a query that returns in 50ms never flashes a spinner.
+        clearTimeout(spinArm);
+        spinArm = setTimeout(() => { runBtn.classList.add('running'); runSpin.start(); }, 150);
+        if (canAbort) abortBtn.style.display = 'inline-block';
+        abortBtn.disabled = false;
+      } else {
+        clearTimeout(spinArm); spinArm = null;
+        clearTimeout(abortGuard); abortGuard = null;
+        runSpin.stop();
+        runBtn.classList.remove('running');
+        runBtn.textContent = RUN_LABEL;
+        // Never re-enable Run into a locked panel — the lock outranks us.
+        runBtn.disabled = qlock;
+        abortBtn.style.display = 'none';
+      }
+    }
+
+    function abortRun(){
+      if (!running || aborting) return;
+      aborting = true;
+      abortBtn.disabled = true;
+      // The seq bump is what makes the abort authoritative: whatever the server
+      // does next, this panel has stopped listening to that run.
+      runSeq++;
+      statusEl.textContent = hardAbort
+        ? 'Aborting…'
+        : 'Stopped waiting — the server may still be working on it.';
+      vscode.postMessage({ type:'abort' });
+      if (!hardAbort) { setRunning(false); return; }
+      // A cancel that is never acknowledged would strand the panel in "Aborting…"
+      // with Run disabled — the precise stuck state this feature exists to end.
+      // Hand the panel back and say plainly that the server has not stopped yet;
+      // a late result from this run is dropped by the seq bump above regardless.
+      clearTimeout(abortGuard);
+      abortGuard = setTimeout(() => {
+        if (!running) return;
+        setRunning(false);
+        statusEl.textContent = 'Cancel sent, but the query has not stopped yet — ' +
+                               'it may still be running on the server.';
+      }, 8000);
+    }
+    abortBtn.addEventListener('click', abortRun);
+    // Esc aborts while running. The autocomplete's own Esc handler
+    // stopPropagation()s when its dropdown is open, so the two never collide.
+    window.addEventListener('keydown', (e) => {
+      // Not while a modal is up — there Escape means "close this" (see overlayOpen).
+      if (e.key === 'Escape' && running && !overlayOpen()) { e.preventDefault(); abortRun(); }
+    });
     function saveFile() {
       const btn = $('saveBtn'); if (!btn) return;
       statusEl.textContent = 'Saving…';
@@ -984,8 +1271,8 @@ export class QueryPanel {
         if ($('formatBtn')) vscode.postMessage({ type:'format', sql: sqlEl.value });
       }
     });
-    $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv' }));
-    $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json' }));
+    $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv', columns: cols() }));
+    $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json', columns: cols() }));
     $('copyJsonBtn').addEventListener('click', copyAsJson);
     $('search').addEventListener('input', (e) => { search = e.target.value.toLowerCase(); renderGrid(); });
 
@@ -1211,28 +1498,11 @@ export class QueryPanel {
     const aiBar = $('aibar'), aiPromptEl = $('aiPrompt'), aiNote = $('ainote');
     let aiSeq = 0, lastError = null, lastAiSql = null;
 
-    // Live progress: an animated spinner + elapsed seconds right in the bar, so
-    // a long provider round-trip reads as "working" rather than "stuck".
-    const AI_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
-    let aiTimer = null, aiStart = 0, aiFrame = 0;
-    function aiSpinStart(){
-      aiStart = Date.now();
-      const spin = $('aispin');
-      spin.textContent = AI_FRAMES[0] + ' Asking AI… 0s';
-      spin.style.display = 'inline';
-      clearInterval(aiTimer);
-      aiTimer = setInterval(() => {
-        aiFrame = (aiFrame + 1) % AI_FRAMES.length;
-        const secs = Math.floor((Date.now() - aiStart) / 1000);
-        spin.textContent = AI_FRAMES[aiFrame] + ' Asking AI… ' + secs + 's';
-      }, 120);
-    }
-    function aiSpinStop(){
-      clearInterval(aiTimer);
-      aiTimer = null;
-      $('aispin').style.display = 'none';
-      return ((Date.now() - aiStart) / 1000).toFixed(1);
-    }
+    // Live progress: an animated spinner + elapsed seconds, so a long wait reads
+    // as "working" rather than "stuck". Shared by the AI bar and the Run button
+    // so the two never drift apart — one animation, one definition.
+    const aiSpin = makeSpinner($('aispin'), 'Asking AI…');
+    const aiSpinStart = aiSpin.start, aiSpinStop = aiSpin.stop;
 
     function setAiBusy(b){
       $('aiGenBtn').disabled = b;
@@ -1408,7 +1678,9 @@ export class QueryPanel {
       if (!picked.length) { statusEl.textContent = 'Nothing to copy — no rows in view.'; return; }
       // One checked row copies as a bare object; anything else stays an array so the
       // shape is predictable for whatever you paste it into.
-      const payload = selected.size === 1 ? picked[0].row : picked.map(({row}) => row);
+      // ...which now includes *which columns* you were looking at.
+      const projected = projectRows(picked.map(({row}) => row), cols());
+      const payload = selected.size === 1 ? projected[0] : projected;
       vscode.postMessage({ type:'copy', text: JSON.stringify(payload, null, 2), rows: picked.length });
     }
 
@@ -1435,8 +1707,10 @@ export class QueryPanel {
         if (!txt) continue; const t = txt.toLowerCase();
         rows = rows.filter(({row}) => cellText(row[col]).toLowerCase().includes(t));
       }
-      if (search) rows = rows.filter(({row}) =>
-        raw.columns.some((c) => cellText(row[c]).toLowerCase().includes(search)));
+      // Visible columns only: a row surviving the search because of text the user
+      // cannot see is the purest form of invisible state.
+      if (search) { const sc = cols(); rows = rows.filter(({row}) =>
+        sc.some((c) => cellText(row[c]).toLowerCase().includes(search))); }
       if (!server && sort.col) {
         rows.sort((a, b) => {
           let x = a.row[sort.col], y = b.row[sort.col];
@@ -1455,26 +1729,153 @@ export class QueryPanel {
     // page in hand — so an empty result means "not on this page", not "not in the table".
     // Say which, rather than letting it read as a broken search.
     function pageLocal(){ return serverBacked() && raw.page.total > raw.rows.length; }
-    function updateScope(matched){
+    // ---------------- column picker ----------------
+    // Presentational only: nothing is re-queried and the result keeps every column, so
+    // editing and Delete (which read raw.rows, never the DOM) are unaffected.
+    let hidden = new Set(), colsKey = '';
+
+    function cols(){ return visibleColumns(raw ? raw.columns : [], hidden); }
+
+    // A different query starts clean; re-running the same one keeps the choice.
+    function syncColumnsFor(result){
+      const key = columnsKey(result ? result.columns : []);
+      if (key !== colsKey) { colsKey = key; hidden = new Set(); }
+    }
+
+    function syncColsBtn(){
+      const all = raw ? raw.columns.length : 0, shown = cols().length;
+      const b = $('colsBtn');
+      // Hidden columns must never be silent state — say so on the button itself.
+      b.textContent = (all && shown < all) ? ('Columns ' + shown + '/' + all + ' ▾') : 'Columns ▾';
+      b.classList.toggle('filtered', all > 0 && shown < all);
+    }
+
+    function renderColsMenu(){
+      const list = $('colsList'), term = $('colsFilter').value.trim().toLowerCase();
+      const all = raw ? raw.columns : [];
+      const shown = cols();
+      list.innerHTML = '';
+      const matches = all.filter((c) => !term || c.toLowerCase().includes(term));
+      if (!matches.length) {
+        const d = document.createElement('div');
+        d.className = 'none';
+        d.textContent = all.length ? 'No column matches.' : 'Run a query first.';
+        list.appendChild(d);
+      }
+      for (const c of matches) {
+        const on = !hidden.has(c);
+        // Refuse to hide the last one: a zero-column grid is a blank rectangle
+        // whose only way back is Show all.
+        const locked = on && shown.length === 1;
+        const row = document.createElement('label');
+        row.className = locked ? 'locked' : '';
+        if (locked) row.title = 'At least one column has to stay visible.';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = on;
+        box.disabled = locked;
+        box.addEventListener('change', () => toggleColumn(c, box.checked));
+        row.appendChild(box);
+        // textContent, not innerHTML: a column name is data from the database.
+        const nameEl = document.createElement('span');
+        nameEl.textContent = c;
+        row.appendChild(nameEl);
+        list.appendChild(row);
+      }
+      $('colsAll').disabled = hidden.size === 0;
+    }
+
+    function toggleColumn(c, show){
+      if (show) {
+        hidden.delete(c);
+      } else {
+        hidden.add(c);
+        // A filter on a column you can no longer see is invisible state — the
+        // "why is my grid empty" trap. Drop it, and say that it happened.
+        if (filters[c]) {
+          delete filters[c];
+          statusEl.textContent = 'Hid "' + c + '" and cleared its column filter.';
+          if (serverBacked()) {
+            const arr = Object.entries(filters).filter(([,v]) => v).map(([column,value]) => ({ column, value }));
+            vscode.postMessage({ type:'filter', filters: arr, seq: ++reqSeq });
+          }
+        }
+      }
+      renderColsMenu(); syncColsBtn(); renderGrid();
+    }
+
+    function colsMenuOpen(){ return $('colsMenu').style.display === 'block'; }
+    function closeColsMenu(){ $('colsMenu').style.display = 'none'; }
+    function openColsMenu(){
+      const r = $('colsBtn').getBoundingClientRect();
+      const m = $('colsMenu');
+      m.style.display = 'block';
+      m.style.top = (r.bottom + 4) + 'px';
+      // Keep it on screen when the button sits near the right edge.
+      m.style.left = Math.max(4, Math.min(r.left, window.innerWidth - m.offsetWidth - 8)) + 'px';
+      $('colsFilter').value = '';
+      renderColsMenu();
+      $('colsFilter').focus();
+    }
+    $('colsBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (colsMenuOpen()) closeColsMenu(); else openColsMenu();
+    });
+    $('colsFilter').addEventListener('input', renderColsMenu);
+    $('colsMenu').addEventListener('click', (e) => e.stopPropagation());
+    $('colsAll').addEventListener('click', () => {
+      hidden = new Set();
+      renderColsMenu(); syncColsBtn(); renderGrid();
+    });
+    document.addEventListener('click', () => { if (colsMenuOpen()) closeColsMenu(); });
+
+    // The grid paints every row in one innerHTML assignment, so an unbounded
+    // result set is a hang, not a slow render: 50k rows x 7 columns is ~350k
+    // cells and freezes the webview thread outright (no repaint, so even the
+    // Abort button stops responding). Cap what is PAINTED — the rows themselves
+    // stay in memory, so search, sort, Export and Copy still cover all of them.
+    const RENDER_CAP = 2000;
+    // Rows matching the current filters, before the cap. Kept in step with the
+    // painted view by cappedView() so the two can never disagree.
+    let viewTotal = 0;
+    function cappedView(){
+      const v = computeView();
+      viewTotal = v.length;
+      return v.length > RENDER_CAP ? v.slice(0, RENDER_CAP) : v;
+    }
+
+    function updateScope(shown){
       const el = $('scope');
-      if (!raw || !search) { el.textContent = ''; return; }
-      const loaded = raw.rows.length;
-      if (!pageLocal()) { el.textContent = matched + ' of ' + loaded + ' row(s) match'; return; }
-      const p = raw.page;
-      const page = Math.floor(p.offset / p.limit) + 1, pages = Math.ceil(p.total / p.limit);
-      el.innerHTML = matched + ' of ' + loaded + ' rows on this page match · page ' + page +
-        ' of ' + pages + ' — Total ' + p.total +
-        ' <span class="warn">(search covers the loaded page only)</span>';
+      const parts = [];
+      // Say plainly that rows are being withheld, and that nothing is lost.
+      if (raw && viewTotal > shown) {
+        parts.push('<span class="warn">Showing the first ' + shown + ' of ' + viewTotal +
+          ' rows</span> — add a LIMIT or filter to narrow it; Export and Copy still cover all ' +
+          viewTotal + '.');
+      }
+      if (raw && search) {
+        const loaded = raw.rows.length;
+        if (!pageLocal()) parts.push(viewTotal + ' of ' + loaded + ' row(s) match');
+        else {
+          const p = raw.page;
+          const page = Math.floor(p.offset / p.limit) + 1, pages = Math.ceil(p.total / p.limit);
+          parts.push(viewTotal + ' of ' + loaded + ' rows on this page match · page ' + page +
+            ' of ' + pages + ' — Total ' + p.total +
+            ' <span class="warn">(search covers the loaded page only)</span>');
+        }
+      }
+      el.innerHTML = parts.join(' · ');
     }
 
     function renderGrid(){
-      if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; updateScope(0); return; }
+      if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; viewTotal = 0; updateScope(0); return; }
       const editable = !!raw.editable;
-      const view = computeView();
+      const view = cappedView();
+      const shownCols = cols();
       const allSel = editable && view.length > 0 && view.every(({ri}) => selected.has(ri));
       let h = '<table><thead><tr>';
       if (editable) h += '<th class="chk"><input type="checkbox" id="chkAll"'+(allSel?' checked':'')+'></th>';
-      for (const c of raw.columns) {
+      for (const c of shownCols) {
         const m = metaFor(c);
         const mk = m ? (m.pk?' 🔑':'') + (m.fk?' 🔗':'') + (m.nullable?'':' <span style="color:var(--vscode-errorForeground)">*</span>') : '';
         const sorted = sort.col === c ? ' sorted' : '';
@@ -1485,23 +1886,32 @@ export class QueryPanel {
       }
       h += '</tr><tr class="filterRow">';
       if (editable) h += '<th class="chk"></th>';
-      for (const c of raw.columns)
+      for (const c of shownCols)
         h += '<th><input class="filter" data-col="'+esc(c)+'" placeholder="filter" value="'+esc(filters[c]||'')+'"></th>';
       h += '</tr></thead><tbody>';
       const fkCols = new Set((raw.foreignKeys || []).map((f) => f.column));
       for (const { row, ri } of view) {
         h += '<tr data-ri="'+ri+'"'+(selected.has(ri)?' class="selected"':'')+'>';
         if (editable) h += '<td class="chk"><input type="checkbox" class="rowchk" data-ri="'+ri+'"'+(selected.has(ri)?' checked':'')+'></td>';
-        for (const c of raw.columns) {
+        for (const c of shownCols) {
           const isFk = fkCols.has(c);
+          const val = row[c];
+          const shape = jsonShape(val);
           const classes = [];
           if (editable) classes.push('editable');
           if (isFk) classes.push('fkcell');
+          if (shape) classes.push('jsoncell');
           const clsAttr = classes.length ? ' class="'+classes.join(' ')+'"' : '';
-          const dataCol = (editable || isFk) ? ' data-col="'+esc(c)+'"' : '';
-          const val = row[c];
-          let inner = (isFk && val != null) ? '<span class="fkval">'+display(val)+'</span>' : display(val);
-          if (editable) inner += '<span class="zoom" data-col="'+esc(c)+'">🔍</span>';
+          // JSON cells need data-col too: their viewer works on read-only results,
+          // where nothing else would have emitted the attribute.
+          const dataCol = (editable || isFk || shape) ? ' data-col="'+escAttr(c)+'"' : '';
+          let inner;
+          if (shape) inner = '<span class="jsonchip">'+esc(jsonSummary(shape))+'</span>';
+          else inner = (isFk && val != null) ? '<span class="fkval">'+display(val)+'</span>' : display(val);
+          if (editable) inner += '<span class="zoom" data-col="'+escAttr(c)+'">🔍</span>';
+          // Deliberately not gated on editable: the 🔍 zoom is, which is why a JOIN
+          // or a view returning jsonb had no inspector at all (Discovery §2 Finding A).
+          if (shape) inner += '<span class="jsonopen" data-col="'+escAttr(c)+'" title="Open JSON viewer">⤢</span>';
           if (isFk && val != null) inner += '<span class="relbtn" data-col="'+esc(c)+'" title="View related row">↗</span>';
           h += '<td'+clsAttr+dataCol+'>'+inner+'</td>';
         }
@@ -1583,7 +1993,9 @@ export class QueryPanel {
       if (!editable) return;
       const all = $('chkAll');
       if (all) all.addEventListener('change', (e) => {
-        if (e.target.checked) computeView().forEach(({ri}) => selected.add(ri)); else selected.clear();
+        // Deliberately the capped view: "select all" must mean the rows the user
+        // can actually see, or Delete would reach rows that were never painted.
+        if (e.target.checked) cappedView().forEach(({ri}) => selected.add(ri)); else selected.clear();
         renderGrid();
       });
       gridEl.querySelectorAll('input.rowchk').forEach((chk) => {
@@ -1600,10 +2012,23 @@ export class QueryPanel {
           openModal(Number(z.closest('tr').getAttribute('data-ri')), z.getAttribute('data-col'));
         });
       });
+      gridEl.querySelectorAll('.jsonopen').forEach((z) => {
+        z.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openModal(Number(z.closest('tr').getAttribute('data-ri')), z.getAttribute('data-col'));
+        });
+      });
     }
     gridEl.addEventListener('dblclick', onDblEdit); // attached once
 
     function onDblEdit(e){
+      const jt = e.target.closest && e.target.closest('td.jsoncell');
+      if (jt) {
+        // A one-line text input is the wrong tool for a JSON document, so the
+        // double-click opens the viewer instead — on read-only results too.
+        openModal(Number(jt.parentElement.getAttribute('data-ri')), jt.getAttribute('data-col'));
+        return;
+      }
       const td = e.target.closest && e.target.closest('td.editable');
       if (!td || !raw || !raw.editable || td.querySelector('input.cell')) return;
       const ri = Number(td.parentElement.getAttribute('data-ri'));
@@ -1622,7 +2047,9 @@ export class QueryPanel {
       };
       input.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-        else if (ev.key === 'Escape') { done = true; renderGrid(); }
+        // stopPropagation for the same reason the completion list does it: Escape
+        // here means "cancel this edit", and must not also abort a running query.
+        else if (ev.key === 'Escape') { ev.stopPropagation(); done = true; renderGrid(); }
       });
       input.addEventListener('blur', commit);
     }
@@ -1636,26 +2063,180 @@ export class QueryPanel {
       renderGrid();
     }
 
-    // ---- cell modal ----
+    // ---- cell modal + JSON viewer ----
+    // A tree of an enormous document is the M32 hang one cell down, so expansion
+    // is lazy, each expansion is capped, and a document past this size never gets
+    // a tree at all — it opens on Raw and says so.
+    const JSON_NODE_CAP = 1000;
+    const JSON_TREE_MAX_CHARS = 2 * 1024 * 1024;
+    const treeEl = $('mtree'), textEl = $('mtext'), tabsEl = $('mtabs'), filterEl = $('mfilter');
+
+    // Children come from an already-parsed document, so a string here is just a
+    // string — jsonShape's "text that parses as JSON" rule applies to grid cells,
+    // not to values inside a tree.
+    function isBranch(v){
+      if (v === null || typeof v !== 'object') return false;
+      if (v instanceof Date) return false;
+      return !(typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(v));
+    }
+
+    function copyBtn(label, title, getText){
+      const b = document.createElement('span');
+      b.className = 'jcopy';
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type:'copy', text: getText() });
+      });
+      return b;
+    }
+
+    // Built with DOM APIs throughout: keys and values are user data and reach the
+    // page only as text nodes, so no JSON content is ever parsed as markup
+    // (Discovery §3.6). Node identity lives in this closure, not in an attribute.
+    function buildNode(container, key, val, isIndex, depth, path){
+      const branch = isBranch(val);
+      const row = document.createElement('div');
+      row.className = 'jrow' + (branch ? ' branch' : '');
+      row.style.paddingLeft = (depth * 14) + 'px';
+
+      const tog = document.createElement('span');
+      tog.className = 'jtog';
+      tog.textContent = branch ? '▸' : ' ';
+      row.appendChild(tog);
+
+      if (key !== null) {
+        const k = document.createElement('span');
+        k.className = 'jkey';
+        k.textContent = String(key);
+        row.appendChild(k);
+        row.appendChild(document.createTextNode(': '));
+      }
+
+      const v = document.createElement('span');
+      v.className = branch ? 'jpeek' : ('jval j' + (val === null ? 'null' : typeof val));
+      v.textContent = jsonPeek(val);
+      row.appendChild(v);
+
+      row.appendChild(copyBtn('⧉', 'Copy this value', () =>
+        typeof val === 'string' ? val : JSON.stringify(val, null, 2)));
+      row.appendChild(copyBtn('⌗', 'Copy path: ' + path, () => path));
+      container.appendChild(row);
+
+      if (!branch) return;
+      const kids = document.createElement('div');
+      kids.hidden = true;
+      container.appendChild(kids);
+      let built = false;
+      function toggle(){
+        if (!built) { built = true; buildChildren(kids, val, depth + 1, path); }
+        kids.hidden = !kids.hidden;
+        tog.textContent = kids.hidden ? '▸' : '▾';
+      }
+      row.addEventListener('click', (e) => {
+        if (e.target.classList.contains('jcopy')) return;
+        toggle();
+      });
+      // Open the first couple of levels: deep documents stay navigable, shallow
+      // ones are readable without a single click.
+      if (depth < 2) toggle();
+    }
+
+    function buildChildren(kids, val, depth, path){
+      const arr = Array.isArray(val);
+      const keys = arr ? null : Object.keys(val);
+      const total = arr ? val.length : keys.length;
+      const shown = Math.min(total, JSON_NODE_CAP);
+      for (let i = 0; i < shown; i++) {
+        const k = arr ? i : keys[i];
+        buildNode(kids, k, val[k], arr, depth, path + jsonPathSeg(k, arr));
+      }
+      if (total > shown) {
+        const note = document.createElement('div');
+        note.className = 'jrow jnote';
+        note.style.paddingLeft = (depth * 14) + 'px';
+        note.textContent = 'Showing the first ' + shown + ' of ' + total +
+                           ' — use Raw to see everything';
+        kids.appendChild(note);
+      }
+    }
+
+    function showTab(which){
+      const tree = which === 'tree';
+      treeEl.style.display = tree ? 'block' : 'none';
+      textEl.style.display = tree ? 'none' : 'block';
+      filterEl.style.display = tree ? 'inline-block' : 'none';
+      $('mtabTree').classList.toggle('on', tree);
+      $('mtabRaw').classList.toggle('on', !tree);
+      // Saving writes the raw text, so it is only offered where that text is what
+      // you are looking at. The tree is read-only in v1.
+      $('msave').disabled = tree || !raw || !raw.editable;
+    }
+
     function openModal(ri, col){
       modalCtx = { ri, col };
       const v = raw.rows[ri][col];
-      $('mfmt').value = 'plain';
-      $('mtext').value = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v));
+      const shape = jsonShape(v);
+      textEl.value = (v === null || v === undefined) ? ''
+        : (typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v));
+      filterEl.value = '';
+      treeEl.innerHTML = '';
+      $('mtitle').textContent = shape ? 'JSON — ' + col : 'Edit Data';
+      $('modal').classList.toggle('json', !!shape);
+      if (shape) {
+        tabsEl.style.display = 'inline-flex';
+        if (textEl.value.length > JSON_TREE_MAX_CHARS) {
+          // Honest rather than heroic: say why there is no tree.
+          const note = document.createElement('div');
+          note.className = 'jrow jnote';
+          note.textContent = 'This document is ' + (textEl.value.length / 1048576).toFixed(1) +
+            ' MB — too large to expand as a tree without freezing the panel. Showing Raw.';
+          treeEl.appendChild(note);
+          showTab('raw');
+        } else {
+          buildNode(treeEl, null, shape.value, false, 0, '$');
+          showTab('tree');
+        }
+      } else {
+        tabsEl.style.display = 'none';
+        showTab('raw');
+      }
       $('overlay').style.display = 'flex';
     }
     function closeModal(){ $('overlay').style.display = 'none'; modalCtx = null; }
+    function overlayOpen(){
+      return $('overlay').style.display === 'flex' || $('addOverlay').style.display === 'flex'
+        || colsMenuOpen();
+    }
+    // Escape precedence: the completion dropdown closes first (its own handler
+    // stops propagation), then any open modal, and only then does Escape abort a
+    // running query — closing what is in front of you is never the surprising choice.
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (colsMenuOpen()) { e.preventDefault(); closeColsMenu(); $('colsBtn').focus(); return; }
+      if ($('overlay').style.display === 'flex') { e.preventDefault(); closeModal(); return; }
+      if ($('addOverlay').style.display === 'flex') {
+        e.preventDefault();
+        $('addOverlay').style.display = 'none';
+      }
+    });
     $('mclose').addEventListener('click', closeModal);
     $('overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') closeModal(); });
-    $('mcopy').addEventListener('click', () => vscode.postMessage({ type:'copy', text: $('mtext').value }));
-    $('mfmt').addEventListener('change', () => {
-      if ($('mfmt').value === 'json') {
-        try { $('mtext').value = JSON.stringify(JSON.parse($('mtext').value), null, 2); } catch(_){}
-      }
+    $('mcopy').addEventListener('click', () => vscode.postMessage({ type:'copy', text: textEl.value }));
+    $('mtabTree').addEventListener('click', () => showTab('tree'));
+    $('mtabRaw').addEventListener('click', () => showTab('raw'));
+    // Dims rather than hides, so a match keeps its place in the structure. Only
+    // expanded nodes exist to be matched — hence "shown" in the placeholder.
+    filterEl.addEventListener('input', () => {
+      const t = filterEl.value.toLowerCase();
+      treeEl.querySelectorAll('.jrow').forEach((r) => {
+        r.classList.toggle('dim', !!t && r.textContent.toLowerCase().indexOf(t) < 0);
+      });
     });
     $('msave').addEventListener('click', () => {
       if (!modalCtx || !raw.editable) { closeModal(); return; }
-      saveCell(modalCtx.ri, modalCtx.col, $('mtext').value);
+      saveCell(modalCtx.ri, modalCtx.col, textEl.value);
       closeModal();
     });
 
@@ -1667,6 +2248,9 @@ export class QueryPanel {
       if (qlock) { lockNudge(); return; }
       if (!raw || !raw.editable) return;
       const form = $('addForm');
+      // Deliberately every column, hidden ones included: this is a data-entry
+      // form, not a view, and omitting a NOT NULL column would fail the insert
+      // for a reason the user cannot see.
       form.innerHTML = raw.columns.map((c) => {
         const m = metaFor(c);
         const label = esc(c) + (m ? ' <span class="ctype">'+esc(m.type)+(m.nullable?'':' *')+'</span>' : '');
@@ -1689,6 +2273,10 @@ export class QueryPanel {
     window.addEventListener('message', (ev) => {
       const m = ev.data;
       if (m.type === 'error') {
+        // A run the user aborted: its failure is not news, and painting it would
+        // overwrite the "Aborted" line they asked for.
+        if (m.runSeq != null && m.runSeq !== runSeq) return;
+        if (m.runSeq != null) setRunning(false);
         statusEl.textContent = 'Error';
         gridEl.innerHTML = '<pre style="color:var(--vscode-errorForeground)">'+esc(m.message)+'</pre>';
         // A failure is what arms Fix — it carries the exact error to the AI.
@@ -1697,6 +2285,25 @@ export class QueryPanel {
         return;
       }
       if (m.type === 'aiEnabled') { aiBar.style.display = 'flex'; return; }
+      if (m.type === 'abortCaps') {
+        canAbort = !!m.canAbort; hardAbort = !!m.hard;
+        // Redis can only stop us waiting, so it must not say "Abort".
+        abortBtn.textContent = hardAbort ? '■ Abort' : '■ Stop waiting';
+        abortBtn.title = hardAbort
+          ? 'Cancel the running query on the server (Esc)'
+          : 'Stop waiting for this command (Esc) — the server may still run it';
+        return;
+      }
+      if (m.type === 'aborted') {
+        // The host confirms the cancel landed. Not styled as an error: the user
+        // asked for this. A soft cancel must not claim more than it did — the
+        // server was never told to stop.
+        setRunning(false);
+        statusEl.textContent = hardAbort
+          ? 'Aborted after ' + m.secs + 's.'
+          : 'Stopped waiting after ' + m.secs + 's — the server may still be working on it.';
+        return;
+      }
       if (m.type === 'aiCompletions') {
         if (m.seq < pcSeq) return; // stale reply overtaken by newer typing
         if (document.activeElement !== aiPromptEl) { pcClose(); return; }
@@ -1781,6 +2388,10 @@ export class QueryPanel {
       }
       if (m.type === 'setSql') { sqlEl.value = m.sql; return; }
       if (m.type === 'result') {
+        // An aborted run may still win the race and return rows. Dropping it here
+        // is what keeps "Aborted" honest — no grid paint from a run the user quit.
+        if (m.runSeq != null && m.runSeq !== runSeq) return;
+        if (m.runSeq != null) setRunning(false);
         // Drop a response that a newer request has already overtaken. Results with no
         // seq (fresh runs, post-edit refreshes) are never stale — always render those.
         if (m.seq != null) {
@@ -1791,6 +2402,10 @@ export class QueryPanel {
         lastError = null;
         $('aiFixBtn').disabled = true;
         raw = m.result; selected.clear();
+        // Before anything renders: a different query starts with every column shown.
+        syncColumnsFor(raw);
+        syncColsBtn();
+        if (colsMenuOpen()) closeColsMenu();
         // Only reset sort/filters for a brand-new table/query, not sort/filter/page re-runs.
         if (m.fresh) { sort = { col:null, dir:1 }; filters = {}; search = ''; $('search').value = ''; }
         // Show the equivalent SQL for table previews so it can be seen/edited.
@@ -1821,19 +2436,6 @@ export class QueryPanel {
 </body>
 </html>`;
   }
-}
-
-function toCsv(result: QueryResult): string {
-  const esc = (v: unknown): string => {
-    if (v === null || v === undefined) {
-      return "";
-    }
-    const s = typeof v === "object" ? JSON.stringify(v) : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const header = result.columns.map(esc).join(",");
-  const lines = result.rows.map((row) => result.columns.map((c) => esc(row[c])).join(","));
-  return [header, ...lines].join("\n");
 }
 
 function escapeHtml(s: string): string {

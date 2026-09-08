@@ -17,6 +17,9 @@ import { buildTls } from "./ssl";
 /** MySQL / MariaDB driver backed by the pure-JS `mysql2` pool. */
 export class MySqlDriver implements Driver {
   private pool?: mysql.Pool;
+  /** Thread id per in-flight run, keyed by the caller's token. One driver
+   *  instance serves every panel on the connection, so this is a map. */
+  private inFlight = new Map<string, number>();
 
   constructor(public readonly config: ConnectionConfig) {}
 
@@ -45,6 +48,19 @@ export class MySqlDriver implements Driver {
   async dispose(): Promise<void> {
     await this.pool?.end();
     this.pool = undefined;
+  }
+
+  /** `KILL QUERY` stops the statement server-side and leaves the session alive. */
+  readonly canCancel = true;
+
+  async cancel(token: string): Promise<void> {
+    const id = this.inFlight.get(token);
+    if (id === undefined) {
+      return;
+    }
+    // A separate pooled connection: the one running the query is blocked on it.
+    // KILL QUERY (not KILL CONNECTION) ends the statement, not the session.
+    await this.p.query(`KILL QUERY ${Number(id)}`);
   }
 
   private get p(): mysql.Pool {
@@ -178,8 +194,26 @@ export class MySqlDriver implements Driver {
     });
   }
 
-  async query(sql: string): Promise<QueryResult> {
-    const [result, fields] = await this.p.query(sql);
+  /**
+   * Runs on an explicitly checked-out connection rather than `pool.query()`
+   * because cancellation needs the connection's `threadId` — a pooled query
+   * never exposes which connection it landed on. Metadata calls keep using the
+   * pool directly; only user SQL is long enough to be worth aborting.
+   */
+  async query(sql: string, _database?: string, token?: string): Promise<QueryResult> {
+    const conn = await this.p.getConnection();
+    if (token && conn.threadId != null) {
+      this.inFlight.set(token, conn.threadId);
+    }
+    let result: unknown, fields: unknown;
+    try {
+      [result, fields] = await conn.query(sql);
+    } finally {
+      if (token) {
+        this.inFlight.delete(token);
+      }
+      conn.release();
+    }
     if (Array.isArray(result)) {
       const rows = result as Array<Record<string, unknown>>;
       const out: QueryResult = {
