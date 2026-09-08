@@ -153,6 +153,12 @@ export class DatabaseTreeProvider
         );
         node.id = `${c.id}#${this.genOf(c.id)}`;
         node.description = describe(c.type);
+        // Deliberately a plain string, never a MarkdownString: this is text the
+        // user typed, and a markdown tooltip renders links — including
+        // `command:` URIs, which would turn a note into a clickable action.
+        if (c.notes) {
+          node.tooltip = `${c.name} · ${describe(c.type)}\n\n${c.notes}`;
+        }
         node.iconPath = this.engineIcon(c.type, connected);
         return node;
       });

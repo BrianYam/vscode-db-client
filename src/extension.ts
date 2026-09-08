@@ -40,7 +40,10 @@ const EXPORT_MODES: Array<vscode.QuickPickItem & { mode: ExportMode }> = [
     label: "$(shield) Without passwords",
     description: "safe to share",
     detail:
-      "Servers, ports, users and options only. Passwords are left out, and any password inside a connection string is stripped.",
+      // Notes are named explicitly: this is the mode people share, and free text
+      // cannot be redacted the way a password field can. The promise on this line
+      // has to match what the file actually carries.
+      "Servers, ports, users, options and your connection notes. Passwords are left out, and any password inside a connection string is stripped.",
   },
   {
     mode: "encrypted",

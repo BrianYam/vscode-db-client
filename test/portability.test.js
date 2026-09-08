@@ -406,3 +406,81 @@ test("decryptBundle rejects a file that is not an encrypted bundle", () => {
   assert.throws(() => decryptBundle(wrap([]), "pw"), /Not an encrypted/);
   assert.throws(() => decryptBundle("nonsense", "pw"), /valid JSON/);
 });
+
+// -------------------------------------------------------------- notes (M34)
+// Export spreads the config blindly while import is allowlisted, so `notes` is
+// the kind of field that leaves happily and never comes back. These pin the
+// round-trip shut.
+
+test("notes survive an export → import round-trip", () => {
+  const notes = "read-replica — safe to query, writes go to primary";
+  const { file } = buildExport(
+    [{ config: { id: "c1", type: "postgres", name: "S", notes } }],
+    OPTS,
+  );
+  assert.strictEqual(file.connections[0].notes, notes, "export must carry notes");
+  const parsed = parseImport(JSON.stringify(file));
+  assert.strictEqual(parsed.connections[0].notes, notes, "import must keep notes");
+});
+
+test("notes are carried by a without-secrets export", () => {
+  // The mode people share. It cannot redact free text, which is exactly why the
+  // picker's detail line names notes — see DISCOVERY_CONNECTION_NOTES.md §2 Finding B.
+  const { file } = buildExport(
+    [{ config: { id: "c1", type: "postgres", name: "S", notes: "prod — do not write" } }],
+    { ...OPTS, includeSecrets: false },
+  );
+  assert.strictEqual(file.secrets, "omitted");
+  assert.strictEqual(file.connections[0].notes, "prod — do not write");
+});
+
+test("a connection with no notes stays without the field", () => {
+  const { file } = buildExport([{ config: { id: "c1", type: "postgres", name: "S" } }], OPTS);
+  assert.strictEqual(file.connections[0].notes, undefined);
+  const parsed = parseImport(JSON.stringify(file));
+  assert.strictEqual(parsed.connections[0].notes, undefined);
+});
+
+test("an oversized note is truncated on import, and says so", () => {
+  // Import never passes through the form, so it is a second entry point for the
+  // cap — untrusted input must not put a multi-megabyte note into globalState.
+  const parsed = parseImport(wrap([{ type: "postgres", name: "S", notes: "x".repeat(5000) }]));
+  assert.strictEqual(parsed.connections[0].notes.length, 2000);
+  assert.ok(
+    parsed.warnings.some((w) => /notes truncated/i.test(w)),
+    `truncation must be reported, not silent: ${JSON.stringify(parsed.warnings)}`,
+  );
+});
+
+test("a non-string notes field in an import file is dropped", () => {
+  for (const bad of [{ a: 1 }, 42, true, ["x"], null]) {
+    const parsed = parseImport(wrap([{ type: "postgres", name: "S", notes: bad }]));
+    assert.strictEqual(parsed.connections[0].notes, undefined, `notes=${JSON.stringify(bad)}`);
+  }
+});
+
+test("notes reach the merged config, not just the parsed file", () => {
+  // The whole chain: export spread → import allowlist → merge spread → saved
+  // config. Every hop is a place the field could quietly fall out.
+  const notes = "staging — seeded nightly, safe to truncate";
+  const { file } = buildExport(
+    [{ config: { id: "c1", type: "postgres", name: "S", notes } }],
+    OPTS,
+  );
+  const parsed = parseImport(JSON.stringify(file));
+  const { added } = mergeConnections([], parsed.connections, mkId);
+  assert.strictEqual(added.length, 1);
+  assert.strictEqual(added[0].notes, notes);
+});
+
+test("notes are plain text — markup and command links are not interpreted anywhere", () => {
+  // The tree renders this into a tooltip as a plain string, never a
+  // MarkdownString, so a command: URI must survive as literal characters.
+  const notes = "[click](command:workbench.action.quit) <script>alert(1)</script>";
+  const { file } = buildExport(
+    [{ config: { id: "c1", type: "postgres", name: "S", notes } }],
+    OPTS,
+  );
+  const parsed = parseImport(JSON.stringify(file));
+  assert.strictEqual(parsed.connections[0].notes, notes, "stored and returned verbatim");
+});

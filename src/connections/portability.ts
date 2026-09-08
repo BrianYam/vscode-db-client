@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
-import { type ConnectionConfig, type DatabaseType, DEFAULT_PORTS } from "./types";
+import { type ConnectionConfig, type DatabaseType, DEFAULT_PORTS, NOTES_MAX_CHARS } from "./types";
 
 /**
  * Import / export of connection configs. Pure logic — no vscode, no filesystem —
@@ -59,6 +59,10 @@ const TYPES: DatabaseType[] = ["postgres", "mysql", "sqlite", "redis"];
  */
 const STRING_FIELDS = [
   "name",
+  // Export takes a blind spread of the config, so `notes` leaves automatically.
+  // Import is allowlisted, so without this line it would be dropped in silence
+  // and a round-trip would quietly lose every note the user wrote.
+  "notes",
   "host",
   "username",
   "database",
@@ -297,6 +301,13 @@ function sanitize(raw: unknown, index: number, warnings: string[]): ExportedConn
     if (typeof r[f] === "string" && r[f] !== "") {
       out[f] = r[f] as string;
     }
+  }
+  // Import never passes through the connection form, so it is a second entry
+  // point for `notes` and has to apply the cap itself — this is untrusted input,
+  // and an oversized note would otherwise land straight in globalState.
+  if (out.notes && out.notes.length > NOTES_MAX_CHARS) {
+    out.notes = out.notes.slice(0, NOTES_MAX_CHARS);
+    warnings.push(`Entry ${index + 1}: notes truncated to ${NOTES_MAX_CHARS} characters.`);
   }
   if (typeof r.sshAuth === "string" && SSH_AUTH.includes(r.sshAuth)) {
     out.sshAuth = r.sshAuth as ExportedConnection["sshAuth"];

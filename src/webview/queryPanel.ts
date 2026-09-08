@@ -144,11 +144,15 @@ export class QueryPanel {
   }
 
   private contextTooltip(): string {
-    const name = this.store.get(this.connectionId)?.name ?? "this connection";
-    return (
+    const config = this.store.get(this.connectionId);
+    const name = config?.name ?? "this connection";
+    const base =
       `Queries in this panel run against "${this.contextLabel()}" on ${name}. ` +
-      `To target another database, use New Query on that database in the tree.`
-    );
+      `To target another database, use New Query on that database in the tree.`;
+    // The note is why this connection is different — "read replica", "prod, do
+    // not write" — so it belongs where the SQL is being typed, not only in the
+    // tree hover the user saw once.
+    return config?.notes ? `${base}\n\n${config.notes}` : base;
   }
 
   private constructor(

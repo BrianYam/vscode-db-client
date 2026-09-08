@@ -1228,3 +1228,73 @@ setup in `docs/TESTING.md` Part 7. Both scripts run end to end, verified 2026-09
 - [ ] `[SDD][M33]` Perf sanity: a SQLite/Redis text column of large JSON strings re-parses
       on every render (search keystrokes included). Bounded by the M32 2,000-row cap and
       fine in principle — confirm it feels responsive on a real table
+
+## M34 — Optional description / notes per connection (requested 2026-09-08)
+
+Spec: `DISCOVERY_CONNECTION_NOTES.md` (§5 locked 2026-09-08 — optional `notes` capped at
+2,000 chars, no schema migration, added to the import allowlist, honest about being stored
+and exported in the clear, plain-string tooltip only).
+
+
+**Build note — the cap needed a second home.** §3.1 put the 2,000-character cap in
+`toConfig()`, "the one funnel". It is not: **import never passes through the form**, so an
+export file — untrusted input — could have put a multi-megabyte note straight into
+globalState. The cap is now applied in `sanitize()` too, and reports the truncation as an
+import warning rather than trimming in silence. Verified end to end: the field survives
+export spread → import allowlist → `mergeConnections` spread → saved config, and
+`store.save`/`upcast` pass it through untouched, so §5.2's "no migration" holds as checked
+rather than assumed.
+
+### M34.0 — Data & form ✅ DONE 2026-09-08 (Discovery §3.1, §3.2)
+- [x] `[SDD][M34]` `notes?: string` on `ConnectionConfig`; documented as plaintext in
+      `globalState`, unlike password/ssh secrets which live in SecretStorage
+- [x] `[SDD][M34]` **No** `CURRENT_SCHEMA_VERSION` bump and no `migrate()` branch — an
+      absent optional field needs neither. Note the reasoning so it is not "fixed" later
+- [x] `[SDD][M34]` `<textarea>` under Name, `Notes (optional)`, with the one-line warning:
+      stored unencrypted with the connection and included in exports
+- [x] `[SDD][M34]` 2,000-character cap enforced in `toConfig()` with a live counter in the
+      form — surfaced, never silently truncated
+
+### M34.1 — Where it shows ✅ DONE 2026-09-08 (Discovery §3.3)
+- [x] `[SDD][M34]` Tree connection node `tooltip` (the node has none today) — a plain
+      `string`, **never** a `MarkdownString`: markdown tooltips render links including
+      `command:` URIs, and this is user-supplied text
+- [x] `[SDD][M34]` Appended to the query panel's `contextTooltip()` so it is in reach while
+      writing SQL
+- [x] `[SDD][M34]` `description` stays the engine name — notes do not go on that line
+
+### M34.2 — Portability ✅ DONE 2026-09-08 (Discovery §3.4, Finding A)
+- [x] `[SDD][M34]` Add `notes` to `STRING_FIELDS` in `portability.ts` — export uses a blind
+      spread and includes it automatically, while import is allowlisted and would **drop
+      it silently**. Without this, export → import loses every note with no warning
+- [x] `[SDD][M34]` Test in `portability.test.js`: notes survive a full round-trip; a note
+      longer than the cap is handled; a non-string `notes` in an import file is rejected
+- [x] `[SDD][M34]` The export-without-secrets confirmation names notes among the file's
+      contents, so its promise stays true (Finding B)
+
+### M34.4 — Editing a connection sent it to the bottom of the tree ✅ DONE 2026-09-08
+Found while QA-ing M34; **pre-existing, not an M34 regression** — `store.ts` is untouched
+by this milestone (`git diff` is empty for it).
+
+`save()` did `all().filter(c => c.id !== config.id)` then `push(...)`, so *every* edit
+removed the entry and re-appended it. That silently discarded list order — which is
+deliberate user state, since `reorder()` exists precisely so connections can be dragged
+into a meaningful arrangement.
+
+- [x] `[SDD][M34]` `save()` replaces in place when the id already exists; only a genuinely
+      new connection is appended
+- [x] `[SDD][M34]` `test/connectionStore.test.js` — new: `store.ts` imports vscode as a
+      *type* only, so it runs against a fake context. Covers position on edit, on rename,
+      append-if-new, schema stamping, notes round-trip, and repeated edits. **Verified the
+      tests fail against the old code** (3 of 6 fail) before restoring the fix
+
+### M34.3 — Human QA gate (Phase 4) 🟡 code done 2026-09-08, manual QA open
+- [x] `[SDD][M34]` Add a note, reopen the form → it is still there; clear it → it goes
+- [x] `[SDD][M34]` Hover the connection in the tree → note shows; a note containing
+      `[click](command:workbench.action.quit)` renders as literal text, not a link
+- [x] `[SDD][M34]` Export with secrets omitted → re-import → notes intact
+- [x] `[SDD][M34]` A pre-existing connection saved before this change still loads and
+      edits fine with no note
+- [x] `[SDD][M34]` Paste 5,000 characters → counter warns, cap applies visibly
+- [x] `[SDD][M34]` Import a file whose note exceeds the cap → truncated *and* a warning is
+      shown in the import summary

@@ -11,6 +11,17 @@ export interface ConnectionConfig {
   schemaVersion?: number;
   type: DatabaseType;
   name: string;
+  /**
+   * Free-text notes about this connection (what it is for, what not to run
+   * against it). Optional and capped at NOTES_MAX_CHARS.
+   *
+   * Unlike `password` / `sshPassword` / `sshPassphrase`, this is **not** a
+   * secret field: it lives in globalState in the clear and it travels in export
+   * files — including exports taken with secrets omitted, which cannot redact
+   * free text. The connection form says so at the point of entry; do not treat
+   * this as a place credentials may be kept.
+   */
+  notes?: string;
   // SQL / Redis network fields
   host?: string;
   port?: number;
@@ -42,6 +53,14 @@ export interface ConnectionConfig {
 }
 
 export type SshAuth = "auto" | "password" | "key" | "agent";
+
+/**
+ * Cap on `ConnectionConfig.notes`. globalState is a synced key-value store, not
+ * a document store — and the note is rendered into a hover tooltip, where a
+ * pasted runbook helps nobody. Enforced where the form builds a config, and
+ * surfaced by a live counter rather than truncating behind the user's back.
+ */
+export const NOTES_MAX_CHARS = 2000;
 
 export const DEFAULT_PORTS: Record<DatabaseType, number> = {
   postgres: 5432,

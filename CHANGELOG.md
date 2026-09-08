@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Connections can carry notes.** An optional **Notes** field on the connection
+  form — what the connection is for, what not to run against it. It shows when
+  you hover the connection in the tree, and again in the query panel's context
+  tooltip, so it is in front of you while you type SQL rather than only at the
+  moment you set it up. Notes travel with **Export / Import**.
+  - Notes are stored **unencrypted** alongside the connection and are included in
+    exports, *including* the "Without passwords" export. The form says so plainly
+    and that export option now names notes among what the file carries — so
+    don't keep credentials there.
 - **JSON and JSONB columns have a proper viewer.** A JSON cell used to be a wall
   of minified text that stretched its column past the edge of the window and made
   the whole row unreadable. It now shows a compact summary — `{…} 12 keys`,
@@ -42,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of appearing in the grid.
 
 ### Fixed
+- **Editing a connection no longer moves it to the bottom of the list.** Saving
+  removed the connection and re-added it at the end, so any order you had dragged
+  your connections into was quietly lost every time you edited one. It now keeps
+  its place; only genuinely new connections are appended.
 - **Pop-up dialogs no longer render underneath the results header.** The overlay
   had no stacking order of its own, so the sticky column headers and filter boxes
   painted straight over the top of it. This affected the Edit Data dialog too, not
