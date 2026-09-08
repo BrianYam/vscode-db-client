@@ -1298,3 +1298,85 @@ into a meaningful arrangement.
 - [x] `[SDD][M34]` Paste 5,000 characters → counter warns, cap applies visibly
 - [x] `[SDD][M34]` Import a file whose note exceeds the cap → truncated *and* a warning is
       shown in the import summary
+
+## M35 — Column picker (show / hide result columns) (requested 2026-09-08)
+
+Spec: `DISCOVERY_COLUMN_PICKER.md` (§5 locked 2026-09-08 — `Columns ▾` dropdown with
+search and Show all, everything visible by default, per-consumer behaviour explicit,
+export reports the count, no persistence across reopens).
+
+
+**Build note — a backtick nearly shipped a broken helper.** The first draft of
+`columnView.ts` used a backtick inside the `String.raw` comment, which silently split the
+literal into `String.raw\`…\` + "…" + \`…\`` — a *normal* template literal for the tail, so
+`'\n'` in `columnsKey` became a raw newline and the helper stopped parsing. Typecheck
+passed throughout; only evaluating the emitted string caught it. The source strings are now
+checked by parsing them in their tests, and the same class of bug bit a webview comment in
+`queryPanel.ts` (comments inside the HTML template must not contain backticks).
+
+### M35.0 — Pure logic ✅ DONE 2026-09-08 (Discovery §3.5)
+- [x] `[SDD][M35]` `visibleColumns(all, hidden)` + `projectRows(rows, columns)` in a small
+      exported module, shipped into the webview as a source string — same reason as
+      `jsonView.ts`: it runs in the webview and the shipped build minifies
+- [x] `[SDD][M35]` Tests: nothing hidden, some hidden, unknown names in the hidden set,
+      order preserved, projection drops only the hidden keys
+
+### M35.1 — The control ✅ DONE 2026-09-08 (Discovery §3.1, §3.2)
+- [x] `[SDD][M35]` `Columns ▾` button in the results toolbar, left of Export; label shows
+      `Columns 5/9` whenever anything is hidden — hidden columns are never silent state
+- [x] `[SDD][M35]` Hand-rolled dropdown at z-index 60 (above the sticky header at 3, below
+      modals at 100): filter box, one checkbox per column, **Show all** (disabled when
+      nothing is hidden)
+- [x] `[SDD][M35]` The last visible column cannot be unchecked — its checkbox disables
+- [x] `[SDD][M35]` Visibility resets when the result's column set changes (compared as a
+      joined key), so re-running the same query keeps the choice
+
+### M35.2 — Per-consumer behaviour ✅ DONE 2026-09-08 (Discovery §3.3 — the table is the spec)
+- [x] `[SDD][M35]` Grid header, body and filter row render visible columns only
+- [x] `[SDD][M35]` Global search matches **visible columns only** — matching a row on
+      invisible text is the exact "why is my grid empty" trap this must avoid
+- [x] `[SDD][M35]` Hiding a column **clears that column's filter** (and re-queries when
+      server-backed); the status line says what happened
+- [x] `[SDD][M35]` `copyAsJson` projects to visible columns — the comment above it already
+      promises the clipboard matches what you were looking at
+- [x] `[SDD][M35]` **Add Row keeps every column**, hidden or not: it is a data-entry form,
+      and omitting a NOT NULL column would fail an insert for an invisible reason
+- [x] `[SDD][M35]` Cell editing and Delete unaffected — they read `raw.rows`, not the DOM
+
+### M35.3 — Export ✅ DONE 2026-09-08 (Discovery §3.4)
+- [x] `[SDD][M35]` `export` message carries `columns: string[]`; absent means all, so no
+      other caller changes
+- [x] `[SDD][M35]` `handleExport` projects `lastResult` before `toCsv` / `JSON.stringify`
+- [x] `[SDD][M35]` Success message reports `12 row(s), 5 of 9 columns` when hiding is active
+      — never a silently narrower file
+
+### M35.4 — Human QA gate (Phase 4) 🟡 code-verified 2026-09-08; visual pass open
+
+Verified by driving the **real** functions from `queryPanel.ts` (pulled out by brace
+matching, not paraphrased) against a DOM stub, plus unit tests where the logic could be
+extracted. Harnesses live in the session scratchpad; the extracted-module tests are
+committed as `test/exportView.test.js` and `test/columnView.test.js`.
+
+- [x] `[SDD][M35]` Hide columns → grid narrows; button reads `Columns 5/9`; Show all
+      restores *(driven: order preserved, button label and flag asserted)*
+- [x] `[SDD][M35]` Hide a column with an active filter → filter clears *(driven: the filter
+      key is gone and the status line reads `Hid "name" and cleared its column filter.`)*
+- [x] `[SDD][M35]` Search matches nothing that lives only in a hidden column *(driven: a
+      term matching one row returns it while visible and returns nothing once hidden)*
+- [x] `[SDD][M35]` **PK hidden → edit and delete still work** *(driven through the real
+      `saveCell` / `deleteSelected`: the posted messages still carry `{id: 2}` and
+      `[{id:1},{id:2}]` with the PK column not rendered)*
+- [x] `[SDD][M35]` Add Row lists every column while some are hidden *(driven through the
+      real `openAddModal`: all four `data-col` fields present)*
+- [x] `[SDD][M35]` Export CSV + JSON contain only visible columns, and the message says so
+      *(unit-tested — the export path was extracted to `src/webview/exportView.ts` to make
+      this testable; also covers CSV quote/comma/newline escaping, which had **no tests at
+      all** before)*
+- [x] `[SDD][M35]` Different query resets visibility; the same one keeps it *(driven)*
+- [x] `[SDD][M35]` Regression: M32 scope note still says `2000 of 5000`; M33 JSON chips
+      still render; a 40-column table filters to 6 matches and shows "No column matches."
+      rather than a blank box *(driven on a 5,000-row result with a JSON column)*
+
+**Not covered by any of the above — needs eyes in a running window:** dropdown placement
+and theming, hover/click feel, the save dialog and the bytes actually written to disk, and
+behaviour against a live database. The logic is verified; the pixels are not.

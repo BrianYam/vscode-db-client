@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A column picker for results.** A **Columns ▾** button in the results toolbar
+  lists every column with a checkbox — all on by default — plus a search box for
+  wide tables and **Show all**. `SELECT *` on a table with a dozen columns is
+  readable again without hand-writing a column list.
+  - The button reads `Columns 5/9` whenever something is hidden, so a narrowed
+    view is never a mystery.
+  - Search and **Copy as JSON** follow what you can see; hiding a column also
+    clears that column's filter, so nothing filters your rows invisibly.
+  - **Export** writes only the visible columns and says so — *"12 row(s), 5 of 9
+    columns"* — rather than quietly producing a narrower file.
+  - **Add Row** still lists every column, hidden or not: it is a data-entry form,
+    and a missing required column would fail the insert for an invisible reason.
+  - Editing and deleting rows work with the primary key hidden.
 - **Connections can carry notes.** An optional **Notes** field on the connection
   form — what the connection is for, what not to run against it. It shows when
   you hover the connection in the tree, and again in the query panel's context

@@ -18,6 +18,8 @@ import type {
 import { logError } from "../log";
 import { suggest } from "../sqlComplete";
 import { canFormat, formatSql, vocabularyFor } from "../sqlDialect";
+import { COLUMN_VIEW_HELPERS } from "./columnView";
+import { projectResult, toCsv } from "./exportView";
 import { JSON_VIEW_HELPERS } from "./jsonView";
 
 interface PanelOptions {
@@ -247,7 +249,7 @@ export class QueryPanel {
           this.openRelated(msg.column, msg.value);
           break;
         case "export":
-          await this.handleExport(msg.format);
+          await this.handleExport(msg.format, msg.columns);
           break;
         case "copy":
           await this.handleCopy(String(msg.text ?? ""), msg.rows);
@@ -675,11 +677,19 @@ export class QueryPanel {
     );
   }
 
-  private async handleExport(format: "csv" | "json"): Promise<void> {
+  /**
+   * `columns` is the webview's visible set. Absent means "all", so anything else
+   * posting an export needs no change. The file follows what was on screen, and
+   * the confirmation says so — a silently narrower file is the failure mode here.
+   */
+  private async handleExport(format: "csv" | "json", columns?: unknown): Promise<void> {
     if (!this.lastResult?.columns.length) {
       vscode.window.showWarningMessage("Nothing to export — run a query first.");
       return;
     }
+    const all = this.lastResult.columns;
+    const result = projectResult(this.lastResult, columns);
+    const hiddenCount = all.length - result.columns.length;
     const uri = await vscode.window.showSaveDialog({
       filters: format === "csv" ? { CSV: ["csv"] } : { JSON: ["json"] },
       saveLabel: `Export ${format.toUpperCase()}`,
@@ -687,11 +697,12 @@ export class QueryPanel {
     if (!uri) {
       return;
     }
-    const content =
-      format === "csv" ? toCsv(this.lastResult) : JSON.stringify(this.lastResult.rows, null, 2);
+    const content = format === "csv" ? toCsv(result) : JSON.stringify(result.rows, null, 2);
     fs.writeFileSync(uri.fsPath, content, "utf8");
     vscode.window.showInformationMessage(
-      `Exported ${this.lastResult.rowCount} row(s) to ${uri.fsPath}`,
+      `Exported ${result.rowCount} row(s)` +
+        (hiddenCount > 0 ? `, ${result.columns.length} of ${all.length} columns` : "") +
+        ` to ${uri.fsPath}`,
     );
   }
 
@@ -915,6 +926,23 @@ export class QueryPanel {
                     color: var(--vscode-textLink-foreground);
                     background: var(--vscode-button-secondaryBackground); }
   @media (prefers-reduced-motion: reduce) { #abortBtn { animation: none; } }
+  /* ---- column picker ---- */
+  #colsMenu { position: fixed; z-index: 60; display: none; min-width: 220px; max-width: 320px;
+              background: var(--vscode-editorWidget-background);
+              border: 1px solid var(--border); border-radius: 4px; padding: 6px;
+              box-shadow: 0 4px 12px #0006; }
+  #colsMenu #colsFilter { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+  #colsList { max-height: 300px; overflow-y: auto; }
+  #colsList label { display: flex; align-items: center; gap: 6px; padding: 3px 4px;
+                    cursor: pointer; border-radius: 3px; white-space: nowrap; }
+  #colsList label:hover { background: var(--vscode-list-hoverBackground); }
+  /* The last visible column disables rather than disappearing, so the reason the
+     click did nothing is visible rather than mysterious. */
+  #colsList label.locked { opacity: .5; cursor: default; }
+  #colsList .none { opacity: .6; padding: 4px; }
+  .colsfoot { display: flex; justify-content: flex-end; margin-top: 6px;
+              border-top: 1px solid var(--border); padding-top: 6px; }
+  #colsBtn.filtered { color: var(--vscode-textLink-foreground); }
   .null { opacity: .5; font-style: italic; }
   /* ---- JSON viewer ---- */
   /* A JSON cell shows a summary chip, never the raw document: td is white-space:pre
@@ -998,6 +1026,7 @@ export class QueryPanel {
     ${formattable ? '<button id="formatBtn" class="secondary" title="Format SQL (Shift+Alt+F)">Format</button>' : ""}
     <button id="addBtn" class="secondary" title="Add row" disabled>＋ Row</button>
     <button id="delBtn" class="secondary" title="Delete selected rows" disabled>🗑 Delete</button>
+    <button id="colsBtn" class="secondary" title="Show or hide result columns">Columns ▾</button>
     <button id="csvBtn" class="secondary">Export CSV</button>
     <button id="jsonBtn" class="secondary">Export JSON</button>
     <button id="copyJsonBtn" class="secondary" title="Copy checked rows as JSON — all rows in view if none are checked">Copy as JSON</button>
@@ -1014,6 +1043,11 @@ export class QueryPanel {
     <span id="pageLbl">–</span>
     <button id="nextBtn" class="secondary" disabled>›</button>
     <span id="total"></span>
+  </div>
+  <div id="colsMenu">
+    <input id="colsFilter" class="filter" placeholder="Search columns…" />
+    <div id="colsList"></div>
+    <div class="colsfoot"><button id="colsAll" class="secondary">Show all</button></div>
   </div>
   <div id="ac"></div>
   <div id="status">Ctrl/Cmd+Enter to run — highlight to run only that${
@@ -1059,6 +1093,7 @@ export class QueryPanel {
     const vscode = acquireVsCodeApi();
     const $ = (id) => document.getElementById(id);
 ${JSON_VIEW_HELPERS}
+${COLUMN_VIEW_HELPERS}
     const sqlEl = $('sql'), statusEl = $('status'), gridEl = $('grid');
     let raw = null;                 // last QueryResult
     let sort = { col: null, dir: 1 };
@@ -1236,8 +1271,8 @@ ${JSON_VIEW_HELPERS}
         if ($('formatBtn')) vscode.postMessage({ type:'format', sql: sqlEl.value });
       }
     });
-    $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv' }));
-    $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json' }));
+    $('csvBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'csv', columns: cols() }));
+    $('jsonBtn').addEventListener('click', () => vscode.postMessage({ type:'export', format:'json', columns: cols() }));
     $('copyJsonBtn').addEventListener('click', copyAsJson);
     $('search').addEventListener('input', (e) => { search = e.target.value.toLowerCase(); renderGrid(); });
 
@@ -1643,7 +1678,9 @@ ${JSON_VIEW_HELPERS}
       if (!picked.length) { statusEl.textContent = 'Nothing to copy — no rows in view.'; return; }
       // One checked row copies as a bare object; anything else stays an array so the
       // shape is predictable for whatever you paste it into.
-      const payload = selected.size === 1 ? picked[0].row : picked.map(({row}) => row);
+      // ...which now includes *which columns* you were looking at.
+      const projected = projectRows(picked.map(({row}) => row), cols());
+      const payload = selected.size === 1 ? projected[0] : projected;
       vscode.postMessage({ type:'copy', text: JSON.stringify(payload, null, 2), rows: picked.length });
     }
 
@@ -1670,8 +1707,10 @@ ${JSON_VIEW_HELPERS}
         if (!txt) continue; const t = txt.toLowerCase();
         rows = rows.filter(({row}) => cellText(row[col]).toLowerCase().includes(t));
       }
-      if (search) rows = rows.filter(({row}) =>
-        raw.columns.some((c) => cellText(row[c]).toLowerCase().includes(search)));
+      // Visible columns only: a row surviving the search because of text the user
+      // cannot see is the purest form of invisible state.
+      if (search) { const sc = cols(); rows = rows.filter(({row}) =>
+        sc.some((c) => cellText(row[c]).toLowerCase().includes(search))); }
       if (!server && sort.col) {
         rows.sort((a, b) => {
           let x = a.row[sort.col], y = b.row[sort.col];
@@ -1690,6 +1729,106 @@ ${JSON_VIEW_HELPERS}
     // page in hand — so an empty result means "not on this page", not "not in the table".
     // Say which, rather than letting it read as a broken search.
     function pageLocal(){ return serverBacked() && raw.page.total > raw.rows.length; }
+    // ---------------- column picker ----------------
+    // Presentational only: nothing is re-queried and the result keeps every column, so
+    // editing and Delete (which read raw.rows, never the DOM) are unaffected.
+    let hidden = new Set(), colsKey = '';
+
+    function cols(){ return visibleColumns(raw ? raw.columns : [], hidden); }
+
+    // A different query starts clean; re-running the same one keeps the choice.
+    function syncColumnsFor(result){
+      const key = columnsKey(result ? result.columns : []);
+      if (key !== colsKey) { colsKey = key; hidden = new Set(); }
+    }
+
+    function syncColsBtn(){
+      const all = raw ? raw.columns.length : 0, shown = cols().length;
+      const b = $('colsBtn');
+      // Hidden columns must never be silent state — say so on the button itself.
+      b.textContent = (all && shown < all) ? ('Columns ' + shown + '/' + all + ' ▾') : 'Columns ▾';
+      b.classList.toggle('filtered', all > 0 && shown < all);
+    }
+
+    function renderColsMenu(){
+      const list = $('colsList'), term = $('colsFilter').value.trim().toLowerCase();
+      const all = raw ? raw.columns : [];
+      const shown = cols();
+      list.innerHTML = '';
+      const matches = all.filter((c) => !term || c.toLowerCase().includes(term));
+      if (!matches.length) {
+        const d = document.createElement('div');
+        d.className = 'none';
+        d.textContent = all.length ? 'No column matches.' : 'Run a query first.';
+        list.appendChild(d);
+      }
+      for (const c of matches) {
+        const on = !hidden.has(c);
+        // Refuse to hide the last one: a zero-column grid is a blank rectangle
+        // whose only way back is Show all.
+        const locked = on && shown.length === 1;
+        const row = document.createElement('label');
+        row.className = locked ? 'locked' : '';
+        if (locked) row.title = 'At least one column has to stay visible.';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = on;
+        box.disabled = locked;
+        box.addEventListener('change', () => toggleColumn(c, box.checked));
+        row.appendChild(box);
+        // textContent, not innerHTML: a column name is data from the database.
+        const nameEl = document.createElement('span');
+        nameEl.textContent = c;
+        row.appendChild(nameEl);
+        list.appendChild(row);
+      }
+      $('colsAll').disabled = hidden.size === 0;
+    }
+
+    function toggleColumn(c, show){
+      if (show) {
+        hidden.delete(c);
+      } else {
+        hidden.add(c);
+        // A filter on a column you can no longer see is invisible state — the
+        // "why is my grid empty" trap. Drop it, and say that it happened.
+        if (filters[c]) {
+          delete filters[c];
+          statusEl.textContent = 'Hid "' + c + '" and cleared its column filter.';
+          if (serverBacked()) {
+            const arr = Object.entries(filters).filter(([,v]) => v).map(([column,value]) => ({ column, value }));
+            vscode.postMessage({ type:'filter', filters: arr, seq: ++reqSeq });
+          }
+        }
+      }
+      renderColsMenu(); syncColsBtn(); renderGrid();
+    }
+
+    function colsMenuOpen(){ return $('colsMenu').style.display === 'block'; }
+    function closeColsMenu(){ $('colsMenu').style.display = 'none'; }
+    function openColsMenu(){
+      const r = $('colsBtn').getBoundingClientRect();
+      const m = $('colsMenu');
+      m.style.display = 'block';
+      m.style.top = (r.bottom + 4) + 'px';
+      // Keep it on screen when the button sits near the right edge.
+      m.style.left = Math.max(4, Math.min(r.left, window.innerWidth - m.offsetWidth - 8)) + 'px';
+      $('colsFilter').value = '';
+      renderColsMenu();
+      $('colsFilter').focus();
+    }
+    $('colsBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (colsMenuOpen()) closeColsMenu(); else openColsMenu();
+    });
+    $('colsFilter').addEventListener('input', renderColsMenu);
+    $('colsMenu').addEventListener('click', (e) => e.stopPropagation());
+    $('colsAll').addEventListener('click', () => {
+      hidden = new Set();
+      renderColsMenu(); syncColsBtn(); renderGrid();
+    });
+    document.addEventListener('click', () => { if (colsMenuOpen()) closeColsMenu(); });
+
     // The grid paints every row in one innerHTML assignment, so an unbounded
     // result set is a hang, not a slow render: 50k rows x 7 columns is ~350k
     // cells and freezes the webview thread outright (no repaint, so even the
@@ -1732,10 +1871,11 @@ ${JSON_VIEW_HELPERS}
       if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; viewTotal = 0; updateScope(0); return; }
       const editable = !!raw.editable;
       const view = cappedView();
+      const shownCols = cols();
       const allSel = editable && view.length > 0 && view.every(({ri}) => selected.has(ri));
       let h = '<table><thead><tr>';
       if (editable) h += '<th class="chk"><input type="checkbox" id="chkAll"'+(allSel?' checked':'')+'></th>';
-      for (const c of raw.columns) {
+      for (const c of shownCols) {
         const m = metaFor(c);
         const mk = m ? (m.pk?' 🔑':'') + (m.fk?' 🔗':'') + (m.nullable?'':' <span style="color:var(--vscode-errorForeground)">*</span>') : '';
         const sorted = sort.col === c ? ' sorted' : '';
@@ -1746,14 +1886,14 @@ ${JSON_VIEW_HELPERS}
       }
       h += '</tr><tr class="filterRow">';
       if (editable) h += '<th class="chk"></th>';
-      for (const c of raw.columns)
+      for (const c of shownCols)
         h += '<th><input class="filter" data-col="'+esc(c)+'" placeholder="filter" value="'+esc(filters[c]||'')+'"></th>';
       h += '</tr></thead><tbody>';
       const fkCols = new Set((raw.foreignKeys || []).map((f) => f.column));
       for (const { row, ri } of view) {
         h += '<tr data-ri="'+ri+'"'+(selected.has(ri)?' class="selected"':'')+'>';
         if (editable) h += '<td class="chk"><input type="checkbox" class="rowchk" data-ri="'+ri+'"'+(selected.has(ri)?' checked':'')+'></td>';
-        for (const c of raw.columns) {
+        for (const c of shownCols) {
           const isFk = fkCols.has(c);
           const val = row[c];
           const shape = jsonShape(val);
@@ -2066,13 +2206,15 @@ ${JSON_VIEW_HELPERS}
     }
     function closeModal(){ $('overlay').style.display = 'none'; modalCtx = null; }
     function overlayOpen(){
-      return $('overlay').style.display === 'flex' || $('addOverlay').style.display === 'flex';
+      return $('overlay').style.display === 'flex' || $('addOverlay').style.display === 'flex'
+        || colsMenuOpen();
     }
     // Escape precedence: the completion dropdown closes first (its own handler
     // stops propagation), then any open modal, and only then does Escape abort a
     // running query — closing what is in front of you is never the surprising choice.
     window.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (colsMenuOpen()) { e.preventDefault(); closeColsMenu(); $('colsBtn').focus(); return; }
       if ($('overlay').style.display === 'flex') { e.preventDefault(); closeModal(); return; }
       if ($('addOverlay').style.display === 'flex') {
         e.preventDefault();
@@ -2106,6 +2248,9 @@ ${JSON_VIEW_HELPERS}
       if (qlock) { lockNudge(); return; }
       if (!raw || !raw.editable) return;
       const form = $('addForm');
+      // Deliberately every column, hidden ones included: this is a data-entry
+      // form, not a view, and omitting a NOT NULL column would fail the insert
+      // for a reason the user cannot see.
       form.innerHTML = raw.columns.map((c) => {
         const m = metaFor(c);
         const label = esc(c) + (m ? ' <span class="ctype">'+esc(m.type)+(m.nullable?'':' *')+'</span>' : '');
@@ -2257,6 +2402,10 @@ ${JSON_VIEW_HELPERS}
         lastError = null;
         $('aiFixBtn').disabled = true;
         raw = m.result; selected.clear();
+        // Before anything renders: a different query starts with every column shown.
+        syncColumnsFor(raw);
+        syncColsBtn();
+        if (colsMenuOpen()) closeColsMenu();
         // Only reset sort/filters for a brand-new table/query, not sort/filter/page re-runs.
         if (m.fresh) { sort = { col:null, dir:1 }; filters = {}; search = ''; $('search').value = ''; }
         // Show the equivalent SQL for table previews so it can be seen/edited.
@@ -2287,19 +2436,6 @@ ${JSON_VIEW_HELPERS}
 </body>
 </html>`;
   }
-}
-
-function toCsv(result: QueryResult): string {
-  const esc = (v: unknown): string => {
-    if (v === null || v === undefined) {
-      return "";
-    }
-    const s = typeof v === "object" ? JSON.stringify(v) : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const header = result.columns.map(esc).join(",");
-  const lines = result.rows.map((row) => result.columns.map((c) => esc(row[c])).join(","));
-  return [header, ...lines].join("\n");
 }
 
 function escapeHtml(s: string): string {
