@@ -90,7 +90,7 @@ step on top:
 npm run release:patch     # or release:minor / release:major
 
 # 2. Publish the version you just cut — on success this also runs
-#    `git push` + `git push --tags` for you
+#    `git push` + `git push --tags`, then cuts the GitHub release
 npm run publish:marketplace
 
 # 3. A few minutes later, confirm the Marketplace picked it up
@@ -104,6 +104,29 @@ After a successful publish it pushes the release commit and tags to origin
 (the version is public at that point, so the tag must not stay local).
 Note the split: `release:*` stays local on purpose — until you publish, a bad
 release can still be undone (`git tag -d vX.Y.Z` + `git reset --hard HEAD~1`).
+
+Once the tag is on origin it also creates the **GitHub release**, with the notes
+taken from that version's `CHANGELOG.md` section and the `.vsix` attached. That
+step is deliberately non-fatal: by then the Marketplace already has the version
+and the tag is pushed, so a failure there must not report a publish that in fact
+succeeded. If it is skipped, run it on its own — it is idempotent and refuses to
+create a second release for a tag that already has one:
+
+```bash
+npm run release:github                 # release the current version
+npm run release:github -- --dry-run    # print the notes and stop
+npm run release:github -- --draft      # create it as a draft to review first
+npm run release:github -- --no-generated-notes   # changelog only, no PR list
+```
+
+The body is the changelog section, and GitHub appends its own "What's Changed"
+(merged PRs, contributors) plus a Full Changelog compare link underneath. Both,
+not either: GitHub builds its part from PR titles, and a PR called
+"Feature/UI ux improvements" says nothing about what shipped — so the changelog
+carries the meaning and the generated part carries the provenance.
+
+It authenticates with the `gh` CLI when that is installed and logged in, and
+otherwise with `GITHUB_TOKEN` / `GH_TOKEN` (needs `contents: write`).
 
 Flags:
 

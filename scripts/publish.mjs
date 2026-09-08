@@ -83,4 +83,28 @@ if (args.includes("--no-push")) {
   run("git", ["push"]);
   run("git", ["push", "--tags"]);
   console.log(`\n✔ Published ${publisher}.${name}@${version} and pushed the release to origin.`);
+  cutGithubRelease();
+}
+
+/**
+ * Create the GitHub release too, now that the tag is on origin.
+ *
+ * Deliberately NOT fatal. Everything irreversible has already happened by this
+ * point — the Marketplace has the version and the tag is pushed — so exiting
+ * non-zero here would report a failed publish that actually succeeded. A
+ * missing release page is a thing you can add in one command afterwards.
+ */
+function cutGithubRelease() {
+  console.log("\nCreating the GitHub release…");
+  const res = spawnSync("node", [join(root, "scripts", "github-release.mjs")], {
+    cwd: root,
+    stdio: "inherit",
+    shell: true,
+  });
+  if (res.status !== 0) {
+    console.warn(
+      "\n⚠ The GitHub release was not created — the publish itself was fine. " +
+        "Run `npm run release:github` once the reason above is dealt with.",
+    );
+  }
 }
