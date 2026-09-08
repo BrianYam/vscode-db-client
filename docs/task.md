@@ -1037,3 +1037,102 @@ config was not.
       switch back and forth — each returns with its own model and key status;
       a custom endpoint keeps its typed base URL and LiteLLM mapping; a
       never-configured preset still shows its default model
+
+## M31 — Query run indication & abort (requested 2026-09-08)
+
+Spec: `DISCOVERY_QUERY_RUN_UX.md` (§5 locked 2026-09-08 — shared braille spinner on the
+Run button, danger-styled Abort beside Run, **true** server-side cancel on Postgres/MySQL,
+no Abort at all on SQLite, "Stop waiting" on Redis, one query in flight per panel).
+
+### M31.0 — Shared spinner ✅ DONE 2026-09-08 (Discovery §3.1)
+- [x] `[SDD][M31]` Extract the AI bar's spinner into `makeSpinner(el, label)` in the
+      webview script — same `AI_FRAMES`, 120ms interval, elapsed-seconds format;
+      `stop()` still returns the elapsed total
+- [x] `[SDD][M31]` Refactor `aiSpinStart`/`aiSpinStop` onto it; AI bar behaviour unchanged
+- [x] `[SDD][M31]` Run button animates in place while running (`⠋ Running… 4s`), armed on
+      a 150ms delay so fast queries never flicker
+
+### M31.1 — Driver cancellation contract ✅ DONE 2026-09-08 (Discovery §3.3)
+- [x] `[SDD][M31]` `Driver.cancel?(): Promise<void>` + `readonly canCancel?: boolean` in
+      `Driver.ts`, documented as optional the way `setTtl?` is
+- [x] `[SDD][M31]` **postgres**: `query()` onto a checked-out client (`pool.connect()` →
+      record `client.processID` → `finally release()`); `cancel()` runs
+      `SELECT pg_cancel_backend($1)` on a second connection; `canCancel = true`
+- [x] `[SDD][M31]` **mysql**: `query()` onto `pool.getConnection()` → record
+      `conn.threadId` → `finally release()`; `cancel()` runs `KILL QUERY <threadId>` on a
+      second connection; `canCancel = true`
+- [x] `[SDD][M31]` **redis**: `cancel()` abandons the in-flight call only;
+      `canCancel = false`
+- [x] `[SDD][M31]` **sqlite**: no `cancel()` — synchronous WASM blocks the host thread
+      (Discovery §2 Finding A). Comment says *why*, so it is not re-litigated later
+
+### M31.2 — Abort control ✅ DONE 2026-09-08 (Discovery §3.2)
+- [x] `[SDD][M31]` `#abortBtn` immediately right of `#runBtn`; hidden when idle; danger
+      style from `--vscode-inputValidation-errorBackground` so it reads red in every theme
+- [x] `[SDD][M31]` Host advertises `canAbort` at panel open; SQLite panels never render
+      the button; Redis renders it labelled `■ Stop waiting` with a status line saying the
+      server may still be working
+- [x] `[SDD][M31]` Esc aborts while a query is running (autocomplete already
+      `stopPropagation()`s its own Esc, so the two cannot collide)
+
+### M31.3 — Run/abort state machine ✅ DONE 2026-09-08 (Discovery §3.4)
+- [x] `[SDD][M31]` Monotonic `runSeq` on the host; `result`/`error` echo it; the webview
+      drops responses from a superseded run
+- [x] `[SDD][M31]` `abort` message type → `handleAbort()` → `driver.cancel?.()` guarded
+- [x] `[SDD][M31]` One query in flight per panel: Run disabled while running; composes
+      with the M23 query lock (unlocking must not re-enable Run mid-flight)
+- [x] `[SDD][M31]` Aborted run reports `Aborted after 12.4s.` as plain status, not an
+      error — the user asked for it
+
+### M31.4 — Human QA gate (Phase 4) 🟡 code done 2026-09-08, manual QA open
+- [ ] `[SDD][M31]` Postgres: `SELECT pg_sleep(30)` → Abort → query stops server-side
+      (verify with `pg_stat_activity`, not just the UI)
+- [ ] `[SDD][M31]` MySQL: `SELECT SLEEP(30)` → Abort → gone from `SHOW PROCESSLIST`
+- [ ] `[SDD][M31]` Race: Abort a query that completes in the same instant — no stale grid
+      paint, no double status line
+- [ ] `[SDD][M31]` SQLite panel shows no Abort button; Redis shows `■ Stop waiting`
+- [ ] `[SDD][M31]` Regression: 50ms query shows no spinner flicker; query lock still
+      blocks Run; Ctrl/Cmd+Enter, highlight-to-run, and the AI bar spinner all unchanged
+- [ ] `[SDD][M31]` Two panels on the *same* connection, both running: aborting one must
+      not cancel the other (the run-token fix — see Discovery §2 Finding B)
+- [ ] `[SDD][M31]` Abort a query the server refuses to stop: panel releases after 8s with
+      "Cancel sent, but the query has not stopped yet"
+- [ ] `[SDD][M31]` Re-run the QA above only after M32 lands — a large result froze the
+      panel before Abort could be exercised at all
+
+## M32 — Grid render cap (hang, reported 2026-09-08)
+
+Found during M31.4 QA: `select * from price_ticks LIMIT 50000` froze the whole window.
+**Not an M31 regression** — `renderGrid`/`computeView` are untouched by M31 (`git diff`
+shows zero changes there); the panel has never capped what it paints.
+
+Cause: `renderGrid()` builds one HTML string for every returned row and assigns it to
+`innerHTML`. At 50k rows x 7 columns that is ~40 MB of HTML and ~400k DOM elements
+(measured), which blocks the webview thread outright. Because the thread never yields,
+the browser never repaints — which is why the spinner in the report is frozen mid-word at
+"Running… 0s" even though the query had already returned. The Abort button cannot help
+here: the freeze is in the *render*, after the query completed.
+
+### M32.0 — Cap what the grid paints ✅ DONE 2026-09-08
+- [x] `[SDD][M32]` `RENDER_CAP = 2000` painted rows (measured: 1.6 MB / 16k cells, instant;
+      50k = 40 MB / 400k cells, hangs). Rows stay in memory — only painting is capped
+- [x] `[SDD][M32]` `cappedView()` is the single source for both the painted grid and
+      select-all, so the two cannot drift
+- [x] `[SDD][M32]` Select-all means the *painted* rows — otherwise Delete would reach rows
+      that were never shown
+- [x] `[SDD][M32]` Honest scope note: "Showing the first 2,000 of 50,000 rows — add a LIMIT
+      or filter to narrow it; Export and Copy still cover all 50,000."
+- [x] `[SDD][M32]` Search/match counts report against the full filtered set, not the cap
+
+### M32.1 — QA
+- [ ] `[SDD][M32]` `select * from <big table> LIMIT 50000` renders instantly, no freeze,
+      scope note visible and accurate
+- [ ] `[SDD][M32]` Export CSV/JSON and Copy as JSON still return all 50,000 rows
+- [ ] `[SDD][M32]` Select-all + Delete only ever touches painted rows
+- [ ] `[SDD][M32]` Regression: 100-row previews and Redis key lists show no scope note
+
+### M32.2 — Known gap (not fixed here)
+- [ ] `[SDD][M32]` The *fetch* is still uncapped: a bare `SELECT *` on a huge table pulls
+      every row into extension-host memory and ships it over postMessage before the cap
+      applies. Painting is now safe; memory is not. Needs a host-side row ceiling with the
+      same honesty note — separate change, own discovery

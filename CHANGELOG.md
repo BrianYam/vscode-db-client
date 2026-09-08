@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A running query now looks like it is running.** The Run button itself animates
+  with the same braille spinner and live elapsed-seconds counter the AI assist bar
+  uses — a 40-second query and a stuck one are no longer indistinguishable. The
+  animation is armed on a short delay, so a fast query never flashes it.
+- **Long queries can be aborted.** An **■ Abort** button appears beside Run the
+  moment a query starts, styled red so it is impossible to miss, and **Esc** does
+  the same. On PostgreSQL and MySQL this is a *real* cancellation — the statement
+  is stopped on the server (`pg_cancel_backend` / `KILL QUERY`), not merely
+  abandoned. An aborted query reports "Aborted after 12.4s." rather than an error,
+  because you asked for it.
+- Honest about what it can do: **SQLite shows no Abort button at all** — its engine
+  runs synchronously and cannot be interrupted, so a button there would be a lie —
+  and **Redis** offers **■ Stop waiting**, which says plainly that the server may
+  still be working on the command.
+
+### Changed
+- Only one query runs per panel at a time; Run is unavailable while one is in
+  flight. A result arriving from a query you already aborted is discarded instead
+  of appearing in the grid.
+
+### Fixed
+- **A large result no longer freezes the window.** The grid painted every row it
+  was given, so a query returning tens of thousands of rows built a DOM large
+  enough to lock the panel up completely. It now paints the first 2,000 and says
+  so — *"Showing the first 2,000 of 50,000 rows"* — while search, sort, Export and
+  Copy still cover the whole result. Select-all now means the rows you can
+  actually see, so Delete can no longer reach rows that were never shown.
+
 ## [1.3.1] - 2026-08-08
 
 ### Added

@@ -173,6 +173,13 @@ export class SqliteDriver implements Driver {
     return out;
   }
 
+  /**
+   * Deliberately implements no `cancel()`. `sql.js` is synchronous WASM running
+   * on the extension host thread: while `exec()` runs, the host cannot process
+   * messages at all, so an Abort click could not even be delivered — let alone
+   * honoured. The query panel hides its Abort button for this engine rather
+   * than offering one that provably cannot work.
+   */
   async query(sql: string): Promise<QueryResult> {
     const res = this.d.exec(sql);
     if (!/^\s*select/i.test(sql)) {

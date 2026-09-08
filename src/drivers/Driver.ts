@@ -158,9 +158,33 @@ export interface Driver {
    */
   children(path: string[], filter?: string): Promise<TreeItemData[]>;
 
-  /** Run a raw statement (SQL, or a Redis command line). `database` selects
-   *  which database to run against on engines that support several per server. */
-  query(sql: string, database?: string): Promise<QueryResult>;
+  /**
+   * Run a raw statement (SQL, or a Redis command line). `database` selects
+   * which database to run against on engines that support several per server.
+   * `token` opaquely identifies this run so `cancel(token)` can target it: a
+   * driver instance is shared by every panel on the connection, so "the query
+   * in flight" is ambiguous without one.
+   */
+  query(sql: string, database?: string, token?: string): Promise<QueryResult>;
+
+  /**
+   * True when `cancel()` stops the statement server-side rather than merely
+   * abandoning the reply. Drives the query panel's Abort button: absent/false
+   * engines either hide it (no `cancel()` at all) or label it honestly as
+   * "stop waiting". Never claim `true` unless the server really stops working.
+   */
+  readonly canCancel?: boolean;
+
+  /**
+   * Cancel the run started with this `token`, if this engine can. A token with
+   * nothing in flight is a no-op — cancelling is inherently racy and the
+   * statement may simply have finished first.
+   *
+   * Optional, like `setTtl?`: sql.js runs synchronously on the extension host
+   * thread, so there is no moment at which a cancel could even be delivered —
+   * it omits this rather than implementing a no-op that lies to the caller.
+   */
+  cancel?(token: string): Promise<void>;
 
   /**
    * Preview a table's rows (paginated). Sets `editable`, `columnsMeta`, `page`,

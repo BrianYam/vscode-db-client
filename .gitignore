@@ -3,3 +3,5 @@ out/
 *.vsix
 .DS_Store
 dist/
+.idea/workspace.xml
+.idea/vcs.xml

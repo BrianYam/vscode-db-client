@@ -41,6 +41,9 @@ const PAGE_SIZE = 100;
 /** Past this the OS clipboard — and whatever you paste into — is what stalls, so we ask first. */
 const COPY_WARN_CHARS = 5 * 1024 * 1024;
 
+/** Gives each panel a stable identity in the run tokens it hands the driver. */
+let panelCounter = 0;
+
 /** A SQL/command editor + a rich results grid, one webview per invocation. */
 export class QueryPanel {
   static create(
@@ -97,6 +100,18 @@ export class QueryPanel {
   private aiBarShown = false;
   /** Recent Generate exchanges in this panel, oldest first — follow-up context. */
   private aiHistory: Array<{ prompt: string; sql: string }> = [];
+  /** Sequence of the hand-typed run currently in flight (echoed to the webview). */
+  private runSeq = 0;
+  /** Set by `handleAbort` to the run being cancelled; cleared once reported. */
+  private abortedSeq?: number;
+  /** Distinguishes this panel's runs from another panel's on the same driver —
+   *  `getDriver` hands every panel on a connection the same instance. */
+  private readonly panelId = `p${++panelCounter}`;
+
+  /** Token identifying one run to the driver, unique across panels. */
+  private runToken(seq: number): string {
+    return `${this.panelId}r${seq}`;
+  }
 
   private rerun(sql: string, database?: string): void {
     this.previewPath = undefined;
@@ -181,7 +196,10 @@ export class QueryPanel {
           this.previewPath = undefined;
           this.sort = undefined;
           this.columnFilters = undefined;
-          await this.run(msg.sql);
+          await this.run(msg.sql, Number(msg.seq ?? 0));
+          break;
+        case "abort":
+          await this.handleAbort();
           break;
         case "page":
           if (this.previewPath) {
@@ -262,6 +280,7 @@ export class QueryPanel {
     }
 
     void this.syncAiBar();
+    void this.advertiseAbort();
     // A provider configured in settings after this panel opened should still
     // light the bar up — re-check whenever the panel comes back into view.
     this.panel.onDidChangeViewState((e) => {
@@ -407,28 +426,95 @@ export class QueryPanel {
     }
   }
 
-  private async run(sql: string): Promise<void> {
+  /**
+   * `runSeq` rides along on the reply so the webview can drop a result from a
+   * run the user has already aborted — cancellation is a race, and the statement
+   * may well finish before the cancel reaches the server.
+   */
+  private async run(sql: string, runSeq = 0): Promise<void> {
     const trimmed = (sql ?? "").trim();
     if (!trimmed) {
       return;
     }
+    this.runSeq = runSeq;
+    const start = Date.now();
     try {
       const driver = await this.manager.getDriver(this.connectionId);
-      const start = Date.now();
-      const result = await driver.query(trimmed, this.database);
+      const result = await driver.query(trimmed, this.database, this.runToken(runSeq));
       result.elapsedMs = Date.now() - start;
-      this.show(result, true);
+      if (this.aborted(runSeq, start)) {
+        return;
+      }
+      this.show(result, true, undefined, runSeq);
     } catch (err) {
+      // A cancelled statement surfaces as a driver error (Postgres and MySQL both
+      // report the kill). Reporting it as a failure would be a lie — the user
+      // asked for it — so an aborted run always reports as aborted.
+      if (this.aborted(runSeq, start)) {
+        return;
+      }
       logError("query", err);
-      this.post({ type: "error", message: (err as Error).message });
+      this.post({ type: "error", message: (err as Error).message, runSeq });
     }
   }
 
-  /** `seq` echoes the webview's request counter so it can drop an out-of-order response. */
-  private show(result: QueryResult, fresh = false, seq?: number): void {
+  /**
+   * True when this exact run was cancelled while in flight; also sends the
+   * webview its "Aborted after Ns" confirmation, so both the success and the
+   * failure path can simply return afterwards.
+   */
+  private aborted(runSeq: number, start: number): boolean {
+    if (this.abortedSeq !== runSeq) {
+      return false;
+    }
+    this.abortedSeq = undefined;
+    this.post({ type: "aborted", runSeq, secs: ((Date.now() - start) / 1000).toFixed(1) });
+    return true;
+  }
+
+  /**
+   * Ask the driver to cancel. Engines without `cancel()` never get an Abort
+   * button in the first place (see `advertiseAbort`), so reaching here with no
+   * implementation means nothing to do rather than an error.
+   */
+  private async handleAbort(): Promise<void> {
+    const seq = this.runSeq;
+    this.abortedSeq = seq;
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      await driver.cancel?.(this.runToken(seq));
+    } catch (err) {
+      // Best-effort by nature: the statement may have finished a millisecond
+      // before the cancel landed. Say what happened rather than failing loudly.
+      logError("cancel", err);
+      this.post({ type: "status", message: `Could not cancel: ${(err as Error).message}` });
+    }
+  }
+
+  /**
+   * Tell the webview whether to render an Abort button, and whether it may
+   * honestly call it "Abort" — sql.js cannot be cancelled at all, and Redis can
+   * only stop us waiting. See DISCOVERY_QUERY_RUN_UX.md §2 Finding A.
+   */
+  private async advertiseAbort(): Promise<void> {
+    try {
+      const driver = await this.manager.getDriver(this.connectionId);
+      this.post({
+        type: "abortCaps",
+        canAbort: typeof driver.cancel === "function",
+        hard: driver.canCancel === true,
+      });
+    } catch {
+      /* not connected yet — the panel simply shows no Abort button */
+    }
+  }
+
+  /** `seq` echoes the webview's request counter so it can drop an out-of-order response.
+   *  `runSeq` does the same for hand-typed runs, which can be aborted mid-flight. */
+  private show(result: QueryResult, fresh = false, seq?: number, runSeq?: number): void {
     this.lastResult = result;
     this.lastEditable = result.editable;
-    this.post({ type: "result", result, fresh, seq });
+    this.post({ type: "result", result, fresh, seq, runSeq });
   }
 
   private async handleUpdate(msg: {
@@ -807,6 +893,23 @@ export class QueryPanel {
   #lockBtn.locked { background: transparent;
                     border: 1px solid var(--vscode-editorWarning-foreground);
                     color: var(--vscode-editorWarning-foreground); }
+  /* Abort only exists while a query is in flight, and has to read as "stop" at a
+     glance — hence the error palette, which is red in every shipped theme. The
+     pulse keeps it alive next to the Run button's spinner. */
+  #abortBtn { display: none; background: var(--vscode-inputValidation-errorBackground);
+              color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground));
+              border: 1px solid var(--vscode-inputValidation-errorBorder,
+                                   var(--vscode-editorError-foreground));
+              font-weight: 600; animation: abortPulse 1.6s ease-in-out infinite; }
+  #abortBtn:not(:disabled):hover { background: var(--vscode-inputValidation-errorBorder,
+                                   var(--vscode-editorError-foreground)); }
+  @keyframes abortPulse { 0%, 100% { opacity: 1; } 50% { opacity: .72; } }
+  /* The running Run button carries the spinner, so it must not dim to the
+     generic :disabled opacity or the animation reads as switched-off. */
+  #runBtn.running { opacity: 1; font-variant-numeric: tabular-nums;
+                    color: var(--vscode-textLink-foreground);
+                    background: var(--vscode-button-secondaryBackground); }
+  @media (prefers-reduced-motion: reduce) { #abortBtn { animation: none; } }
   .null { opacity: .5; font-style: italic; }
   .chk { width: 22px; text-align: center; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
@@ -849,6 +952,7 @@ export class QueryPanel {
   <div id="ainote"></div>
   <div class="bar">
     <button id="runBtn" title="Run (Ctrl/Cmd+Enter) — runs the highlighted text only, when something is highlighted">Run ▶</button>
+    <button id="abortBtn" title="Stop the running query (Esc)">■ Abort</button>
     <button id="lockBtn" class="secondary" title="Query lock — blocks running queries and editing data in this panel. Engages by itself when the AI generates a mutation. One click toggles.">🔓</button>
     ${hasFile ? '<button id="saveBtn" class="secondary" title="Save to file (Cmd/Ctrl+S)">💾 Save</button>' : ""}
     <button id="refreshBtn" class="secondary" title="Refresh">⟳</button>
@@ -931,6 +1035,32 @@ export class QueryPanel {
       }, 350);
     }
 
+    // ---------------- shared spinner ----------------
+    // Braille frames + live elapsed seconds. show() paints the element (the AI
+    // bar's own span, or the Run button's label); stop() returns the elapsed
+    // total so callers can report how long the wait actually was.
+    const SPIN_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+    function makeSpinner(el, label, show){
+      let timer = null, t0 = 0, frame = 0;
+      const paint = () => {
+        const secs = Math.floor((Date.now() - t0) / 1000);
+        const text = SPIN_FRAMES[frame] + ' ' + label + ' ' + secs + 's';
+        if (show) show(text); else { el.textContent = text; el.style.display = 'inline'; }
+      };
+      return {
+        start(){
+          t0 = Date.now(); frame = 0; paint();
+          clearInterval(timer);
+          timer = setInterval(() => { frame = (frame + 1) % SPIN_FRAMES.length; paint(); }, 120);
+        },
+        stop(){
+          clearInterval(timer); timer = null;
+          if (!show) el.style.display = 'none';
+          return ((Date.now() - t0) / 1000).toFixed(1);
+        },
+      };
+    }
+
     // ---------------- query lock ----------------
     // Manual via the toolbar 🔒, automatic when the AI generates a mutation.
     // Locked = read-only panel: no runs, no cell/row edits, no TTL changes.
@@ -942,7 +1072,9 @@ export class QueryPanel {
       const b = $('lockBtn');
       b.textContent = on ? '🔒' : '🔓';
       b.classList.toggle('locked', on);
-      $('runBtn').disabled = on;
+      // Unlocking must not hand Run back while a query is still in flight —
+      // the run/abort state machine owns the button for as long as it is busy.
+      $('runBtn').disabled = on || running;
       statusEl.textContent = on
         ? '🔒 Query lock on — running and editing are blocked in this panel.'
         : '🔓 Unlocked.';
@@ -954,12 +1086,87 @@ export class QueryPanel {
     // Ctrl/Cmd+Enter — one rule, not two. A whitespace-only selection is ignored.
     function run() {
       if (qlock) { lockNudge(); return; }
+      // One query in flight per panel: a second Run would orphan the first and
+      // leave the Abort button pointing at the wrong statement.
+      if (running) { statusEl.textContent = 'A query is already running — abort it first.'; return; }
       const sel = sqlEl.value.slice(sqlEl.selectionStart, sqlEl.selectionEnd);
       const partial = !!sel.trim();
+      const sql = partial ? sel : sqlEl.value;
+      // Nothing to run means nothing to abort — don't enter the running state at
+      // all, or Run would sit disabled waiting for a reply that never comes.
+      if (!sql.trim()) { statusEl.textContent = 'Nothing to run — the editor is empty.'; return; }
       statusEl.textContent = partial ? 'Running selection…' : 'Running…';
-      vscode.postMessage({ type:'run', sql: partial ? sel : sqlEl.value });
+      setRunning(true);
+      vscode.postMessage({ type:'run', sql, seq: ++runSeq });
     }
     $('runBtn').addEventListener('click', run);
+
+    // ---------------- run / abort state ----------------
+    // runSeq is the staleness guard: aborting is a race, so a result that
+    // arrives from a run the user has already walked away from is dropped rather
+    // than painted over the grid.
+    let running = false, runSeq = 0, aborting = false, spinArm = null, abortGuard = null;
+    // Set by the host at panel open. canAbort = the engine offers cancellation
+    // at all (sql.js cannot, so it never gets a button); hardAbort = that
+    // cancellation actually stops the server, rather than just stopping us
+    // waiting (Redis). The label has to tell the truth about which one it is.
+    let canAbort = false, hardAbort = false;
+    const runBtn = $('runBtn'), abortBtn = $('abortBtn');
+    const RUN_LABEL = runBtn.textContent;
+    const runSpin = makeSpinner(null, 'Running…', (t) => { runBtn.textContent = t; });
+
+    function setRunning(on){
+      running = on;
+      if (on) {
+        aborting = false;
+        runBtn.disabled = true;
+        // Armed on a delay: a query that returns in 50ms never flashes a spinner.
+        clearTimeout(spinArm);
+        spinArm = setTimeout(() => { runBtn.classList.add('running'); runSpin.start(); }, 150);
+        if (canAbort) abortBtn.style.display = 'inline-block';
+        abortBtn.disabled = false;
+      } else {
+        clearTimeout(spinArm); spinArm = null;
+        clearTimeout(abortGuard); abortGuard = null;
+        runSpin.stop();
+        runBtn.classList.remove('running');
+        runBtn.textContent = RUN_LABEL;
+        // Never re-enable Run into a locked panel — the lock outranks us.
+        runBtn.disabled = qlock;
+        abortBtn.style.display = 'none';
+      }
+    }
+
+    function abortRun(){
+      if (!running || aborting) return;
+      aborting = true;
+      abortBtn.disabled = true;
+      // The seq bump is what makes the abort authoritative: whatever the server
+      // does next, this panel has stopped listening to that run.
+      runSeq++;
+      statusEl.textContent = hardAbort
+        ? 'Aborting…'
+        : 'Stopped waiting — the server may still be working on it.';
+      vscode.postMessage({ type:'abort' });
+      if (!hardAbort) { setRunning(false); return; }
+      // A cancel that is never acknowledged would strand the panel in "Aborting…"
+      // with Run disabled — the precise stuck state this feature exists to end.
+      // Hand the panel back and say plainly that the server has not stopped yet;
+      // a late result from this run is dropped by the seq bump above regardless.
+      clearTimeout(abortGuard);
+      abortGuard = setTimeout(() => {
+        if (!running) return;
+        setRunning(false);
+        statusEl.textContent = 'Cancel sent, but the query has not stopped yet — ' +
+                               'it may still be running on the server.';
+      }, 8000);
+    }
+    abortBtn.addEventListener('click', abortRun);
+    // Esc aborts while running. The autocomplete's own Esc handler
+    // stopPropagation()s when its dropdown is open, so the two never collide.
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && running) { e.preventDefault(); abortRun(); }
+    });
     function saveFile() {
       const btn = $('saveBtn'); if (!btn) return;
       statusEl.textContent = 'Saving…';
@@ -1211,28 +1418,11 @@ export class QueryPanel {
     const aiBar = $('aibar'), aiPromptEl = $('aiPrompt'), aiNote = $('ainote');
     let aiSeq = 0, lastError = null, lastAiSql = null;
 
-    // Live progress: an animated spinner + elapsed seconds right in the bar, so
-    // a long provider round-trip reads as "working" rather than "stuck".
-    const AI_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
-    let aiTimer = null, aiStart = 0, aiFrame = 0;
-    function aiSpinStart(){
-      aiStart = Date.now();
-      const spin = $('aispin');
-      spin.textContent = AI_FRAMES[0] + ' Asking AI… 0s';
-      spin.style.display = 'inline';
-      clearInterval(aiTimer);
-      aiTimer = setInterval(() => {
-        aiFrame = (aiFrame + 1) % AI_FRAMES.length;
-        const secs = Math.floor((Date.now() - aiStart) / 1000);
-        spin.textContent = AI_FRAMES[aiFrame] + ' Asking AI… ' + secs + 's';
-      }, 120);
-    }
-    function aiSpinStop(){
-      clearInterval(aiTimer);
-      aiTimer = null;
-      $('aispin').style.display = 'none';
-      return ((Date.now() - aiStart) / 1000).toFixed(1);
-    }
+    // Live progress: an animated spinner + elapsed seconds, so a long wait reads
+    // as "working" rather than "stuck". Shared by the AI bar and the Run button
+    // so the two never drift apart — one animation, one definition.
+    const aiSpin = makeSpinner($('aispin'), 'Asking AI…');
+    const aiSpinStart = aiSpin.start, aiSpinStop = aiSpin.stop;
 
     function setAiBusy(b){
       $('aiGenBtn').disabled = b;
@@ -1455,22 +1645,48 @@ export class QueryPanel {
     // page in hand — so an empty result means "not on this page", not "not in the table".
     // Say which, rather than letting it read as a broken search.
     function pageLocal(){ return serverBacked() && raw.page.total > raw.rows.length; }
-    function updateScope(matched){
+    // The grid paints every row in one innerHTML assignment, so an unbounded
+    // result set is a hang, not a slow render: 50k rows x 7 columns is ~350k
+    // cells and freezes the webview thread outright (no repaint, so even the
+    // Abort button stops responding). Cap what is PAINTED — the rows themselves
+    // stay in memory, so search, sort, Export and Copy still cover all of them.
+    const RENDER_CAP = 2000;
+    // Rows matching the current filters, before the cap. Kept in step with the
+    // painted view by cappedView() so the two can never disagree.
+    let viewTotal = 0;
+    function cappedView(){
+      const v = computeView();
+      viewTotal = v.length;
+      return v.length > RENDER_CAP ? v.slice(0, RENDER_CAP) : v;
+    }
+
+    function updateScope(shown){
       const el = $('scope');
-      if (!raw || !search) { el.textContent = ''; return; }
-      const loaded = raw.rows.length;
-      if (!pageLocal()) { el.textContent = matched + ' of ' + loaded + ' row(s) match'; return; }
-      const p = raw.page;
-      const page = Math.floor(p.offset / p.limit) + 1, pages = Math.ceil(p.total / p.limit);
-      el.innerHTML = matched + ' of ' + loaded + ' rows on this page match · page ' + page +
-        ' of ' + pages + ' — Total ' + p.total +
-        ' <span class="warn">(search covers the loaded page only)</span>';
+      const parts = [];
+      // Say plainly that rows are being withheld, and that nothing is lost.
+      if (raw && viewTotal > shown) {
+        parts.push('<span class="warn">Showing the first ' + shown + ' of ' + viewTotal +
+          ' rows</span> — add a LIMIT or filter to narrow it; Export and Copy still cover all ' +
+          viewTotal + '.');
+      }
+      if (raw && search) {
+        const loaded = raw.rows.length;
+        if (!pageLocal()) parts.push(viewTotal + ' of ' + loaded + ' row(s) match');
+        else {
+          const p = raw.page;
+          const page = Math.floor(p.offset / p.limit) + 1, pages = Math.ceil(p.total / p.limit);
+          parts.push(viewTotal + ' of ' + loaded + ' rows on this page match · page ' + page +
+            ' of ' + pages + ' — Total ' + p.total +
+            ' <span class="warn">(search covers the loaded page only)</span>');
+        }
+      }
+      el.innerHTML = parts.join(' · ');
     }
 
     function renderGrid(){
-      if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; updateScope(0); return; }
+      if (!raw || !raw.columns.length) { gridEl.innerHTML = ''; viewTotal = 0; updateScope(0); return; }
       const editable = !!raw.editable;
-      const view = computeView();
+      const view = cappedView();
       const allSel = editable && view.length > 0 && view.every(({ri}) => selected.has(ri));
       let h = '<table><thead><tr>';
       if (editable) h += '<th class="chk"><input type="checkbox" id="chkAll"'+(allSel?' checked':'')+'></th>';
@@ -1583,7 +1799,9 @@ export class QueryPanel {
       if (!editable) return;
       const all = $('chkAll');
       if (all) all.addEventListener('change', (e) => {
-        if (e.target.checked) computeView().forEach(({ri}) => selected.add(ri)); else selected.clear();
+        // Deliberately the capped view: "select all" must mean the rows the user
+        // can actually see, or Delete would reach rows that were never painted.
+        if (e.target.checked) cappedView().forEach(({ri}) => selected.add(ri)); else selected.clear();
         renderGrid();
       });
       gridEl.querySelectorAll('input.rowchk').forEach((chk) => {
@@ -1689,6 +1907,10 @@ export class QueryPanel {
     window.addEventListener('message', (ev) => {
       const m = ev.data;
       if (m.type === 'error') {
+        // A run the user aborted: its failure is not news, and painting it would
+        // overwrite the "Aborted" line they asked for.
+        if (m.runSeq != null && m.runSeq !== runSeq) return;
+        if (m.runSeq != null) setRunning(false);
         statusEl.textContent = 'Error';
         gridEl.innerHTML = '<pre style="color:var(--vscode-errorForeground)">'+esc(m.message)+'</pre>';
         // A failure is what arms Fix — it carries the exact error to the AI.
@@ -1697,6 +1919,25 @@ export class QueryPanel {
         return;
       }
       if (m.type === 'aiEnabled') { aiBar.style.display = 'flex'; return; }
+      if (m.type === 'abortCaps') {
+        canAbort = !!m.canAbort; hardAbort = !!m.hard;
+        // Redis can only stop us waiting, so it must not say "Abort".
+        abortBtn.textContent = hardAbort ? '■ Abort' : '■ Stop waiting';
+        abortBtn.title = hardAbort
+          ? 'Cancel the running query on the server (Esc)'
+          : 'Stop waiting for this command (Esc) — the server may still run it';
+        return;
+      }
+      if (m.type === 'aborted') {
+        // The host confirms the cancel landed. Not styled as an error: the user
+        // asked for this. A soft cancel must not claim more than it did — the
+        // server was never told to stop.
+        setRunning(false);
+        statusEl.textContent = hardAbort
+          ? 'Aborted after ' + m.secs + 's.'
+          : 'Stopped waiting after ' + m.secs + 's — the server may still be working on it.';
+        return;
+      }
       if (m.type === 'aiCompletions') {
         if (m.seq < pcSeq) return; // stale reply overtaken by newer typing
         if (document.activeElement !== aiPromptEl) { pcClose(); return; }
@@ -1781,6 +2022,10 @@ export class QueryPanel {
       }
       if (m.type === 'setSql') { sqlEl.value = m.sql; return; }
       if (m.type === 'result') {
+        // An aborted run may still win the race and return rows. Dropping it here
+        // is what keeps "Aborted" honest — no grid paint from a run the user quit.
+        if (m.runSeq != null && m.runSeq !== runSeq) return;
+        if (m.runSeq != null) setRunning(false);
         // Drop a response that a newer request has already overtaken. Results with no
         // seq (fresh runs, post-edit refreshes) are never stale — always render those.
         if (m.seq != null) {
