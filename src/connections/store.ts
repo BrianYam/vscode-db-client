@@ -6,12 +6,18 @@ const KEY = CONNECTIONS_KEY;
 const secretKey = (id: string) => `openDbClient.password.${id}`;
 const sshPwKey = (id: string) => `openDbClient.sshPassword.${id}`;
 const sshPassphraseKey = (id: string) => `openDbClient.sshPassphrase.${id}`;
+// Frozen names: Athena connections already in SecretStorage are read back by
+// these exact keys. See the Athena block in types.ts.
+const awsSecretKey = (id: string) => `openDbClient.awsSecret.${id}`;
+const awsTokenKey = (id: string) => `openDbClient.awsSessionToken.${id}`;
 
 /** Secret values kept out of globalState. */
 export interface Secrets {
   password?: string;
   sshPassword?: string;
   sshPassphrase?: string;
+  awsSecretAccessKey?: string;
+  awsSessionToken?: string;
 }
 
 /**
@@ -47,6 +53,8 @@ export class ConnectionStore {
     await this.storeSecret(secretKey(config.id), secrets.password);
     await this.storeSecret(sshPwKey(config.id), secrets.sshPassword);
     await this.storeSecret(sshPassphraseKey(config.id), secrets.sshPassphrase);
+    await this.storeSecret(awsSecretKey(config.id), secrets.awsSecretAccessKey);
+    await this.storeSecret(awsTokenKey(config.id), secrets.awsSessionToken);
   }
 
   private async storeSecret(key: string, value?: string): Promise<void> {
@@ -80,6 +88,8 @@ export class ConnectionStore {
     await this.ctx.secrets.delete(secretKey(id));
     await this.ctx.secrets.delete(sshPwKey(id));
     await this.ctx.secrets.delete(sshPassphraseKey(id));
+    await this.ctx.secrets.delete(awsSecretKey(id));
+    await this.ctx.secrets.delete(awsTokenKey(id));
   }
 
   /**
@@ -98,6 +108,8 @@ export class ConnectionStore {
       this.ctx.secrets.delete(secretKey(c.id)),
       this.ctx.secrets.delete(sshPwKey(c.id)),
       this.ctx.secrets.delete(sshPassphraseKey(c.id)),
+      this.ctx.secrets.delete(awsSecretKey(c.id)),
+      this.ctx.secrets.delete(awsTokenKey(c.id)),
     ]);
     const results = await Promise.allSettled(deletions);
     const secretsFailed = results.filter((r) => r.status === "rejected").length;
@@ -116,6 +128,14 @@ export class ConnectionStore {
 
   getSshPassphrase(id: string): Promise<string | undefined> {
     return Promise.resolve(this.ctx.secrets.get(sshPassphraseKey(id)));
+  }
+
+  getAwsSecret(id: string): Promise<string | undefined> {
+    return Promise.resolve(this.ctx.secrets.get(awsSecretKey(id)));
+  }
+
+  getAwsSessionToken(id: string): Promise<string | undefined> {
+    return Promise.resolve(this.ctx.secrets.get(awsTokenKey(id)));
   }
 }
 

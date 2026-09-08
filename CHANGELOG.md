@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Results grid now has a **row-number gutter**, so you can tell where you are in
+  a long result. It numbers the rows you are looking at — renumbering with the
+  current sort and filter — and continues across paged previews rather than
+  restarting at 1 on page 2. It never reaches Export or Copy.
+- Column picker gains **Hide all** next to Show all. It leaves the first column
+  visible, honouring the same one-column floor the checkboxes already enforce,
+  and clears any filters on the columns it hides (in one round trip) rather than
+  leaving invisible state behind.
+
+- **AWS Athena support.** Connect with an AWS profile (SSO, `credential_process`
+  and assume-role chains all resolve through the SDK), static access keys, or the
+  machine's own role. Browse catalog → database → table → column, and run
+  queries. Athena runs Trino, so SQL formatting and editor completion use the
+  Trino dialect.
+- Results footer reports **bytes scanned** alongside elapsed time, since Athena
+  bills per terabyte scanned rather than per second.
+
+### Fixed
+
+- Athena: the query panel bound itself to the Glue **catalog** instead of the
+  database, because it read the first tree-path segment as every other engine
+  does. Schema hints and every AI verb then asked Glue for a database named
+  `AwsDataCatalog` and failed ("Database awsdatacatalog not found", or a
+  `glue:GetTables` denial) — while a fully qualified query still ran, which hid
+  the cause. Path-to-database mapping now lives in one place,
+  `databaseFromPath`. No behaviour change for PostgreSQL, MySQL, SQLite or
+  Redis — verified by differential test against the previous logic.
+- AI verbs now receive column **types** in the schema context, not just names
+  (`reports(month string partition key, …)`), for drivers that can supply them
+  without an extra round trip. Athena is the first: given only names, a model
+  reads `month` as numeric and writes `month IN (7, 8)` against a column that
+  holds "july" — valid Trino, zero rows, and no error explaining it. Athena also
+  flags partition keys, which are the columns that decide how much a statement
+  scans. Drivers that supply no types render exactly as before.
+- Athena: AI verbs were told the dialect was generic "SQL", so generated
+  statements could use PostgreSQL idioms Athena rejects. They now name Trino.
+- Athena connections showed as "athena" in the tree rather than "AWS Athena".
+
+### Changed
+
+- **Minimum VS Code is now 1.90** (was 1.85). The AWS SDK declares Node >= 20,
+  and VS Code only reaches Node 20.9 at 1.90 — 1.85 through 1.89 run Node 18.
+  The SDK is imported at module scope, so it loads for every user rather than
+  only Athena users; leaving the floor at 1.85 would have claimed support for
+  builds where the whole extension could fail to activate.
+- Athena `getDDL()` now quotes identifiers and escapes the S3 location. It uses
+  **backticks**, because Athena's DDL is Hive while its SELECT is Trino — the
+  driver's existing `q()`/`lit()` are the Trino pair and would emit DDL Athena
+  rejects. Output is also labelled approximate, as the Postgres reconstruction
+  already is: it is the shape of the table, not a runnable statement.
+- `countRows()` is now **optional** on `Driver`. Athena does not implement it:
+  counting there means a full table scan, and returning `0` reads as "empty
+  table" and would quietly break any pager that trusted it. Callers must guard,
+  as they already do for `setTtl`.
+- `Driver.connect()` now takes a secrets object rather than a bare password
+  string — Athena's access-key mode needs two secrets, and a driver must never
+  reach into SecretStorage itself.
+- "Select Top 200" is now **Preview Rows**, which is what it does on every engine.
+
+### Notes on Athena and cost
+
+- Browsing the tree runs no queries: the tree, autocomplete and DDL all come
+  from Athena's metadata APIs, which scan nothing. `information_schema` is
+  never used, because querying it is billed DML.
+- Clicking a table does **not** preview it — on a billed engine a stray click
+  should not start a scan. Preview Rows is an explicit action, capped at 500
+  rows, and the statement shown in the editor is exactly the one that ran.
+- Previews do not page server-side, so no "next page" click can silently start
+  a second scan of the same table.
+- Row counts are not offered: `COUNT(*)` means a full scan, which on a
+  terabyte-scale table is real money for a number nobody asked for.
+- A failed or cancelled query reports the bytes it scanned before stopping —
+  AWS bills those either way.
+- Athena tables have no primary key, so grid editing is unavailable and says so.
+
 ## [1.3.2] - 2026-09-08
 
 ### Added

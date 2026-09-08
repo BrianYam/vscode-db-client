@@ -61,8 +61,11 @@ export class ConnectionManager {
 
       const driver = createDriver(effectiveConfig);
       pend.driver = driver;
-      const password = await this.store.getPassword(id);
-      await driver.connect(password);
+      await driver.connect({
+        password: await this.store.getPassword(id),
+        awsSecretAccessKey: await this.store.getAwsSecret(id),
+        awsSessionToken: await this.store.getAwsSessionToken(id),
+      });
       this.live.set(id, driver);
       return driver;
     } catch (err) {

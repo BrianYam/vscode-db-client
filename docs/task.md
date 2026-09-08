@@ -1380,3 +1380,69 @@ committed as `test/exportView.test.js` and `test/columnView.test.js`.
 **Not covered by any of the above — needs eyes in a running window:** dropdown placement
 and theming, hover/click feel, the save dialog and the bytes actually written to disk, and
 behaviour against a live database. The logic is verified; the pixels are not.
+
+## [SDD][M-ATH] AWS Athena (Lite) — rewrite on `feat/athena-lite`
+
+Spec: `docs/BLUEPRINT_ATHENA.md`. Prior attempt preserved at `feat/athena-fat`
+(cherry-pick source, not a rebase source).
+
+### Contract
+- [x] [SDD][M-ATH-1] Add `"athena"` to `DatabaseType` and the seven frozen `aws*`/
+      `athena*` fields to `ConnectionConfig`, byte-identical to `feat/athena-fat`.
+      `DEFAULT_PORTS.athena = 0`.
+- [x] [SDD][M-ATH-2] Add `awsSecret`/`awsSessionToken` SecretStorage keys to `store.ts`,
+      exact names preserved.
+- [x] [SDD][M-ATH-3] Regression test: both saved `schemaVersion: 1` records load and
+      resolve credentials without re-entry. **Gate — nothing ships until this passes.**
+
+### Driver
+- [x] [SDD][M-ATH-4] `src/drivers/athena.ts` implementing `Driver`: `connect`
+      (profile / keys / ambient via `@aws-sdk/credential-providers`), `dispose`.
+- [x] [SDD][M-ATH-5] `children()` — catalog → database → table → column, metadata APIs
+      only, zero billed queries.
+- [x] [SDD][M-ATH-6] `query()` — StartQueryExecution, backoff poll, paged
+      GetQueryResults to the row cap; populate `bytesScanned` on `QueryResult`.
+- [x] [SDD][M-ATH-7] `tableColumns()`, `previewTable()` (explicit action only).
+- [x] [SDD][M-ATH-8] Adopt `main`'s `cancel?(token)` signature. Do not reintroduce
+      `Cancellable` or `capabilities.ts`.
+- [x] [SDD][M-ATH-9] Registry case in `registry.ts`.
+
+### Surface
+- [x] [SDD][M-ATH-10] Form section: region, credential mode, profile / access key,
+      workgroup, database, results location. No catalog, endpoint, or FIPS inputs.
+- [x] [SDD][M-ATH-11] Tree icons + `contextValue` so a table click never auto-previews.
+- [x] [SDD][M-ATH-12] Results footer: bytes scanned. No price estimate.
+- [x] [SDD][M-ATH-13] Port `test/athena.test.js` for the surviving pure helpers only.
+- [x] [SDD][M-ATH-14] `CHANGELOG.md` under `[Unreleased]`; minor bump at release.
+
+## [SDD][M-GRID] Results grid: row numbers + column picker shortcuts
+
+Small UI change; no separate blueprint. Locked decisions live with the tasks.
+
+### Row numbers
+- [x] [SDD][M-GRID-1] Leftmost gutter column in the results grid showing the
+      row's position. Decisions: it is a **position indicator, not an identity** —
+      it renumbers with the current sort and filter, the way every SQL grid does.
+- [x] [SDD][M-GRID-2] Continue the count across server-paged previews
+      (`page.offset + n`), so row 1 of page 2 reads 101 rather than restarting.
+- [x] [SDD][M-GRID-3] Must never reach Export CSV / Export JSON / Copy as JSON.
+      Structurally safe already: those project from the result by column name, so
+      a DOM-only gutter cannot leak in. Verify, don't assume.
+- [x] [SDD][M-GRID-4] Not selectable, tabular figures so digits align, and no
+      `data-col` — sort, filter and cell-edit handlers key off that attribute, so
+      the gutter stays inert without needing to be special-cased.
+
+### Column picker
+- [x] [SDD][M-GRID-5] Add "Hide all" beside the existing "Show all". Only
+      unselect-all is missing; "Show all" is already select-all.
+- [x] [SDD][M-GRID-6] Keep the **first** column visible rather than allowing
+      zero. The one-column floor already exists (`locked` in `renderColsMenu`
+      disables the last checkbox); this makes the bulk action respect the same
+      rule instead of adding a second, different one. First, not last: it is
+      usually the key column.
+- [x] [SDD][M-GRID-7] Clear filters on columns the bulk action hides, in one
+      server round trip, and say how many. Hiding a filtered column otherwise
+      leaves invisible state — the "why is my grid empty" trap `toggleColumn`
+      already guards against one column at a time.
+- [x] [SDD][M-GRID-8] `hideAllButFirst` as a pure helper in `columnView.ts`,
+      unit-tested against the shipped source string like its siblings.

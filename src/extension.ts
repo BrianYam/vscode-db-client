@@ -17,6 +17,7 @@ import {
 } from "./connections/portability";
 import { QueryStore } from "./connections/queryStore";
 import { ConnectionStore, newId } from "./connections/store";
+import { databaseFromPath } from "./drivers/registry";
 import { setSqliteWasmDir } from "./drivers/sqlite";
 import { initLog, logError, logInfo } from "./log";
 import { bindQueryDoc, registerSqlFeatures } from "./sqlFeatures";
@@ -213,6 +214,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
               password: await store.getPassword(config.id),
               sshPassword: await store.getSshPassword(config.id),
               sshPassphrase: await store.getSshPassphrase(config.id),
+              awsSecretAccessKey: await store.getAwsSecret(config.id),
+              awsSessionToken: await store.getAwsSessionToken(config.id),
             }
           : undefined,
       });
@@ -408,7 +411,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   reg("openDbClient.newQuery", (node: DbNode) => {
     QueryPanel.create(ctx, manager, store, node.connectionId, {
-      database: node.nodePath[0],
+      database: databaseFromPath(store.get(node.connectionId)?.type, node.nodePath),
     });
   });
 

@@ -2,6 +2,7 @@ import * as mysql from "mysql2/promise";
 import { type ConnectionConfig, DEFAULT_PORTS } from "../connections/types";
 import type {
   ColumnMeta,
+  ConnectSecrets,
   Driver,
   ForeignKey,
   PreviewOptions,
@@ -23,7 +24,8 @@ export class MySqlDriver implements Driver {
 
   constructor(public readonly config: ConnectionConfig) {}
 
-  async connect(password?: string): Promise<void> {
+  async connect(secrets?: ConnectSecrets): Promise<void> {
+    const password = secrets?.password;
     if (this.config.useConnectionString && this.config.connectionString) {
       this.pool = mysql.createPool(this.config.connectionString);
     } else {

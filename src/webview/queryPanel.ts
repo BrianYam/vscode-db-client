@@ -15,6 +15,7 @@ import type {
   SchemaHints,
   SortSpec,
 } from "../drivers/Driver";
+import { databaseFromPath } from "../drivers/registry";
 import { logError } from "../log";
 import { suggest } from "../sqlComplete";
 import { canFormat, formatSql, vocabularyFor } from "../sqlDialect";
@@ -167,15 +168,13 @@ export class QueryPanel {
     const config = this.store.get(connectionId);
     this.ai = new AiService(new AiStore(ctx), new UsageStore(ctx));
     this.database = options.database;
-    // A preview's path starts with the database on multi-database engines
-    // (postgres/mysql: db name, redis: db number). Bind the panel to it, so that
-    // Run on the shown SQL and completion hints target the database the preview
-    // came from — not the connection's entry database. Previewing
-    // drizzle.__drizzle_migrations and hitting Run used to fail with
-    // "relation does not exist" precisely because of this gap. SQLite is
-    // excluded: its path[0] is a table name, and it has one database anyway.
-    if (this.database === undefined && options.previewPath?.length && config?.type !== "sqlite") {
-      this.database = options.previewPath[0];
+    // Bind the panel to the database the preview came from, so that Run on the
+    // shown SQL and completion hints target it rather than the connection's
+    // entry database. Previewing drizzle.__drizzle_migrations and hitting Run
+    // used to fail with "relation does not exist" precisely because of this gap.
+    // Which path segment that is depends on the engine — see databaseFromPath.
+    if (this.database === undefined && options.previewPath?.length) {
+      this.database = databaseFromPath(config?.type, options.previewPath);
     }
     this.filePath = options.filePath;
     const title = options.filePath
@@ -940,7 +939,7 @@ export class QueryPanel {
      click did nothing is visible rather than mysterious. */
   #colsList label.locked { opacity: .5; cursor: default; }
   #colsList .none { opacity: .6; padding: 4px; }
-  .colsfoot { display: flex; justify-content: flex-end; margin-top: 6px;
+  .colsfoot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px;
               border-top: 1px solid var(--border); padding-top: 6px; }
   #colsBtn.filtered { color: var(--vscode-textLink-foreground); }
   .null { opacity: .5; font-style: italic; }
@@ -972,6 +971,14 @@ export class QueryPanel {
   #mtabs button.on { background: var(--vscode-button-background);
                      color: var(--vscode-button-foreground); }
   .chk { width: 22px; text-align: center; }
+  /* Row-number gutter. A position indicator, not data: it renumbers with the
+     current sort and filter, and it deliberately carries no data-col, so the
+     sort, filter, edit and JSON handlers — all of which select on that
+     attribute — skip it without needing to know it exists. Exports project from
+     the result by column name, so it cannot reach a CSV either. */
+  .rn { width: 1%; white-space: nowrap; text-align: right; padding-right: 8px;
+        color: var(--vscode-descriptionForeground); opacity: .7;
+        user-select: none; font-variant-numeric: tabular-nums; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
   /* Second sticky header row, pinned directly below the name row. This was
      position:static, which — being more specific than the th rule above —
@@ -1047,7 +1054,7 @@ export class QueryPanel {
   <div id="colsMenu">
     <input id="colsFilter" class="filter" placeholder="Search columns…" />
     <div id="colsList"></div>
-    <div class="colsfoot"><button id="colsAll" class="secondary">Show all</button></div>
+    <div class="colsfoot"><button id="colsNone" class="secondary" title="Hide every column but the first">Hide all</button><button id="colsAll" class="secondary">Show all</button></div>
   </div>
   <div id="ac"></div>
   <div id="status">Ctrl/Cmd+Enter to run — highlight to run only that${
@@ -1105,6 +1112,12 @@ ${COLUMN_VIEW_HELPERS}
     // Filter/sort/page round-trips can overlap, and a slow one landing last would
     // otherwise repaint the grid with rows that no longer match the boxes.
     let reqSeq = 0, renderedSeq = 0;
+    function fmtBytes(n) {
+      const u = ['B','KB','MB','GB','TB','PB'];
+      let v = n, i = 0;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return i === 0 ? v + ' B' : v.toFixed(1) + ' ' + u[i];
+    }
     const serverBacked = () => !!(raw && raw.page);
     function scheduleServerFilter(){
       clearTimeout(filterTimer);
@@ -1783,6 +1796,8 @@ ${COLUMN_VIEW_HELPERS}
         list.appendChild(row);
       }
       $('colsAll').disabled = hidden.size === 0;
+      // Already at the floor: nothing left that may legally be hidden.
+      $('colsNone').disabled = shown.length <= 1;
     }
 
     function toggleColumn(c, show){
@@ -1825,6 +1840,27 @@ ${COLUMN_VIEW_HELPERS}
     $('colsMenu').addEventListener('click', (e) => e.stopPropagation());
     $('colsAll').addEventListener('click', () => {
       hidden = new Set();
+      renderColsMenu(); syncColsBtn(); renderGrid();
+    });
+    $('colsNone').addEventListener('click', () => {
+      const all = raw ? raw.columns : [];
+      const next = hideAllButFirst(all);
+      if (!next.size) return;
+      // Same trap toggleColumn() guards one column at a time: a filter on a
+      // column you can no longer see is invisible state. Drop them together, in
+      // ONE server round trip rather than one per column, and say what happened.
+      const dropped = [];
+      for (const c of next) {
+        if (filters[c]) { delete filters[c]; dropped.push(c); }
+      }
+      hidden = next;
+      if (dropped.length && serverBacked()) {
+        const arr = Object.entries(filters).filter(([,v]) => v).map(([column,value]) => ({ column, value }));
+        vscode.postMessage({ type:'filter', filters: arr, seq: ++reqSeq });
+      }
+      statusEl.textContent = dropped.length
+        ? ('Showing "' + all[0] + '" only — cleared ' + dropped.length + ' column filter(s).')
+        : ('Showing "' + all[0] + '" only.');
       renderColsMenu(); syncColsBtn(); renderGrid();
     });
     document.addEventListener('click', () => { if (colsMenuOpen()) closeColsMenu(); });
@@ -1874,6 +1910,7 @@ ${COLUMN_VIEW_HELPERS}
       const shownCols = cols();
       const allSel = editable && view.length > 0 && view.every(({ri}) => selected.has(ri));
       let h = '<table><thead><tr>';
+      h += '<th class="rn"></th>';
       if (editable) h += '<th class="chk"><input type="checkbox" id="chkAll"'+(allSel?' checked':'')+'></th>';
       for (const c of shownCols) {
         const m = metaFor(c);
@@ -1885,13 +1922,19 @@ ${COLUMN_VIEW_HELPERS}
              (m ? '<div class="ctype">'+esc(m.type)+'</div>' : '') + '</th>';
       }
       h += '</tr><tr class="filterRow">';
+      h += '<th class="rn"></th>';
       if (editable) h += '<th class="chk"></th>';
       for (const c of shownCols)
         h += '<th><input class="filter" data-col="'+esc(c)+'" placeholder="filter" value="'+esc(filters[c]||'')+'"></th>';
       h += '</tr></thead><tbody>';
       const fkCols = new Set((raw.foreignKeys || []).map((f) => f.column));
+      // Continue the count across server-paged previews, so the first row of
+      // page 2 reads 101 rather than restarting at 1 — the number is there to
+      // answer "where am I", which a per-page reset defeats.
+      let rn = raw.page ? raw.page.offset : 0;
       for (const { row, ri } of view) {
         h += '<tr data-ri="'+ri+'"'+(selected.has(ri)?' class="selected"':'')+'>';
+        h += '<td class="rn">'+(++rn)+'</td>';
         if (editable) h += '<td class="chk"><input type="checkbox" class="rowchk" data-ri="'+ri+'"'+(selected.has(ri)?' checked':'')+'></td>';
         for (const c of shownCols) {
           const isFk = fkCols.has(c);
@@ -2413,7 +2456,15 @@ ${COLUMN_VIEW_HELPERS}
         $('addBtn').disabled = !raw.editable;
         updateTtl();
         const p = raw.page;
-        $('cost').textContent = raw.elapsedMs != null ? ('Cost: ' + (raw.elapsedMs/1000).toFixed(2) + 's') : '';
+        // On a billed engine, wall-clock time is not the cost that matters —
+        // Athena charges per byte scanned. Show the bytes when the driver
+        // reports them, deliberately without a dollar figure: that would need a
+        // per-region price table that goes stale silently and is wrong under
+        // reserved capacity.
+        const timePart = raw.elapsedMs != null ? (raw.elapsedMs/1000).toFixed(2) + 's' : '';
+        const scanPart = raw.bytesScanned != null ? fmtBytes(raw.bytesScanned) + ' scanned' : '';
+        const costParts = [timePart, scanPart].filter(Boolean);
+        $('cost').textContent = costParts.length ? 'Cost: ' + costParts.join(' · ') : '';
         if (p) {
           const from = p.total ? p.offset + 1 : 0, to = Math.min(p.offset + p.limit, p.total);
           $('pageLbl').textContent = from + '–' + to;

@@ -21,6 +21,14 @@ export interface ConnectionSecrets {
   password?: string;
   sshPassword?: string;
   sshPassphrase?: string;
+  /**
+   * Athena `keys` mode. The access key ID rides along in the config (it is an
+   * identifier, not a secret); only this and the session token are held back
+   * from a redacted export. Without them here, a "with secrets" export would
+   * quietly produce an Athena connection that cannot authenticate.
+   */
+  awsSecretAccessKey?: string;
+  awsSessionToken?: string;
 }
 
 /**
@@ -49,7 +57,7 @@ export interface ExportFile {
   connections: ExportedConnection[];
 }
 
-const TYPES: DatabaseType[] = ["postgres", "mysql", "sqlite", "redis"];
+const TYPES: DatabaseType[] = ["postgres", "mysql", "sqlite", "redis", "athena"];
 
 /**
  * Fields an import is allowed to set. Anything else in the file is dropped:
@@ -74,11 +82,33 @@ const STRING_FIELDS = [
   "sshHost",
   "sshUsername",
   "sshPrivateKeyPath",
+  // Athena. `awsEndpoint` is dialled on connect, which is exactly why it is
+  // allowlisted here rather than spread in blindly from an untrusted file.
+  "awsRegion",
+  "awsProfile",
+  "awsAccessKeyId",
+  "athenaWorkgroup",
+  "athenaCatalog",
+  "athenaOutputLocation",
+  "awsEndpoint",
 ] as const;
 const NUMBER_FIELDS = ["port", "redisDb", "sshPort", "sshConnectTimeout"] as const;
-const BOOL_FIELDS = ["ssl", "allowInvalidCert", "useConnectionString", "sshEnabled"] as const;
-const SECRET_FIELDS = ["password", "sshPassword", "sshPassphrase"] as const;
+const BOOL_FIELDS = [
+  "ssl",
+  "allowInvalidCert",
+  "useConnectionString",
+  "sshEnabled",
+  "awsUseFips",
+] as const;
+const SECRET_FIELDS = [
+  "password",
+  "sshPassword",
+  "sshPassphrase",
+  "awsSecretAccessKey",
+  "awsSessionToken",
+] as const;
 const SSH_AUTH = ["auto", "password", "key", "agent"];
+const AWS_AUTH = ["profile", "keys", "ambient"];
 
 // ---------------------------------------------------------------- redaction
 
@@ -308,6 +338,9 @@ function sanitize(raw: unknown, index: number, warnings: string[]): ExportedConn
   if (out.notes && out.notes.length > NOTES_MAX_CHARS) {
     out.notes = out.notes.slice(0, NOTES_MAX_CHARS);
     warnings.push(`Entry ${index + 1}: notes truncated to ${NOTES_MAX_CHARS} characters.`);
+  }
+  if (typeof r.awsAuthMode === "string" && AWS_AUTH.includes(r.awsAuthMode)) {
+    out.awsAuthMode = r.awsAuthMode as ExportedConnection["awsAuthMode"];
   }
   if (typeof r.sshAuth === "string" && SSH_AUTH.includes(r.sshAuth)) {
     out.sshAuth = r.sshAuth as ExportedConnection["sshAuth"];

@@ -55,6 +55,17 @@ export interface SchemaHints {
    */
   columnsByTable?: Record<string, string[]>;
   /**
+   * Column types per table, when the driver already has them and does not need
+   * an extra round trip to say so. Optional: engines that would have to pay for
+   * it omit the field and callers render bare column names.
+   *
+   * The AI verbs are the reason this exists. Given only names, a model reads a
+   * column called `month` as a number and writes `month IN (7, 8)` against a
+   * lake table whose month column actually holds "july" — valid SQL, zero rows,
+   * no error to explain it.
+   */
+  typesByTable?: Record<string, Record<string, string>>;
+  /**
    * A row limit was hit, so the lists above are incomplete. Surfaced to the user
    * rather than silently dropping suggestions.
    */
@@ -101,6 +112,13 @@ export interface QueryResult {
   foreignKeys?: ForeignKey[];
   /** Server round-trip time in milliseconds. */
   elapsedMs?: number;
+  /**
+   * Bytes the engine scanned to answer this. Athena bills per terabyte
+   * scanned, so on that engine this is what the statement cost — the grid
+   * shows it rather than leaving the user to find out on the invoice. Absent
+   * on engines where a query has no per-run price.
+   */
+  bytesScanned?: number;
   /** The equivalent SQL for a table preview (shown, editable, in the editor). */
   sql?: string;
   /**
@@ -141,6 +159,18 @@ export interface TreeItemData {
 }
 
 /**
+ * Secrets for `connect()`, fetched by the host from SecretStorage. An object
+ * rather than a bare password because Athena's `keys` mode needs two of them,
+ * and a driver must never reach for SecretStorage (or any VS Code API) itself.
+ */
+export interface ConnectSecrets {
+  password?: string;
+  /** Athena `keys` mode. The access key ID is not secret and lives in config. */
+  awsSecretAccessKey?: string;
+  awsSessionToken?: string;
+}
+
+/**
  * Every database engine implements this interface. The tree, query panel, and
  * commands are written against Driver only — they never import pg/mysql2/etc.
  * directly. Add a new engine by adding one file that implements Driver.
@@ -148,7 +178,7 @@ export interface TreeItemData {
 export interface Driver {
   readonly config: ConnectionConfig;
 
-  connect(password?: string): Promise<void>;
+  connect(secrets?: ConnectSecrets): Promise<void>;
   dispose(): Promise<void>;
 
   /**
@@ -198,8 +228,17 @@ export interface Driver {
   /** Table and column names for editor autocomplete. */
   schemaHints(database?: string): Promise<SchemaHints>;
 
-  /** Total row count for a table (for pagination), honoring preview filters. */
-  countRows(path: string[], opts?: PreviewOptions): Promise<number>;
+  /**
+   * Total row count for a table (for pagination), honoring preview filters.
+   *
+   * Optional, like `setTtl?`, because "how many rows are there" is not a
+   * question every engine can answer cheaply — or at all. On Athena it means a
+   * full table scan, which on a terabyte-scale table is real money for a number
+   * nobody asked for; on Redis a table row count has no meaning. Those engines
+   * omit it rather than returning a `0` that reads as "empty table" and would
+   * quietly break any pager that trusted it. Callers must guard.
+   */
+  countRows?(path: string[], opts?: PreviewOptions): Promise<number>;
 
   /** Column metadata for a table. */
   tableColumns(path: string[]): Promise<ColumnMeta[]>;

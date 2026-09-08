@@ -1,4 +1,4 @@
-export type DatabaseType = "postgres" | "mysql" | "sqlite" | "redis";
+export type DatabaseType = "postgres" | "mysql" | "sqlite" | "redis" | "athena";
 
 /**
  * A saved connection. Secrets (password) are NOT stored here — they live in
@@ -50,7 +50,42 @@ export interface ConnectionConfig {
   sshAuth?: SshAuth;
   sshPrivateKeyPath?: string;
   sshConnectTimeout?: number;
+
+  // ---- Athena only -------------------------------------------------------
+  // These names are a FROZEN contract: connections already persisted in
+  // globalState are read back by these exact keys. Renaming one silently
+  // orphans a saved connection, which is why a field may leave the connection
+  // form while staying declared and read here (athenaCatalog, awsEndpoint and
+  // awsUseFips are exactly that case).
+  /**
+   * How AWS credentials are obtained. `profile` is the default: one profile
+   * name resolves SSO, `credential_process`, `source_profile` chains and web
+   * identity through the SDK's own chain, which is less code than any of them
+   * handled directly.
+   */
+  awsAuthMode?: AwsAuthMode;
+  awsRegion?: string;
+  /** Named profile in ~/.aws/config. Empty = the SDK's default resolution. */
+  awsProfile?: string;
+  /** Static access key id. The secret and session token live in SecretStorage. */
+  awsAccessKeyId?: string;
+  athenaWorkgroup?: string;
+  /** Glue/Hive catalog. One level ABOVE database, unlike every other engine. */
+  athenaCatalog?: string;
+  /**
+   * s3:// results prefix. Optional: a workgroup with
+   * EnforceWorkGroupConfiguration silently OVERRIDES this rather than
+   * rejecting it, so the effective value is read back via GetWorkGroup.
+   */
+  athenaOutputLocation?: string;
+  /** Override the endpoint (LocalStack, PrivateLink, a private DNS name). */
+  awsEndpoint?: string;
+  /** Use the FIPS endpoint — a hard requirement for some regulated accounts. */
+  awsUseFips?: boolean;
 }
+
+/** Athena credential modes. */
+export type AwsAuthMode = "profile" | "keys" | "ambient";
 
 export type SshAuth = "auto" | "password" | "key" | "agent";
 
@@ -67,4 +102,6 @@ export const DEFAULT_PORTS: Record<DatabaseType, number> = {
   mysql: 3306,
   sqlite: 0,
   redis: 6379,
+  // Athena is signed HTTPS to a regional endpoint — there is no port to set.
+  athena: 0,
 };
