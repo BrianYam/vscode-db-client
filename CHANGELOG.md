@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Results grid now has a **row-number gutter**, so you can tell where you are in
+  a long result. It numbers the rows you are looking at — renumbering with the
+  current sort and filter — and continues across paged previews rather than
+  restarting at 1 on page 2. It never reaches Export or Copy.
+- Column picker gains **Hide all** next to Show all. It leaves the first column
+  visible, honouring the same one-column floor the checkboxes already enforce,
+  and clears any filters on the columns it hides (in one round trip) rather than
+  leaving invisible state behind.
+
 - **AWS Athena support.** Connect with an AWS profile (SSO, `credential_process`
   and assume-role chains all resolve through the SDK), static access keys, or the
   machine's own role. Browse catalog → database → table → column, and run

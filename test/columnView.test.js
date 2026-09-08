@@ -5,8 +5,8 @@ const { test } = require("node:test");
 const assert = require("node:assert");
 const { COLUMN_VIEW_HELPERS } = require("../out/webview/columnView.js");
 
-const { visibleColumns, projectRows, columnsKey } = new Function(
-  `${COLUMN_VIEW_HELPERS}\nreturn { visibleColumns, projectRows, columnsKey };`,
+const { visibleColumns, projectRows, columnsKey, hideAllButFirst } = new Function(
+  `${COLUMN_VIEW_HELPERS}\nreturn { visibleColumns, projectRows, columnsKey, hideAllButFirst };`,
 )();
 
 const ALL = ["id", "name", "email", "created_at"];
@@ -85,4 +85,19 @@ test("columnsKey: separator cannot be forged by a column name", () => {
   // Joined on a newline precisely because a column name cannot contain one;
   // names with commas or spaces must still produce distinct keys.
   assert.notStrictEqual(columnsKey(["a,b"]), columnsKey(["a", "b"]));
+});
+
+// "Hide all" has to respect the same one-column floor the checkboxes enforce.
+test("hideAllButFirst keeps the first column and hides the rest", () => {
+  const hidden = hideAllButFirst(ALL);
+  assert.deepStrictEqual([...hidden], ["name", "email", "created_at"]);
+  // The survivor is what visibleColumns() would then render.
+  assert.deepStrictEqual(visibleColumns(ALL, hidden), ["id"]);
+});
+
+test("hideAllButFirst hides nothing when there is nothing left to hide", () => {
+  // One column is already the floor; a no-op beats hiding the only column.
+  assert.strictEqual(hideAllButFirst(["id"]).size, 0);
+  assert.strictEqual(hideAllButFirst([]).size, 0);
+  assert.strictEqual(hideAllButFirst(undefined).size, 0);
 });

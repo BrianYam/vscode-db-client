@@ -37,6 +37,18 @@ export const COLUMN_VIEW_HELPERS = String.raw`
       });
     }
 
+    // Every column except the first, as a hidden-set. The bulk "hide all" has to
+    // land somewhere legal: a zero-column grid is a blank rectangle, and the
+    // picker already refuses to uncheck the last remaining box, so the bulk
+    // action honours that same floor rather than inventing a second rule. The
+    // FIRST column survives because it is usually the key you identify a row by.
+    function hideAllButFirst(all){
+      var out = new Set();
+      if (!all || all.length < 2) return out;
+      for (var i = 1; i < all.length; i++) out.add(all[i]);
+      return out;
+    }
+
     // Identity of a result's column set. Visibility resets when this changes, so
     // a different query starts clean while re-running the same one keeps the
     // user's choice. Newline-joined: a column name cannot contain one.
