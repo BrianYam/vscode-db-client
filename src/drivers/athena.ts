@@ -69,8 +69,11 @@ const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
  * - **Metadata never runs a query.** The tree, `schemaHints`, `tableColumns`
  *   and `getDDL` come from Athena's metadata APIs, which scan no S3.
  *   `information_schema` would be billed DML, so it is never used.
- * - **`countRows` refuses.** Counting means a full scan; on a 2 TB table one
- *   pagination click would bill roughly $10. An honest unknown is better.
+ * - **`countRows` is not implemented at all.** Counting means a full scan; on a
+ *   2 TB table one pagination click would bill roughly $10. The method is
+ *   optional on `Driver` precisely so this engine can decline it, rather than
+ *   return a `0` that reads as "empty table". `previewTable` reports the rows
+ *   it actually holds instead.
  * - **Nothing is editable.** Glue/Hive has no primary keys, so there is no way
  *   to address a row for UPDATE/DELETE.
  */
@@ -628,15 +631,6 @@ export class AthenaDriver implements Driver {
       lines.push(`LOCATION '${location}'`);
     }
     return lines.join("\n");
-  }
-
-  /**
-   * Deliberately NOT a COUNT(*). Counting means a full table scan; on a 2 TB
-   * table that is roughly $10 for a number nobody asked for. `previewTable`
-   * reports the rows it actually holds instead.
-   */
-  async countRows(): Promise<number> {
-    return 0;
   }
 
   // ---- refusals -----------------------------------------------------------

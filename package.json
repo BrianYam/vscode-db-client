@@ -15,7 +15,7 @@
     "url": "https://github.com/BrianYam/vscode-db-client.git"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "Programming Languages",
@@ -414,7 +414,7 @@
     "@types/pg": "^8.11.6",
     "@types/sql.js": "^1.4.9",
     "@types/ssh2": "^1.15.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.90.0",
     "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.2",

@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Minimum VS Code is now 1.90** (was 1.85). The AWS SDK declares Node >= 20,
+  and VS Code only reaches Node 20.9 at 1.90 — 1.85 through 1.89 run Node 18.
+  The SDK is imported at module scope, so it loads for every user rather than
+  only Athena users; leaving the floor at 1.85 would have claimed support for
+  builds where the whole extension could fail to activate.
+- `countRows()` is now **optional** on `Driver`. Athena does not implement it:
+  counting there means a full table scan, and returning `0` reads as "empty
+  table" and would quietly break any pager that trusted it. Callers must guard,
+  as they already do for `setTtl`.
 - `Driver.connect()` now takes a secrets object rather than a bare password
   string — Athena's access-key mode needs two secrets, and a driver must never
   reach into SecretStorage itself.

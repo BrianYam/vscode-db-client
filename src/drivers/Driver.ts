@@ -228,8 +228,17 @@ export interface Driver {
   /** Table and column names for editor autocomplete. */
   schemaHints(database?: string): Promise<SchemaHints>;
 
-  /** Total row count for a table (for pagination), honoring preview filters. */
-  countRows(path: string[], opts?: PreviewOptions): Promise<number>;
+  /**
+   * Total row count for a table (for pagination), honoring preview filters.
+   *
+   * Optional, like `setTtl?`, because "how many rows are there" is not a
+   * question every engine can answer cheaply — or at all. On Athena it means a
+   * full table scan, which on a terabyte-scale table is real money for a number
+   * nobody asked for; on Redis a table row count has no meaning. Those engines
+   * omit it rather than returning a `0` that reads as "empty table" and would
+   * quietly break any pager that trusted it. Callers must guard.
+   */
+  countRows?(path: string[], opts?: PreviewOptions): Promise<number>;
 
   /** Column metadata for a table. */
   tableColumns(path: string[]): Promise<ColumnMeta[]>;

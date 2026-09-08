@@ -197,3 +197,11 @@ test("the AI is told Athena is Trino, not generic SQL", () => {
   assert.strictEqual(dialectLabel("postgres"), "PostgreSQL");
   assert.strictEqual(dialectLabel("nope"), "SQL");
 });
+
+test("Athena declines countRows rather than answering 0", () => {
+  // Copilot review, PR #9: returning 0 reads as "empty table" and would break
+  // any pager that trusted it. countRows is optional on Driver, so the engine
+  // that cannot answer cheaply omits it and callers guard.
+  const d = new AthenaDriver(SAVED_PROFILE_MODE);
+  assert.strictEqual(d.countRows, undefined);
+});
