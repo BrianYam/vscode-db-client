@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **JSON and JSONB columns have a proper viewer.** A JSON cell used to be a wall
+  of minified text that stretched its column past the edge of the window and made
+  the whole row unreadable. It now shows a compact summary — `{…} 12 keys`,
+  `[…] 40 items` — and `⤢` opens a collapsible tree with syntax colouring, a
+  filter box, and copy buttons for both a value and its path (`$.items[3].sku`).
+  **Raw** is one click away, and is still where you edit.
+  - It works on **any** result, not just editable table previews — a JOIN or a
+    view returning JSONB previously had no way to inspect a cell at all.
+  - It covers all four engines: Postgres `json`/`jsonb` and MySQL `JSON` arrive
+    already parsed, and JSON kept as text in SQLite or Redis is detected too.
+  - Big documents stay safe: the tree expands lazily, one expansion paints at most
+    1,000 children and says how many it withheld, and anything over ~2 MB opens on
+    Raw with an explanation rather than freezing the panel.
 - **A running query now looks like it is running.** The Run button itself animates
   with the same braille spinner and live elapsed-seconds counter the AI assist bar
   uses — a 40-second query and a stuck one are no longer indistinguishable. The
@@ -29,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of appearing in the grid.
 
 ### Fixed
+- **Pop-up dialogs no longer render underneath the results header.** The overlay
+  had no stacking order of its own, so the sticky column headers and filter boxes
+  painted straight over the top of it. This affected the Edit Data dialog too, not
+  only the new JSON viewer. **Esc** now closes an open dialog as well.
 - **A large result no longer freezes the window.** The grid painted every row it
   was given, so a query returning tens of thousands of rows built a DOM large
   enough to lock the panel up completely. It now paints the first 2,000 and says

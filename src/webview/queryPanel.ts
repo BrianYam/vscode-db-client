@@ -18,6 +18,7 @@ import type {
 import { logError } from "../log";
 import { suggest } from "../sqlComplete";
 import { canFormat, formatSql, vocabularyFor } from "../sqlDialect";
+import { JSON_VIEW_HELPERS } from "./jsonView";
 
 interface PanelOptions {
   initialSql?: string;
@@ -911,6 +912,33 @@ export class QueryPanel {
                     background: var(--vscode-button-secondaryBackground); }
   @media (prefers-reduced-motion: reduce) { #abortBtn { animation: none; } }
   .null { opacity: .5; font-style: italic; }
+  /* ---- JSON viewer ---- */
+  /* A JSON cell shows a summary chip, never the raw document: td is white-space:pre
+     with no truncation, so one 5 KB value used to push every other column off screen. */
+  .jsonchip { font-family: var(--vscode-editor-font-family, monospace); opacity: .9;
+              border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; }
+  td.jsoncell { position: relative; }
+  .jsonopen { position: absolute; right: 2px; top: 2px; opacity: 0; cursor: pointer; }
+  td.jsoncell:hover .jsonopen { opacity: .8; }
+  #mtree { display: none; overflow: auto; max-height: 55vh; padding: 6px;
+           font-family: var(--vscode-editor-font-family, monospace);
+           background: var(--vscode-input-background);
+           border: 1px solid var(--border); }
+  .jrow { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .jrow.branch { cursor: pointer; }
+  .jrow.dim { opacity: .25; }
+  .jtog { display: inline-block; width: 12px; opacity: .7; }
+  .jkey { color: var(--vscode-symbolIcon-propertyForeground, var(--vscode-textLink-foreground)); }
+  .jpeek { opacity: .6; }
+  .jstring { color: var(--vscode-debugTokenExpression-string, #ce9178); }
+  .jnumber { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
+  .jboolean { color: var(--vscode-debugTokenExpression-boolean, #569cd6); }
+  .jnull { color: var(--vscode-debugTokenExpression-error, #808080); font-style: italic; }
+  .jnote { opacity: .8; color: var(--vscode-editorWarning-foreground); }
+  .jcopy { opacity: 0; cursor: pointer; margin-left: 6px; font-size: 11px; }
+  .jrow:hover .jcopy { opacity: .75; }
+  #mtabs button.on { background: var(--vscode-button-background);
+                     color: var(--vscode-button-foreground); }
   .chk { width: 22px; text-align: center; }
   tr.selected td { background: var(--vscode-list-activeSelectionBackground); }
   /* Second sticky header row, pinned directly below the name row. This was
@@ -923,11 +951,17 @@ export class QueryPanel {
   .filterRow th { position: sticky; top: var(--hdr-h, 0px); z-index: 2; padding: 2px; }
   .filterRow input { width: 100%; box-sizing: border-box; }
   /* cell-detail modal */
+  /* Above everything that is positioned: the sticky header th (z-index 3), the
+     filter row (2), and the completion dropdown (50). Without this the overlay
+     sits at z-index auto and the grid header paints straight over the modal. */
   #overlay { position: fixed; inset: 0; background: #0008; display: none;
-             align-items: center; justify-content: center; }
+             align-items: center; justify-content: center; z-index: 100; }
   #modal { background: var(--vscode-editorWidget-background);
            border: 1px solid var(--border); border-radius: 6px; padding: 14px;
            width: min(680px, 90vw); }
+  /* A JSON tree earns more room than a single-value edit box: nested keys plus a
+     long string value wrap badly at 680px. */
+  #modal.json { width: min(980px, 94vw); }
   #modal h3 { margin: 0 0 10px; text-align: center; }
   #modal .mbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   #modal textarea { width: 100%; box-sizing: border-box; min-height: 220px;
@@ -986,12 +1020,17 @@ export class QueryPanel {
 
   <div id="overlay">
     <div id="modal">
-      <h3>Edit Data</h3>
+      <h3 id="mtitle">Edit Data</h3>
       <div class="mbar">
-        <select id="mfmt"><option value="plain">Plain</option><option value="json">JSON</option></select>
+        <span id="mtabs" style="display:none; gap:6px;">
+          <button id="mtabTree" class="secondary">Tree</button>
+          <button id="mtabRaw" class="secondary">Raw</button>
+        </span>
         <button id="mcopy" class="secondary">Copy</button>
+        <input id="mfilter" class="filter" placeholder="Filter shown nodes…" style="display:none; width:180px;">
         <span class="spacer"></span>
       </div>
+      <div id="mtree"></div>
       <textarea id="mtext"></textarea>
       <div class="mfoot">
         <button id="mclose" class="secondary">Close</button>
@@ -1000,7 +1039,7 @@ export class QueryPanel {
     </div>
   </div>
 
-  <div id="addOverlay" style="position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;">
+  <div id="addOverlay" style="position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:100;">
     <div id="modal" style="max-height:86vh;overflow:auto;">
       <h3>Add Row</h3>
       <div style="opacity:.7;margin-bottom:8px;">Leave a field blank to use the column default / NULL.</div>
@@ -1015,6 +1054,7 @@ export class QueryPanel {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const $ = (id) => document.getElementById(id);
+${JSON_VIEW_HELPERS}
     const sqlEl = $('sql'), statusEl = $('status'), gridEl = $('grid');
     let raw = null;                 // last QueryResult
     let sort = { col: null, dir: 1 };
@@ -1165,7 +1205,8 @@ export class QueryPanel {
     // Esc aborts while running. The autocomplete's own Esc handler
     // stopPropagation()s when its dropdown is open, so the two never collide.
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && running) { e.preventDefault(); abortRun(); }
+      // Not while a modal is up — there Escape means "close this" (see overlayOpen).
+      if (e.key === 'Escape' && running && !overlayOpen()) { e.preventDefault(); abortRun(); }
     });
     function saveFile() {
       const btn = $('saveBtn'); if (!btn) return;
@@ -1710,14 +1751,23 @@ export class QueryPanel {
         if (editable) h += '<td class="chk"><input type="checkbox" class="rowchk" data-ri="'+ri+'"'+(selected.has(ri)?' checked':'')+'></td>';
         for (const c of raw.columns) {
           const isFk = fkCols.has(c);
+          const val = row[c];
+          const shape = jsonShape(val);
           const classes = [];
           if (editable) classes.push('editable');
           if (isFk) classes.push('fkcell');
+          if (shape) classes.push('jsoncell');
           const clsAttr = classes.length ? ' class="'+classes.join(' ')+'"' : '';
-          const dataCol = (editable || isFk) ? ' data-col="'+esc(c)+'"' : '';
-          const val = row[c];
-          let inner = (isFk && val != null) ? '<span class="fkval">'+display(val)+'</span>' : display(val);
-          if (editable) inner += '<span class="zoom" data-col="'+esc(c)+'">🔍</span>';
+          // JSON cells need data-col too: their viewer works on read-only results,
+          // where nothing else would have emitted the attribute.
+          const dataCol = (editable || isFk || shape) ? ' data-col="'+escAttr(c)+'"' : '';
+          let inner;
+          if (shape) inner = '<span class="jsonchip">'+esc(jsonSummary(shape))+'</span>';
+          else inner = (isFk && val != null) ? '<span class="fkval">'+display(val)+'</span>' : display(val);
+          if (editable) inner += '<span class="zoom" data-col="'+escAttr(c)+'">🔍</span>';
+          // Deliberately not gated on editable: the 🔍 zoom is, which is why a JOIN
+          // or a view returning jsonb had no inspector at all (Discovery §2 Finding A).
+          if (shape) inner += '<span class="jsonopen" data-col="'+escAttr(c)+'" title="Open JSON viewer">⤢</span>';
           if (isFk && val != null) inner += '<span class="relbtn" data-col="'+esc(c)+'" title="View related row">↗</span>';
           h += '<td'+clsAttr+dataCol+'>'+inner+'</td>';
         }
@@ -1818,10 +1868,23 @@ export class QueryPanel {
           openModal(Number(z.closest('tr').getAttribute('data-ri')), z.getAttribute('data-col'));
         });
       });
+      gridEl.querySelectorAll('.jsonopen').forEach((z) => {
+        z.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openModal(Number(z.closest('tr').getAttribute('data-ri')), z.getAttribute('data-col'));
+        });
+      });
     }
     gridEl.addEventListener('dblclick', onDblEdit); // attached once
 
     function onDblEdit(e){
+      const jt = e.target.closest && e.target.closest('td.jsoncell');
+      if (jt) {
+        // A one-line text input is the wrong tool for a JSON document, so the
+        // double-click opens the viewer instead — on read-only results too.
+        openModal(Number(jt.parentElement.getAttribute('data-ri')), jt.getAttribute('data-col'));
+        return;
+      }
       const td = e.target.closest && e.target.closest('td.editable');
       if (!td || !raw || !raw.editable || td.querySelector('input.cell')) return;
       const ri = Number(td.parentElement.getAttribute('data-ri'));
@@ -1840,7 +1903,9 @@ export class QueryPanel {
       };
       input.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-        else if (ev.key === 'Escape') { done = true; renderGrid(); }
+        // stopPropagation for the same reason the completion list does it: Escape
+        // here means "cancel this edit", and must not also abort a running query.
+        else if (ev.key === 'Escape') { ev.stopPropagation(); done = true; renderGrid(); }
       });
       input.addEventListener('blur', commit);
     }
@@ -1854,26 +1919,178 @@ export class QueryPanel {
       renderGrid();
     }
 
-    // ---- cell modal ----
+    // ---- cell modal + JSON viewer ----
+    // A tree of an enormous document is the M32 hang one cell down, so expansion
+    // is lazy, each expansion is capped, and a document past this size never gets
+    // a tree at all — it opens on Raw and says so.
+    const JSON_NODE_CAP = 1000;
+    const JSON_TREE_MAX_CHARS = 2 * 1024 * 1024;
+    const treeEl = $('mtree'), textEl = $('mtext'), tabsEl = $('mtabs'), filterEl = $('mfilter');
+
+    // Children come from an already-parsed document, so a string here is just a
+    // string — jsonShape's "text that parses as JSON" rule applies to grid cells,
+    // not to values inside a tree.
+    function isBranch(v){
+      if (v === null || typeof v !== 'object') return false;
+      if (v instanceof Date) return false;
+      return !(typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(v));
+    }
+
+    function copyBtn(label, title, getText){
+      const b = document.createElement('span');
+      b.className = 'jcopy';
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type:'copy', text: getText() });
+      });
+      return b;
+    }
+
+    // Built with DOM APIs throughout: keys and values are user data and reach the
+    // page only as text nodes, so no JSON content is ever parsed as markup
+    // (Discovery §3.6). Node identity lives in this closure, not in an attribute.
+    function buildNode(container, key, val, isIndex, depth, path){
+      const branch = isBranch(val);
+      const row = document.createElement('div');
+      row.className = 'jrow' + (branch ? ' branch' : '');
+      row.style.paddingLeft = (depth * 14) + 'px';
+
+      const tog = document.createElement('span');
+      tog.className = 'jtog';
+      tog.textContent = branch ? '▸' : ' ';
+      row.appendChild(tog);
+
+      if (key !== null) {
+        const k = document.createElement('span');
+        k.className = 'jkey';
+        k.textContent = String(key);
+        row.appendChild(k);
+        row.appendChild(document.createTextNode(': '));
+      }
+
+      const v = document.createElement('span');
+      v.className = branch ? 'jpeek' : ('jval j' + (val === null ? 'null' : typeof val));
+      v.textContent = jsonPeek(val);
+      row.appendChild(v);
+
+      row.appendChild(copyBtn('⧉', 'Copy this value', () =>
+        typeof val === 'string' ? val : JSON.stringify(val, null, 2)));
+      row.appendChild(copyBtn('⌗', 'Copy path: ' + path, () => path));
+      container.appendChild(row);
+
+      if (!branch) return;
+      const kids = document.createElement('div');
+      kids.hidden = true;
+      container.appendChild(kids);
+      let built = false;
+      function toggle(){
+        if (!built) { built = true; buildChildren(kids, val, depth + 1, path); }
+        kids.hidden = !kids.hidden;
+        tog.textContent = kids.hidden ? '▸' : '▾';
+      }
+      row.addEventListener('click', (e) => {
+        if (e.target.classList.contains('jcopy')) return;
+        toggle();
+      });
+      // Open the first couple of levels: deep documents stay navigable, shallow
+      // ones are readable without a single click.
+      if (depth < 2) toggle();
+    }
+
+    function buildChildren(kids, val, depth, path){
+      const arr = Array.isArray(val);
+      const keys = arr ? null : Object.keys(val);
+      const total = arr ? val.length : keys.length;
+      const shown = Math.min(total, JSON_NODE_CAP);
+      for (let i = 0; i < shown; i++) {
+        const k = arr ? i : keys[i];
+        buildNode(kids, k, val[k], arr, depth, path + jsonPathSeg(k, arr));
+      }
+      if (total > shown) {
+        const note = document.createElement('div');
+        note.className = 'jrow jnote';
+        note.style.paddingLeft = (depth * 14) + 'px';
+        note.textContent = 'Showing the first ' + shown + ' of ' + total +
+                           ' — use Raw to see everything';
+        kids.appendChild(note);
+      }
+    }
+
+    function showTab(which){
+      const tree = which === 'tree';
+      treeEl.style.display = tree ? 'block' : 'none';
+      textEl.style.display = tree ? 'none' : 'block';
+      filterEl.style.display = tree ? 'inline-block' : 'none';
+      $('mtabTree').classList.toggle('on', tree);
+      $('mtabRaw').classList.toggle('on', !tree);
+      // Saving writes the raw text, so it is only offered where that text is what
+      // you are looking at. The tree is read-only in v1.
+      $('msave').disabled = tree || !raw || !raw.editable;
+    }
+
     function openModal(ri, col){
       modalCtx = { ri, col };
       const v = raw.rows[ri][col];
-      $('mfmt').value = 'plain';
-      $('mtext').value = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v));
+      const shape = jsonShape(v);
+      textEl.value = (v === null || v === undefined) ? ''
+        : (typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v));
+      filterEl.value = '';
+      treeEl.innerHTML = '';
+      $('mtitle').textContent = shape ? 'JSON — ' + col : 'Edit Data';
+      $('modal').classList.toggle('json', !!shape);
+      if (shape) {
+        tabsEl.style.display = 'inline-flex';
+        if (textEl.value.length > JSON_TREE_MAX_CHARS) {
+          // Honest rather than heroic: say why there is no tree.
+          const note = document.createElement('div');
+          note.className = 'jrow jnote';
+          note.textContent = 'This document is ' + (textEl.value.length / 1048576).toFixed(1) +
+            ' MB — too large to expand as a tree without freezing the panel. Showing Raw.';
+          treeEl.appendChild(note);
+          showTab('raw');
+        } else {
+          buildNode(treeEl, null, shape.value, false, 0, '$');
+          showTab('tree');
+        }
+      } else {
+        tabsEl.style.display = 'none';
+        showTab('raw');
+      }
       $('overlay').style.display = 'flex';
     }
     function closeModal(){ $('overlay').style.display = 'none'; modalCtx = null; }
+    function overlayOpen(){
+      return $('overlay').style.display === 'flex' || $('addOverlay').style.display === 'flex';
+    }
+    // Escape precedence: the completion dropdown closes first (its own handler
+    // stops propagation), then any open modal, and only then does Escape abort a
+    // running query — closing what is in front of you is never the surprising choice.
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if ($('overlay').style.display === 'flex') { e.preventDefault(); closeModal(); return; }
+      if ($('addOverlay').style.display === 'flex') {
+        e.preventDefault();
+        $('addOverlay').style.display = 'none';
+      }
+    });
     $('mclose').addEventListener('click', closeModal);
     $('overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') closeModal(); });
-    $('mcopy').addEventListener('click', () => vscode.postMessage({ type:'copy', text: $('mtext').value }));
-    $('mfmt').addEventListener('change', () => {
-      if ($('mfmt').value === 'json') {
-        try { $('mtext').value = JSON.stringify(JSON.parse($('mtext').value), null, 2); } catch(_){}
-      }
+    $('mcopy').addEventListener('click', () => vscode.postMessage({ type:'copy', text: textEl.value }));
+    $('mtabTree').addEventListener('click', () => showTab('tree'));
+    $('mtabRaw').addEventListener('click', () => showTab('raw'));
+    // Dims rather than hides, so a match keeps its place in the structure. Only
+    // expanded nodes exist to be matched — hence "shown" in the placeholder.
+    filterEl.addEventListener('input', () => {
+      const t = filterEl.value.toLowerCase();
+      treeEl.querySelectorAll('.jrow').forEach((r) => {
+        r.classList.toggle('dim', !!t && r.textContent.toLowerCase().indexOf(t) < 0);
+      });
     });
     $('msave').addEventListener('click', () => {
       if (!modalCtx || !raw.editable) { closeModal(); return; }
-      saveCell(modalCtx.ri, modalCtx.col, $('mtext').value);
+      saveCell(modalCtx.ri, modalCtx.col, textEl.value);
       closeModal();
     });
 

@@ -1124,7 +1124,7 @@ here: the freeze is in the *render*, after the query completed.
       or filter to narrow it; Export and Copy still cover all 50,000."
 - [x] `[SDD][M32]` Search/match counts report against the full filtered set, not the cap
 
-### M32.1 — QA
+### M32.1 — QA  *(fixtures: `scripts/qa-fixtures.sql` → `qa_big_rows`, 50k rows)*
 - [ ] `[SDD][M32]` `select * from <big table> LIMIT 50000` renders instantly, no freeze,
       scope note visible and accurate
 - [ ] `[SDD][M32]` Export CSV/JSON and Copy as JSON still return all 50,000 rows
@@ -1136,3 +1136,95 @@ here: the freeze is in the *render*, after the query completed.
       every row into extension-host memory and ships it over postMessage before the cap
       applies. Painting is now safe; memory is not. Needs a host-side row ceiling with the
       same honesty note — separate change, own discovery
+
+## M33 — JSON viewer for JSONB columns (requested 2026-09-08)
+
+Spec: `DISCOVERY_JSON_VIEWER.md` (§5 locked 2026-09-08 — value-shaped detection, viewer
+on any result not just editable ones, summary chip in the grid, Tree + Raw tabs hand-rolled
+under the CSP, editing stays on Raw, bounded by a node cap).
+
+
+**Build notes.** Two things the spec did not anticipate:
+- *Where the helpers live.* `jsonShape` has to run **in** the webview (per cell, per
+  render), so the `miniMarkdown` precedent — pure logic on the host, HTML injected — does
+  not apply. Injecting the functions via `Function.prototype.toString()` is a trap: the
+  shipped build minifies (`vscode:prepublish` → `--production`), so any module-scope
+  reference would pass typecheck and tests and then throw only in the packaged extension.
+  They ship instead as a source **string** (`src/webview/jsonView.ts`), which the minifier
+  passes through untouched — verified in `dist/extension.js` after `--production` — and
+  the test evaluates that same string, so what is tested is what ships.
+- *Dates and byte arrays are objects too.* `typeof v === 'object'` alone renders every
+  Postgres timestamp as `{}` and every `bytea` as a document. Both survive
+  `structuredClone` into the webview, so `jsonShape` excludes `Date` and `ArrayBuffer`
+  views explicitly; there is a regression test for exactly this.
+
+### M33.0 — Detection helper ✅ DONE 2026-09-08 (Discovery §3.1)
+- [x] `[SDD][M33]` `jsonShape(v)` → `null | {kind,count,value}`: real objects/arrays, plus
+      strings that trim to `{`/`[` and `JSON.parse`. Exported for test
+- [x] `[SDD][M33]` Tests: object, array, empty object/array, JSON string (SQLite/Redis
+      shape), non-JSON string starting with `{`, null/undefined, number, deeply nested
+
+### M33.1 — Grid cell summary ✅ DONE 2026-09-08 (Discovery §3.2)
+- [x] `[SDD][M33]` JSON cells render a summary chip (`{…} 12 keys` / `[…] 40 items` /
+      `{}` / `[]`) instead of minified text — fixes one cell blowing out the row
+- [x] `[SDD][M33]` `⤢` affordance rendered whenever the cell holds JSON, **independent of
+      `editable`** (Discovery §2 Finding A — today's 🔍 is missing on JOINs/views entirely)
+- [x] `[SDD][M33]` Regression: `cellText()` unchanged, so search / column filters / sort
+      still match against the full JSON text
+
+### M33.2 — Tree viewer ✅ DONE 2026-09-08 (Discovery §3.3)
+- [x] `[SDD][M33]` Modal gains Tree / Raw tabs, replacing the `#mfmt` plain/json select
+- [x] `[SDD][M33]` Collapsible nodes; collapsed past depth 2 on open; type colouring from
+      VS Code theme tokens (string/number/boolean/null/key)
+- [x] `[SDD][M33]` Per-node copy value + copy path (`$.items[3].sku`) via the existing host
+      `copy` message, so the size gate still applies
+- [x] `[SDD][M33]` Key/value filter box dims non-matching nodes
+
+### M33.3 — Safety & bounds ✅ DONE 2026-09-08 (Discovery §3.5, §3.6)
+- [x] `[SDD][M33]` **Escaping**: JSON keys/values never reach an HTML attribute — node
+      identity is a JS-side index, text goes through text nodes; `escAttr()` (adds `"`/`'`
+      to `esc()`) where an attribute is unavoidable. Review this hardest
+- [x] `[SDD][M33]` Lazy expansion; `JSON_NODE_CAP = 1000` children per expansion with an
+      honest inline note naming the true count
+- [x] `[SDD][M33]` Documents over ~2 MB open on Raw with a one-line explanation, no tree
+
+### M33.4 — Editing ✅ DONE 2026-09-08 (Discovery §3.4)
+- [x] `[SDD][M33]` Save stays on the Raw tab and is disabled on Tree; existing round-trip
+      (string bound as a parameter, engine casts to jsonb) is unchanged
+- [x] `[SDD][M33]` Optimistic update writes back a string where the original was an object
+      — re-render the cell from the parsed value so the chip stays correct after a save
+
+### M33.6 — Viewer fixes ✅ DONE 2026-09-08 (reported in QA)
+- [x] `[SDD][M33]` **Modal painted under the grid header.** `#overlay` had no `z-index` at
+      all, so the sticky `th` (z-index 3), the filter row (2) and the completion dropdown
+      (50) all painted over it. Overlay + add-row overlay now sit at 100.
+      **Pre-existing** — the Edit Data modal had the same defect; the JSON tree just made
+      it impossible to miss
+- [x] `[SDD][M33]` **Escape did not close the modal** — there was never a handler. Added,
+      with explicit precedence: completion dropdown (stops propagation) → open modal →
+      abort a running query. Closing what is in front of you is never the surprising choice
+- [x] `[SDD][M33]` Inline cell editor's Escape now `stopPropagation()`s, matching the
+      dropdowns — cancelling an edit could otherwise also abort a running query
+- [x] `[SDD][M33]` `#modal.json` widens to `min(980px, 94vw)`: nested keys plus a long
+      string value wrapped badly at 680px. Plain Edit Data keeps its original width
+
+### M33.5 — Human QA gate (Phase 4) 🟡 code done 2026-09-08, manual QA open
+*(fixtures: `scripts/qa-fixtures.sql` / `.mysql.sql` → `qa_json`, one row per case;
+setup in `docs/TESTING.md` Part 7. Both scripts run end to end, verified 2026-09-08.)*
+- [ ] `[SDD][M33]` Postgres jsonb + json columns; MySQL JSON column; SQLite TEXT holding
+      JSON; Redis string holding JSON — all four open the tree
+- [ ] `[SDD][M33]` A JOIN returning jsonb (non-editable result) still offers the viewer
+- [ ] `[SDD][M33]` A 5 MB document opens on Raw without freezing the panel
+- [x] `[SDD][M33]` Hostile payload: keys/values containing `"`, `'`, `<script>`, `&` render
+      as text and break nothing — **pre-verified 2026-09-08**: the fixture's real payload
+      was pushed through the actual `buildNode` against a DOM stub; zero `innerHTML`
+      assignments during the tree build, and `<script>`, `<img`, `onerror`, `onmouseover`
+      all present only as text-node content. Worth a visual confirm too
+- [ ] `[SDD][M33]` Edit a jsonb value on Raw → saves; malformed JSON → engine error shown
+- [ ] `[SDD][M33]` Regression: non-JSON columns unchanged; M32 scope note still accurate
+- [ ] `[SDD][M33]` Escape closes the JSON modal; a second Escape aborts a still-running
+      query; Escape in an inline cell edit cancels only the edit
+- [ ] `[SDD][M33]` Modal renders above the sticky grid header at every scroll position
+- [ ] `[SDD][M33]` Perf sanity: a SQLite/Redis text column of large JSON strings re-parses
+      on every render (search keystrokes included). Bounded by the M32 2,000-row cap and
+      fine in principle — confirm it feels responsive on a real table
