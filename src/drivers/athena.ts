@@ -578,13 +578,30 @@ export class AthenaDriver implements Driver {
     }
     const { tables, truncated } = await this.listTables(this.catalog, db);
     const columnsByTable: Record<string, string[]> = {};
+    const typesByTable: Record<string, Record<string, string>> = {};
     const columns = new Set<string>();
     for (const t of tables) {
-      // Free: ListTableMetadata already returned the columns, so no extra call.
-      const names = [...(t.Columns ?? []), ...(t.PartitionKeys ?? [])]
-        .map((c) => c.Name)
-        .filter((n): n is string => !!n);
-      columnsByTable[t.Name ?? ""] = names;
+      // Free: ListTableMetadata already returned columns AND types, so carrying
+      // the types costs no extra call. They matter more here than on a real
+      // database — a lake table is often entirely string-typed, and a model
+      // given only names will write `month IN (7, 8)` against a column holding
+      // "july": valid Trino, zero rows, and no error saying why.
+      const partitions = new Set((t.PartitionKeys ?? []).map((c) => c.Name));
+      const all = [...(t.Columns ?? []), ...(t.PartitionKeys ?? [])];
+      const name = t.Name ?? "";
+      const names = all.map((c) => c.Name).filter((n): n is string => !!n);
+      columnsByTable[name] = names;
+      typesByTable[name] = {};
+      for (const c of all) {
+        if (c.Name) {
+          // Partition keys are flagged, not just typed: they are the columns
+          // that decide how much of the lake a statement scans, so a model
+          // choosing what to filter on needs to know which ones they are.
+          typesByTable[name][c.Name] = partitions.has(c.Name)
+            ? `${c.Type ?? "string"} partition key`
+            : (c.Type ?? "string");
+        }
+      }
       for (const n of names) {
         columns.add(n);
       }
@@ -593,6 +610,7 @@ export class AthenaDriver implements Driver {
       tables: tables.map((t) => t.Name ?? ""),
       columns: [...columns],
       columnsByTable,
+      typesByTable,
       truncated,
     };
   }

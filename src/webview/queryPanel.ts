@@ -15,6 +15,7 @@ import type {
   SchemaHints,
   SortSpec,
 } from "../drivers/Driver";
+import { databaseFromPath } from "../drivers/registry";
 import { logError } from "../log";
 import { suggest } from "../sqlComplete";
 import { canFormat, formatSql, vocabularyFor } from "../sqlDialect";
@@ -167,15 +168,13 @@ export class QueryPanel {
     const config = this.store.get(connectionId);
     this.ai = new AiService(new AiStore(ctx), new UsageStore(ctx));
     this.database = options.database;
-    // A preview's path starts with the database on multi-database engines
-    // (postgres/mysql: db name, redis: db number). Bind the panel to it, so that
-    // Run on the shown SQL and completion hints target the database the preview
-    // came from — not the connection's entry database. Previewing
-    // drizzle.__drizzle_migrations and hitting Run used to fail with
-    // "relation does not exist" precisely because of this gap. SQLite is
-    // excluded: its path[0] is a table name, and it has one database anyway.
-    if (this.database === undefined && options.previewPath?.length && config?.type !== "sqlite") {
-      this.database = options.previewPath[0];
+    // Bind the panel to the database the preview came from, so that Run on the
+    // shown SQL and completion hints target it rather than the connection's
+    // entry database. Previewing drizzle.__drizzle_migrations and hitting Run
+    // used to fail with "relation does not exist" precisely because of this gap.
+    // Which path segment that is depends on the engine — see databaseFromPath.
+    if (this.database === undefined && options.previewPath?.length) {
+      this.database = databaseFromPath(config?.type, options.previewPath);
     }
     this.filePath = options.filePath;
     const title = options.filePath

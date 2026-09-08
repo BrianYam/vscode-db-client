@@ -10,6 +10,8 @@ import type { ForeignKey, SchemaHints } from "../drivers/Driver";
 export interface AiSchemaInput {
   tables: string[];
   columnsByTable: Record<string, string[]>;
+  /** Column types per table, when the driver can supply them cheaply. */
+  typesByTable?: Record<string, Record<string, string>>;
   /** FK relations per table, best-effort — absent tables just render no arrows. */
   fksByTable?: Record<string, ForeignKey[]>;
 }
@@ -77,7 +79,16 @@ export function renderSchema(tables: string[], schema: AiSchemaInput): string {
   const lines: string[] = [];
   for (const t of tables) {
     const cols = schema.columnsByTable[t];
-    lines.push(cols?.length ? `${t}(${cols.join(", ")})` : t);
+    if (!cols?.length) {
+      lines.push(t);
+      continue;
+    }
+    // `col type` when we know the type, bare `col` when we don't. Types are
+    // worth their tokens: without them a model compares an integer to a column
+    // that actually holds "july", and the query returns nothing at all.
+    const types = schema.typesByTable?.[t];
+    const rendered = cols.map((c) => (types?.[c] ? `${c} ${types[c]}` : c));
+    lines.push(`${t}(${rendered.join(", ")})`);
   }
   for (const t of tables) {
     for (const fk of schema.fksByTable?.[t] ?? []) {
@@ -127,6 +138,7 @@ export function schemaInputFromHints(
   return {
     tables: hints.tables,
     columnsByTable: hints.columnsByTable ?? {},
+    typesByTable: hints.typesByTable,
     fksByTable,
   };
 }

@@ -387,7 +387,15 @@ function contextFor(data: TreeItemData): string {
 }
 
 function describe(type: string): string {
-  return { postgres: "PostgreSQL", mysql: "MySQL", sqlite: "SQLite", redis: "Redis" }[type] ?? type;
+  return (
+    {
+      postgres: "PostgreSQL",
+      mysql: "MySQL",
+      sqlite: "SQLite",
+      redis: "Redis",
+      athena: "AWS Athena",
+    }[type] ?? type
+  );
 }
 
 const color = (id: string) => new vscode.ThemeColor(id);

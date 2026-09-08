@@ -160,3 +160,39 @@ test("generateUserPrompt carries editor SQL and session history for follow-ups",
   // System prompt tells the model what those sections mean.
   assert.match(systemPrompt("generate", "postgres"), /edit the current query/);
 });
+
+// Column types in the rendered schema. Without them a model reads a column
+// named `month` as numeric and writes `month IN (7, 8)` against a lake column
+// that holds "july" — valid SQL, zero rows, and no error explaining it.
+test("renderSchema emits `col type` when types are known", () => {
+  const out = renderSchema(["reports"], {
+    tables: ["reports"],
+    columnsByTable: { reports: ["ticket_number", "year", "month"] },
+    typesByTable: {
+      reports: {
+        ticket_number: "string",
+        year: "string partition key",
+        month: "string partition key",
+      },
+    },
+  });
+  assert.strictEqual(
+    out,
+    "reports(ticket_number string, year string partition key, month string partition key)",
+  );
+});
+
+test("renderSchema falls back to bare names per column, not per table", () => {
+  // A driver may know some types and not others; the known ones still count.
+  const out = renderSchema(["t"], {
+    tables: ["t"],
+    columnsByTable: { t: ["a", "b"] },
+    typesByTable: { t: { a: "bigint" } },
+  });
+  assert.strictEqual(out, "t(a bigint, b)");
+});
+
+test("renderSchema is unchanged for drivers that supply no types", () => {
+  const out = renderSchema(["t"], { tables: ["t"], columnsByTable: { t: ["a", "b"] } });
+  assert.strictEqual(out, "t(a, b)");
+});

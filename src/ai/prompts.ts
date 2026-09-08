@@ -11,6 +11,9 @@ const DIALECT_LABEL: Record<string, string> = {
   postgres: "PostgreSQL",
   mysql: "MySQL/MariaDB",
   sqlite: "SQLite",
+  // Athena runs Trino, so naming it matters: told only "SQL", a model reaches
+  // for PostgreSQL idioms (`::` casts, ILIKE) that Athena rejects outright.
+  athena: "Amazon Athena (Trino SQL)",
 };
 
 export function dialectLabel(connType: string): string {

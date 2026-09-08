@@ -17,6 +17,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Results footer reports **bytes scanned** alongside elapsed time, since Athena
   bills per terabyte scanned rather than per second.
 
+### Fixed
+
+- Athena: the query panel bound itself to the Glue **catalog** instead of the
+  database, because it read the first tree-path segment as every other engine
+  does. Schema hints and every AI verb then asked Glue for a database named
+  `AwsDataCatalog` and failed ("Database awsdatacatalog not found", or a
+  `glue:GetTables` denial) — while a fully qualified query still ran, which hid
+  the cause. Path-to-database mapping now lives in one place,
+  `databaseFromPath`. No behaviour change for PostgreSQL, MySQL, SQLite or
+  Redis — verified by differential test against the previous logic.
+- AI verbs now receive column **types** in the schema context, not just names
+  (`reports(month string partition key, …)`), for drivers that can supply them
+  without an extra round trip. Athena is the first: given only names, a model
+  reads `month` as numeric and writes `month IN (7, 8)` against a column that
+  holds "july" — valid Trino, zero rows, and no error explaining it. Athena also
+  flags partition keys, which are the columns that decide how much a statement
+  scans. Drivers that supply no types render exactly as before.
+- Athena: AI verbs were told the dialect was generic "SQL", so generated
+  statements could use PostgreSQL idioms Athena rejects. They now name Trino.
+- Athena connections showed as "athena" in the tree rather than "AWS Athena".
+
 ### Changed
 
 - `Driver.connect()` now takes a secrets object rather than a bare password

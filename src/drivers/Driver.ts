@@ -55,6 +55,17 @@ export interface SchemaHints {
    */
   columnsByTable?: Record<string, string[]>;
   /**
+   * Column types per table, when the driver already has them and does not need
+   * an extra round trip to say so. Optional: engines that would have to pay for
+   * it omit the field and callers render bare column names.
+   *
+   * The AI verbs are the reason this exists. Given only names, a model reads a
+   * column called `month` as a number and writes `month IN (7, 8)` against a
+   * lake table whose month column actually holds "july" — valid SQL, zero rows,
+   * no error to explain it.
+   */
+  typesByTable?: Record<string, Record<string, string>>;
+  /**
    * A row limit was hit, so the lists above are incomplete. Surfaced to the user
    * rather than silently dropping suggestions.
    */

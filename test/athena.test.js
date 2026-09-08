@@ -150,3 +150,50 @@ test("bytes scanned are shown in the unit Athena bills in", () => {
   assert.strictEqual(formatBytes(1536), "1.5 KB");
   assert.strictEqual(formatBytes(1024 ** 4), "1.0 TB");
 });
+
+// ---- tree path → database -------------------------------------------------
+
+const { databaseFromPath } = require("../out/drivers/registry.js");
+
+test("Athena's database is the SECOND path segment, under the catalog", () => {
+  // The regression this exists for: reading path[0] handed "AwsDataCatalog" to
+  // schemaHints as a database name, so Glue answered "Database awsdatacatalog
+  // not found" (or denied glue:GetTables) and every AI verb lost its schema
+  // context — while a fully qualified query still ran, hiding the cause.
+  assert.strictEqual(
+    databaseFromPath("athena", ["AwsDataCatalog", "aerobus_analytics_stage", "reports_parquet"]),
+    "aerobus_analytics_stage",
+  );
+  assert.strictEqual(
+    databaseFromPath("athena", ["AwsDataCatalog", "aerobus_analytics_stage"]),
+    "aerobus_analytics_stage",
+  );
+});
+
+test("every other engine keeps the database first", () => {
+  assert.strictEqual(databaseFromPath("postgres", ["public", "users"]), "public");
+  assert.strictEqual(databaseFromPath("mysql", ["shop", "orders"]), "shop");
+  assert.strictEqual(databaseFromPath("redis", ["0", "some:key"]), "0");
+  assert.strictEqual(databaseFromPath(undefined, ["public", "users"]), "public");
+});
+
+test("SQLite has no database to bind to", () => {
+  // Its path[0] is a table name, so returning it would bind the panel to a table.
+  assert.strictEqual(databaseFromPath("sqlite", ["users"]), undefined);
+});
+
+test("a catalog node on its own yields no database yet", () => {
+  assert.strictEqual(databaseFromPath("athena", ["AwsDataCatalog"]), undefined);
+});
+
+// ---- AI prompt dialect ----------------------------------------------------
+
+const { dialectLabel } = require("../out/ai/prompts.js");
+
+test("the AI is told Athena is Trino, not generic SQL", () => {
+  // Falling back to "SQL" let the model reach for PostgreSQL idioms (`::`
+  // casts, ILIKE) that Athena rejects.
+  assert.match(dialectLabel("athena"), /Trino/);
+  assert.strictEqual(dialectLabel("postgres"), "PostgreSQL");
+  assert.strictEqual(dialectLabel("nope"), "SQL");
+});
