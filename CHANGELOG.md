@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-09-12
+
 ### Fixed
 - **A Redis list or sorted set no longer hides how much it is not showing.**
   Previewing a value sliced it to the first 200 elements and said nothing — the

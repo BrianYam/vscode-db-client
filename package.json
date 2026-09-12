@@ -2,7 +2,7 @@
   "name": "open-database-client",
   "displayName": "Open DB Client",
   "description": "Free database client with unlimited connections — browse, query, and edit PostgreSQL, MySQL/MariaDB, SQLite, Redis, and AWS Athena. AI SQL assistant (bring your own key), SSH tunnels, editable results grid, SQL autocomplete, saved queries.",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "pricing": "Free",
   "publisher": "brianlab",
   "license": "MIT",
