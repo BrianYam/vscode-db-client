@@ -1571,7 +1571,19 @@ actually does — but both contradict the repo's own "be honest in UX" conventio
 - [x] `[SDD][M-HONESTY]` `syncAiBar()` now runs in both directions and posts
       `aiDisabled`; the webview hides the bar on it. Settings fires the notify
       on the opt-out toggle, provider save, and consent revoke
-- [ ] `[SDD][M-HONESTY]` Manual QA: with two editors side by side, untick a
-      connection in Settings → its open query panel's assist bar disappears
-      without touching the panel; re-tick restores it. Preview a Redis list of
-      >200 elements → status line reads "Showing the first 200 of N elements"
+- [x] `[SDD][M-HONESTY]` Manual QA **passed 2026-09-12**, driven through
+      code-server + browser automation against the branch build. 7 checks:
+      1. list over cap → *"Showing the first 200 of 5,000 elements — this is the
+         preview's limit, not the key's."* (editor showed `LRANGE qa:biglist 0 199`)
+      2. sorted set → *"…first 200 of 900 members…"*, correct unit
+      3. 3-element list → plain "3 row(s)", **no** notice (no false positive)
+      4. editing through the notice still commits — `LINDEX qa:biglist 0` returned
+         the new value, `LLEN` still 5000
+      5. **the case that was broken**: Settings and the query panel side by side,
+         both visible; unticking the connection removed the assist bar from the
+         panel without it being touched
+      6. re-ticking restored it
+      7. unticking a *different* connection left this panel's bar alone — the
+         hide is per-connection, not a blanket response to any settings change
+      Ollama is the preset to use for this: `needsKey: false`, so `isConfigured()`
+      is satisfied with no API key and no server actually running
