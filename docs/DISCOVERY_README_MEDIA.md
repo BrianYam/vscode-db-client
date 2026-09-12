@@ -10,9 +10,9 @@ commands and Marketplace image rules live in
 | --- | --- | --- | --- |
 | `media/demo.gif` | **2026-09-12** | 2.5 MB | 5 engines → preview → page → **cell edit** → column picker → JSON viewer |
 | `media/query-panel.png` | **2026-09-12** | 334 KB | Query panel, column picker open, row gutter, JSON chips |
-| `media/ai-query-generation.gif` | 2026-08-06 | 413 KB | AI assist bar generating SQL — still accurate, kept |
-| `media/ai-assistance-setup.png` | 2026-08-06 | 169 KB | Provider/key setup — still accurate, kept |
-| `media/ai-usage-table.png` | 2026-08-06 | 264 KB | Usage ledger — still accurate, kept |
+| `media/ai-query-generation.gif` | 2026-08-06 | 413 KB | AI assist bar generating SQL — kept; predates the per-call cost readout (M26) |
+| `media/ai-assistance-setup.png` | **2026-09-12** | 275 KB | Provider form, Consent, per-connection opt-out — re-shot; the old one showed "v1.1.1" |
+| `media/ai-usage-table.png` | 2026-08-06 | 264 KB | **Stale, unreferenced.** Predates the Provider column (1.3.0) and shows "—" cost rows that 1.3.0/1.3.1 fixed. Pulled from the README; file kept so the path stays stable for a re-shoot |
 
 ## The problem with the current hero
 
@@ -35,7 +35,7 @@ VS Code Dark+, editor font ≥ 15 px so it survives the Marketplace's column wid
 | 1 | Tree already open, showing **five connections** — Postgres, MySQL, SQLite, Redis, Athena — expanded one level | 0–2 | Five engines, one tree, no cap |
 | 2 | Click a Postgres table → **Preview Rows**; grid paints; click `›` to page | 2–5 | Browsing is one click; previews page, not truncate |
 | 3 | Double-click a cell, type a new value, `Enter`; row flashes committed | 5–8 | **The grid is writable** — the single strongest differentiator |
-| 4 | Click `Columns ▾`, uncheck two columns; button reads `Columns 5/9` | 8–11 | Wide tables are tameable |
+| 4 | Click `Columns ▾`, uncheck three columns; button reads `Columns 6/9` | 8–11 | Wide tables are tameable |
 | 5 | Click `⤢` on a JSONB cell; tree expands; copy a path | 11–14 | Real JSON inspection, not a wall of text |
 | 6 | Type a prompt in the AI bar → **Generate**; SQL appears; 🔒 auto-lock badge shows on a mutation | 14–18 | AI with a safety rail, your key |
 | 7 | Hold on the results footer: elapsed time + row count | 18–20 | Honest about what it did |
@@ -63,9 +63,12 @@ engine that tells you what the click cost.
   reads as fast on capture reads as frantic on loop.
 - Loop-friendly: end on a frame close to the opening one so the restart is not
   jarring.
-- Everything under `media/` is excluded from the `.vsix` (`.vscodeignore`) and
-  served to the Marketplace from GitHub raw — so a new asset must be **pushed to
-  `main`** before it renders on the listing.
+- The large README assets are excluded from the `.vsix` **individually** by
+  `.vscodeignore` (not the whole `media/` folder — `media/icon.png` and
+  `media/icons/` ship, because the extension renders them at runtime). A new
+  README asset therefore needs its own ignore line *and* must be **pushed to
+  `main`** before it renders on the listing, since the Marketplace loads it from
+  GitHub raw.
 
 ## Open decisions
 

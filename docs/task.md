@@ -1466,8 +1466,10 @@ is in `docs/RESEARCH_MARKETPLACE_CONVERSION.md`.
       gutter, 2,000-row render guard, bytes-scanned footer — plus SQL
       autocomplete and query lock, shipped in 0.4.0/1.1.1 and never listed
 - [x] `[SDD][M-README]` README: correct the limits section — previews page 100
-      rows server-side with `‹ ›` (not a 200-row cap); Redis 200/page, Athena
-      500 unpaged; state the VS Code 1.90 floor
+      rows server-side with `‹ ›` (not a 200-row cap); Redis lists **500 keys**
+      at a time (`KEY_LIMIT`) while `PREVIEW_LIMIT` = 200 caps elements shown
+      inside one list/zset **value** — two different limits; Athena 500 unpaged;
+      state the VS Code 1.90 floor
 - [x] `[SDD][M-README]` README: hero GIF moved above the driver paragraph;
       Security and Privacy folded into one section; rating badge added
 - [x] `[SDD][M-README]` `package.json` description names Athena + autocomplete
@@ -1516,7 +1518,7 @@ environment is reproducible: `scripts/demo-seed.sql` + throwaway containers, see
       `Free` | `Trial`, and the listing renders the label next to the install
       count. The whole pitch is "forever free"; the competitor with a paid tier
       shows "Free Trial" there, so the distinction is visible at a glance
-- [x] `[SDD][M-README]` `keywords` 22 → 29 (documented cap is 30, publish fails
+- [x] `[SDD][M-README]` `keywords` 21 → 29 (documented cap is 30, publish fails
       above it): added database explorer, sql editor, postgres/mysql/redis
       client, data grid, nosql, dba
 - [x] `[SDD][M-README]` `.vscodeignore`: exclude `.idea/**` and `**/.DS_Store` —
@@ -1533,3 +1535,22 @@ environment is reproducible: `scripts/demo-seed.sql` + throwaway containers, see
 - [ ] `[SDD][M-README]` `galleryBanner` observed to have no visible effect on the
       redesigned listing UI (research §2). Not documented as deprecated — left in
       place, but do not spend time tuning it
+
+## M-HONESTY — Two silent-behaviour gaps found reviewing the README (2026-09-12)
+
+Both surfaced while checking README claims against source for PR #20. Neither is
+a documentation problem — the README was corrected to describe what the code
+actually does — but both contradict the repo's own "be honest in UX" convention.
+
+- [ ] `[SDD][M-HONESTY]` **Redis list/zset value previews truncate silently.**
+      `readValue()` slices to `PREVIEW_LIMIT` (200) via `lrange` / `zrange` and
+      returns `rowCount: rows.length` with no `message`, no `more`, no
+      truncation flag. A 5,000-element list shows 200 rows and says nothing —
+      while key *listings* right next to it do render a "Showing first 500 keys"
+      node. Either carry truncation metadata on the result, or page it.
+- [ ] `[SDD][M-HONESTY]` **Per-connection AI opt-out does not affect open
+      panels.** `syncAiBar()` returns early once `aiBarShown` is true and there
+      is no `aiDisabled` message, so unticking a connection leaves the assist
+      bar in any panel already open — yet the Settings copy states "The assist
+      bar disappears in its query panels." Broadcast the change to open panels
+      and hide the bar, or soften the in-app wording as the README now does.

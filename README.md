@@ -40,7 +40,9 @@ Built on mature, pure-JS drivers (`pg`, `mysql2`, `ioredis`, AWS SDK) plus WASM
 | **Redis** | ✅ | ✅ | ✅ | Server-side key search, TTLs, raw commands, SSH tunnel |
 | **AWS Athena** | ✅ | ✅ | — | SSO / profile / assume-role; reports bytes scanned |
 
-SSH tunnelling works for every engine except SQLite, which is a local file.
+SSH tunnelling is offered for PostgreSQL, MySQL/MariaDB and Redis. SQLite is a
+local file, and Athena is signed HTTPS to a regional endpoint — neither has a
+host to tunnel to.
 
 ## Features
 
@@ -56,7 +58,7 @@ SSH tunnelling works for every engine except SQLite, which is a local file.
 - **Editable results grid** — update cells, insert and delete rows
   (primary-key based), with SQLite changes written back to the `.db` file.
 - **Column picker** — `Columns ▾` hides the noise in a wide `SELECT *`; the
-  button reads `Columns 5/9` so a narrowed view is never a mystery, and Export
+  button reads `Columns 6/9` so a narrowed view is never a mystery, and Export
   follows what you can see.
 - **A proper JSON/JSONB viewer** — cells show a summary (`{…} 12 keys`) and `⤢`
   opens a collapsible, filterable tree with copy-for-value and copy-for-path
@@ -86,9 +88,10 @@ SSH tunnelling works for every engine except SQLite, which is a local file.
 - A **local usage ledger** counts every request's exact tokens and estimated
   cost — priced from a locally stored copy of the LiteLLM price list covering
   81 providers, with every row labelled by source and flagged when stale.
-- **Per-connection opt-out.** Untick a connection and the assist bar disappears
-  from its query panels entirely — so a regulated database can be kept out of
-  reach of the AI while the rest of your connections keep it.
+- **Per-connection opt-out.** Untick a connection and query panels opened for it
+  get no assist bar — so a regulated database can be kept out of reach of the AI
+  while the rest of your connections keep it. (Panels already open when you
+  change the setting keep their bar until reopened.)
 
 ![AI assist bar generating SQL from a plain-language prompt](media/ai-query-generation.gif)
 
@@ -121,8 +124,10 @@ SSH tunnelling works for every engine except SQLite, which is a local file.
   metadata APIs, which scan no data; `information_schema` is never touched
   because querying it is billed. Clicking a table does *not* preview it — on a
   billed engine a stray click should never start a scan.
-- The results footer reports **bytes scanned** next to elapsed time, including
-  for a query you aborted — AWS bills those either way.
+- The results footer reports **bytes scanned** next to elapsed time. Abort or
+  fail a query and the figure comes back in the message instead — *"you are
+  still billed for the 1.2 GB scanned before it stopped"* — because AWS charges
+  for those either way and hiding the number would be worse than not warning.
 
 ### Connect from anywhere
 
@@ -165,9 +170,9 @@ the extension has stored on your machine.
 
 ## Notes & limits
 
-- Table previews page 100 rows at a time (Redis lists 500 keys per page and
-  shows the first 200 elements of a list or sorted set; Athena previews up to
-  500 rows and does not page). The UI always says when a list is truncated.
+- Table previews page 100 rows at a time. Redis lists 500 keys at a time and
+  says so; a list or sorted-set **value** shows its first 200 elements. Athena
+  previews up to 500 rows and does not page.
 - A very large result renders the first 2,000 rows — search, sort, Export and
   Copy still cover the whole result, and the grid says so.
 - Grid editing on a SQL table needs a primary key; rows without one are

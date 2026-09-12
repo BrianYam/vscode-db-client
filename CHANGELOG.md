@@ -22,14 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on five connected engines and goes straight to the editable grid: preview,
   page (the row gutter continuing at 101 rather than restarting), a cell edit
   committed to Postgres, the column picker reading `Columns 6/9`, and the JSON
-  viewer's tree. `media/query-panel.png` re-shot to match. Neither showed any
-  feature added since 1.2.0.
+  viewer's tree. `media/query-panel.png` re-shot to match. Neither of the
+  replaced assets showed a single feature added since 1.2.0.
 - **Capabilities the README had never mentioned.** Redis values are editable in
   the grid like any other engine — a string, a list element by index, a hash
   field or its name, a set member — and editing a string carries its remaining
-  TTL across. SSH tunnelling works for every engine except SQLite, not only
-  PostgreSQL and MySQL. AI can be switched off **per connection**, so a
-  regulated database keeps the assist bar out of its query panels.
+  TTL across. SSH tunnelling is offered for Redis as well, not only PostgreSQL
+  and MySQL (SQLite is a local file and Athena is signed HTTPS, so neither has a
+  host to tunnel to). AI can be switched off **per connection**, so a regulated
+  database gets no assist bar in panels opened for it.
 - **AI providers are now named correctly.** The list said "any OpenAI-compatible
   provider" and gave DeepSeek as an example, which is not a preset; the actual
   presets are Anthropic (Claude), OpenAI, OpenRouter and Ollama, with a custom
@@ -42,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   limitation 1.3.0/1.3.1 fixed. Re-shooting it needs a real provider key.
 - **Marketplace metadata.** `pricing: "Free"` is now explicit, so the listing
   renders the label next to the install count rather than relying on the
-  default; `Data Science` added to `categories`; `keywords` 22 → 29 (the
+  default; `Data Science` added to `categories`; `keywords` 21 → 29 (the
   documented cap is 30 — publishing fails above it).
 
 ### Fixed
