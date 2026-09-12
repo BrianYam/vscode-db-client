@@ -1,8 +1,9 @@
 {
   "name": "open-database-client",
   "displayName": "Open DB Client",
-  "description": "Free database client with unlimited connections — browse, query, and edit PostgreSQL, MySQL/MariaDB, SQLite, and Redis. AI SQL assistant (bring your own key), SSH tunnels, editable results grid, saved queries.",
+  "description": "Free database client with unlimited connections — browse, query, and edit PostgreSQL, MySQL/MariaDB, SQLite, Redis, and AWS Athena. AI SQL assistant (bring your own key), SSH tunnels, editable results grid, SQL autocomplete, saved queries.",
   "version": "1.4.0",
+  "pricing": "Free",
   "publisher": "brianlab",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -19,6 +20,7 @@
   },
   "categories": [
     "Programming Languages",
+    "Data Science",
     "Visualization",
     "Other"
   ],
@@ -43,7 +45,15 @@
     "ssh tunnel",
     "ai",
     "text to sql",
-    "db"
+    "db",
+    "database explorer",
+    "sql editor",
+    "postgres client",
+    "mysql client",
+    "redis client",
+    "data grid",
+    "nosql",
+    "dba"
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
@@ -389,7 +399,7 @@
     "release:minor": "npm version minor && npm run package",
     "release:major": "npm version major && npm run package",
     "fetch-icons": "node scripts/fetch-icons.mjs",
-    "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl https://localhost/ --baseImagesUrl https://localhost/",
+    "package": "npx --yes @vscode/vsce package",
     "publish:marketplace": "node scripts/publish.mjs",
     "release:github": "node scripts/github-release.mjs",
     "marketplace:verify": "node scripts/marketplace-status.mjs",

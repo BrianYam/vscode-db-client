@@ -1446,3 +1446,111 @@ Small UI change; no separate blueprint. Locked decisions live with the tasks.
       already guards against one column at a time.
 - [x] [SDD][M-GRID-8] `hideAllButFirst` as a pure helper in `columnView.ts`,
       unit-tested against the shipped source string like its siblings.
+
+## M-README — Listing conversion refresh (requested 2026-09-12)
+
+Discovery (chat, 2026-09-12): installs sit at 58 with a 4.45 weighted rating and
+249 downloads; the user wants the Marketplace listing to convert better. Audit
+found the README last touched 2026-08-06 (v1.2.0-era) — it was a full four
+minor releases behind the product, and understated it in two places that matter
+(four engines, "previews capped at 200 rows"). Research on Marketplace mechanics
+is in `docs/RESEARCH_MARKETPLACE_CONVERSION.md`.
+
+### M-README.0 — Content parity ✅ done 2026-09-12
+- [x] `[SDD][M-README]` README: Athena added everywhere (hero line, "why",
+      per-engine capability table, its own cost-honesty section); previously the
+      manifest advertised Athena in keywords while the listing body denied it
+- [x] `[SDD][M-README]` README: add the 1.2.1→1.4.0 features that never reached
+      the listing — column picker, JSON/JSONB viewer, query abort (real
+      server-side cancel), running-query spinner, connection notes, row-number
+      gutter, 2,000-row render guard, bytes-scanned footer — plus SQL
+      autocomplete and query lock, shipped in 0.4.0/1.1.1 and never listed
+- [x] `[SDD][M-README]` README: correct the limits section — previews page 100
+      rows server-side with `‹ ›` (not a 200-row cap); Redis lists **500 keys**
+      at a time (`KEY_LIMIT`) while `PREVIEW_LIMIT` = 200 caps elements shown
+      inside one list/zset **value** — two different limits; Athena 500 unpaged;
+      state the VS Code 1.90 floor
+- [x] `[SDD][M-README]` README: hero GIF moved above the driver paragraph;
+      Security and Privacy folded into one section; rating badge added
+- [x] `[SDD][M-README]` `package.json` description names Athena + autocomplete
+      (it is the Marketplace search snippet)
+
+### M-README.1 — Media refresh ✅ captured 2026-09-12 (automated)
+Captured the same way as the 2026-08-06 originals — code-server in Docker driven
+by browser automation — so a re-cut needs no human screen time. The capture
+environment is reproducible: `scripts/demo-seed.sql` + throwaway containers, see
+`docs/DISCOVERY_README_MEDIA.md`.
+- [x] `[SDD][M-README]` `media/demo.gif` re-recorded: 5 connections in the tree →
+      Preview Rows → page `›` (gutter continues at 101) → cell edit committed to
+      Postgres → column picker `Columns 6/9` → JSON viewer tree. 1280×683,
+      28 frames, 17.5 s, 2.5 MB
+- [x] `[SDD][M-README]` `media/query-panel.png` re-shot: column picker open,
+      row gutter, PK badge, column types and JSON summary chips all in frame
+- [ ] `[SDD][M-README]` AI beat NOT in the hero: driving Generate needs a real
+      provider key, which the capture environment has none of. The existing
+      `media/ai-query-generation.gif` still matches shipped behaviour and stays
+      as the AI section's own media. Fold AI into the hero only when recording
+      with a real key
+- [x] `[SDD][M-README]` `media/ai-assistance-setup.png` re-shot — the old one
+      showed "Open DB Client v1.1.1" on screen, four minor releases stale
+- [ ] `[SDD][M-README]` `media/ai-usage-table.png` re-shoot needed (real
+      provider key required): the shipped one predates the Provider column and
+      shows unpriced "—" rows that 1.3.0/1.3.1 fixed. Pulled from the README
+      meanwhile; file kept on disk so the path stays stable
+- [ ] `[SDD][M-README]` `media/ai-query-generation.gif` predates the per-call
+      cost readout added in M26 (2026-08-07). Not wrong, just missing a newer
+      detail — re-shoot when a key is available
+- [ ] `[SDD][M-README]` In-app guide "How to use" still lists only four engines
+      when adding a connection ("PostgreSQL, MySQL/MariaDB, SQLite, Redis") —
+      Athena missing. Product copy, not README; spotted during capture
+- [~] `[SDD][M-README]` Athena GIF — **dropped 2026-09-12 (user decision)**.
+      It would need real AWS credentials, and the hero already shows Athena in
+      the tree as a configured connection, which is all it claims. Revisit only
+      if Athena becomes the thing being sold
+- [x] `[SDD][M-README]` New media stays out of the `.vsix` — `.vscodeignore`
+      already excludes both files; re-verified in the built package
+
+### M-README.2 — Metadata & QA ✅ done 2026-09-12
+- [x] `[SDD][M-README]` `categories`: added **Data Science** from the documented
+      enumerated list (research §2). Now Programming Languages / Data Science /
+      Visualization / Other
+- [x] `[SDD][M-README]` `pricing: "Free"` set explicitly — documented values are
+      `Free` | `Trial`, and the listing renders the label next to the install
+      count. The whole pitch is "forever free"; the competitor with a paid tier
+      shows "Free Trial" there, so the distinction is visible at a glance
+- [x] `[SDD][M-README]` `keywords` 21 → 29 (documented cap is 30, publish fails
+      above it): added database explorer, sql editor, postgres/mysql/redis
+      client, data grid, nosql, dba
+- [x] `[SDD][M-README]` `.vscodeignore`: exclude `.idea/**` and `**/.DS_Store` —
+      `.idea/workspace.xml` was shipping inside every published `.vsix`
+- [x] `[SDD][M-README]` QA: `npx vsce package` warning-free; verified inside the
+      built vsix that relative README paths rewrite to
+      `https://github.com/BrianYam/vscode-db-client/raw/HEAD/media/…`
+- [x] `[SDD][M-README]` Fix `npm run package`: it forced
+      `--base{Content,Images}Url https://localhost/`, breaking every README
+      image in the released `.vsix`. Verified live listing was unaffected
+      (`vsce publish` takes no such flags) before changing anything
+- [ ] `[SDD][M-README]` Post-publish: confirm images actually render on the live
+      Marketplace page (raw/HEAD resolves only once the assets are on `main`)
+- [ ] `[SDD][M-README]` `galleryBanner` observed to have no visible effect on the
+      redesigned listing UI (research §2). Not documented as deprecated — left in
+      place, but do not spend time tuning it
+
+## M-HONESTY — Two silent-behaviour gaps found reviewing the README (2026-09-12)
+
+Both surfaced while checking README claims against source for PR #20. Neither is
+a documentation problem — the README was corrected to describe what the code
+actually does — but both contradict the repo's own "be honest in UX" convention.
+
+- [ ] `[SDD][M-HONESTY]` **Redis list/zset value previews truncate silently.**
+      `readValue()` slices to `PREVIEW_LIMIT` (200) via `lrange` / `zrange` and
+      returns `rowCount: rows.length` with no `message`, no `more`, no
+      truncation flag. A 5,000-element list shows 200 rows and says nothing —
+      while key *listings* right next to it do render a "Showing first 500 keys"
+      node. Either carry truncation metadata on the result, or page it.
+- [ ] `[SDD][M-HONESTY]` **Per-connection AI opt-out does not affect open
+      panels.** `syncAiBar()` returns early once `aiBarShown` is true and there
+      is no `aiDisabled` message, so unticking a connection leaves the assist
+      bar in any panel already open — yet the Settings copy states "The assist
+      bar disappears in its query panels." Broadcast the change to open panels
+      and hide the bar, or soften the in-app wording as the README now does.
