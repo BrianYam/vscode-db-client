@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as vscode from "vscode";
-import { AiService } from "../ai/aiService";
+import { AiService, onDidChangeAiSettings } from "../ai/aiService";
 import { AiStore } from "../ai/aiStore";
 import type { AiVerb } from "../ai/prompts";
 import { UsageStore } from "../ai/usageStore";
@@ -294,25 +294,37 @@ export class QueryPanel {
         void this.syncAiBar();
       }
     });
+    // …and again the moment settings change, because the panel may be visible
+    // the whole time (a split view, or the settings tab beside this one), in
+    // which case no view-state event ever fires.
+    const aiSub = onDidChangeAiSettings(() => void this.syncAiBar());
+    this.panel.onDidDispose(() => aiSub.dispose());
   }
 
   /**
    * Show the assist bar only when a provider is fully configured and AI is not
    * disabled for this connection. Redis is out of scope for v1 (different
    * language — same deferral as autocomplete), so its panels never get the bar.
+   *
+   * Runs in both directions: it used to return early once the bar was showing,
+   * which meant unticking a connection in Settings left the bar in place until
+   * the panel was reopened — while the Settings copy said it would disappear.
    */
   private async syncAiBar(): Promise<void> {
-    if (this.aiBarShown || this.disposed) {
+    if (this.disposed) {
       return;
     }
     const type = this.store.get(this.connectionId)?.type;
-    if (!type || type === "redis") {
+    const wanted =
+      !!type &&
+      type !== "redis" &&
+      (await this.ai.isConfigured()) &&
+      this.ai.enabledFor(this.connectionId);
+    if (wanted === this.aiBarShown) {
       return;
     }
-    if ((await this.ai.isConfigured()) && this.ai.enabledFor(this.connectionId)) {
-      this.aiBarShown = true;
-      this.post({ type: "aiEnabled" });
-    }
+    this.aiBarShown = wanted;
+    this.post({ type: wanted ? "aiEnabled" : "aiDisabled" });
   }
 
   private async handleAi(msg: {
@@ -2328,6 +2340,7 @@ ${COLUMN_VIEW_HELPERS}
         return;
       }
       if (m.type === 'aiEnabled') { aiBar.style.display = 'flex'; return; }
+      if (m.type === 'aiDisabled') { aiBar.style.display = 'none'; return; }
       if (m.type === 'abortCaps') {
         canAbort = !!m.canAbort; hardAbort = !!m.hard;
         // Redis can only stop us waiting, so it must not say "Abort".

@@ -88,10 +88,9 @@ host to tunnel to.
 - A **local usage ledger** counts every request's exact tokens and estimated
   cost — priced from a locally stored copy of the LiteLLM price list covering
   81 providers, with every row labelled by source and flagged when stale.
-- **Per-connection opt-out.** Untick a connection and query panels opened for it
-  get no assist bar — so a regulated database can be kept out of reach of the AI
-  while the rest of your connections keep it. (Panels already open when you
-  change the setting keep their bar until reopened.)
+- **Per-connection opt-out.** Untick a connection and the assist bar goes away
+  in its query panels — open ones included — so a regulated database can be kept
+  out of reach of the AI while the rest of your connections keep it.
 
 ![AI assist bar generating SQL from a plain-language prompt](media/ai-query-generation.gif)
 
@@ -170,9 +169,9 @@ the extension has stored on your machine.
 
 ## Notes & limits
 
-- Table previews page 100 rows at a time. Redis lists 500 keys at a time and
-  says so; a list or sorted-set **value** shows its first 200 elements. Athena
-  previews up to 500 rows and does not page.
+- Table previews page 100 rows at a time. Redis lists 500 keys at a time, and a
+  list or sorted-set **value** shows its first 200 elements. Athena previews up
+  to 500 rows and does not page. Every one of those says so when it truncates.
 - A very large result renders the first 2,000 rows — search, sort, Export and
   Copy still cover the whole result, and the grid says so.
 - Grid editing on a SQL table needs a primary key; rows without one are

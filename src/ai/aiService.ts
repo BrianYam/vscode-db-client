@@ -87,6 +87,25 @@ export interface PriceCandidate {
  * provider call → usage ledger. Lives outside queryPanel.ts so the panel only
  * does message plumbing, per the house webview pattern.
  */
+/**
+ * Fires when AI settings change in a way an already-open query panel must react
+ * to — the per-connection opt-out, or a provider being configured or cleared.
+ *
+ * Module-level rather than an instance member because every panel builds its
+ * own `AiService`, so an instance event would never reach anyone else. It lives
+ * here and not in `AiStore` on purpose: `aiStore.ts` imports vscode as a *type*
+ * only, which is what lets `test/aiSettings.test.js` load the compiled module
+ * outside the extension host. A real `vscode.EventEmitter` there would break it.
+ */
+const aiSettingsChanged = new vscode.EventEmitter<void>();
+
+export const onDidChangeAiSettings = aiSettingsChanged.event;
+
+/** Tell open panels to re-evaluate whether their assist bar belongs. */
+export function notifyAiSettingsChanged(): void {
+  aiSettingsChanged.fire();
+}
+
 export class AiService {
   constructor(
     private readonly store: AiStore,

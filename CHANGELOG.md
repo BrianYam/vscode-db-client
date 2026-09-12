@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A Redis list or sorted set no longer hides how much it is not showing.**
+  Previewing a value sliced it to the first 200 elements and said nothing — the
+  grid was handed 200 rows with no indication more existed, so a 5,000-element
+  list was indistinguishable from a 200-element one. It now reads *"Showing the
+  first 200 of 5,000 elements — this is the preview's limit, not the key's."*
+  The count comes from `LLEN`/`ZCARD`, which are O(1), so an exact figure costs
+  one cheap round trip and beats a vague "there may be more". Key *listings*
+  have always rendered a "Showing first 500 keys" node; the value preview
+  directly beside them was the one place that stayed quiet.
+- **Turning AI off for a connection now affects query panels that are already
+  open.** The Settings page says "the assist bar disappears in its query
+  panels", and it did not: `syncAiBar()` returned early once the bar was
+  showing, so unticking a connection left it in place until the panel was
+  reopened — on the one screen whose entire purpose is keeping a regulated
+  database away from the model. The bar now appears *and* disappears as the
+  setting changes, including while both editors are visible side by side, which
+  no view-state event would have caught. Configuring or clearing a provider, and
+  revoking consent, reach open panels the same way.
+
+
 ## [1.4.1] - 2026-09-12
 
 ### Changed

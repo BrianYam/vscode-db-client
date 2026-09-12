@@ -1542,15 +1542,48 @@ Both surfaced while checking README claims against source for PR #20. Neither is
 a documentation problem — the README was corrected to describe what the code
 actually does — but both contradict the repo's own "be honest in UX" convention.
 
-- [ ] `[SDD][M-HONESTY]` **Redis list/zset value previews truncate silently.**
+- [x] `[SDD][M-HONESTY]` **Redis list/zset value previews truncate silently.**
       `readValue()` slices to `PREVIEW_LIMIT` (200) via `lrange` / `zrange` and
       returns `rowCount: rows.length` with no `message`, no `more`, no
       truncation flag. A 5,000-element list shows 200 rows and says nothing —
       while key *listings* right next to it do render a "Showing first 500 keys"
       node. Either carry truncation metadata on the result, or page it.
-- [ ] `[SDD][M-HONESTY]` **Per-connection AI opt-out does not affect open
+- [x] `[SDD][M-HONESTY]` **Per-connection AI opt-out does not affect open
       panels.** `syncAiBar()` returns early once `aiBarShown` is true and there
       is no `aiDisabled` message, so unticking a connection leaves the assist
       bar in any panel already open — yet the Settings copy states "The assist
       bar disappears in its query panels." Broadcast the change to open panels
       and hide the bar, or soften the in-app wording as the README now does.
+
+### M-HONESTY.1 — Fixed 2026-09-12
+- [x] `[SDD][M-HONESTY]` `previewNotice(shown, total, unit)` exported from
+      `redis.ts` and unit-tested (`test/previewNotice.test.js`, 6 cases). `list`
+      pairs `lrange` with `llen`, `zset` pairs `zrange` with `zcard` — both O(1),
+      so an exact "first 200 of 5,000" costs one cheap round trip and beats a
+      vague "there may be more". Returns undefined when total <= shown, which
+      also covers the key shrinking between the two reads
+- [x] `[SDD][M-HONESTY]` `onDidChangeAiSettings` / `notifyAiSettingsChanged()`
+      added to `aiService.ts` — **module-level, not on AiStore**: every panel
+      builds its own `AiService`, so an instance event would reach nobody, and
+      `aiStore.ts` imports vscode as a type only so `test/aiSettings.test.js`
+      can load it outside the extension host. A real EventEmitter there breaks
+      that test
+- [x] `[SDD][M-HONESTY]` `syncAiBar()` now runs in both directions and posts
+      `aiDisabled`; the webview hides the bar on it. Settings fires the notify
+      on the opt-out toggle, provider save, and consent revoke
+- [x] `[SDD][M-HONESTY]` Manual QA **passed 2026-09-12**, driven through
+      code-server + browser automation against the branch build. 7 checks:
+      1. list over cap → *"Showing the first 200 of 5,000 elements — this is the
+         preview's limit, not the key's."* (editor showed `LRANGE qa:biglist 0 199`)
+      2. sorted set → *"…first 200 of 900 members…"*, correct unit
+      3. 3-element list → plain "3 row(s)", **no** notice (no false positive)
+      4. editing through the notice still commits — `LINDEX qa:biglist 0` returned
+         the new value, `LLEN` still 5000
+      5. **the case that was broken**: Settings and the query panel side by side,
+         both visible; unticking the connection removed the assist bar from the
+         panel without it being touched
+      6. re-ticking restored it
+      7. unticking a *different* connection left this panel's bar alone — the
+         hide is per-connection, not a blanket response to any settings change
+      Ollama is the preset to use for this: `needsKey: false`, so `isConfigured()`
+      is satisfied with no API key and no server actually running

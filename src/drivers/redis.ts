@@ -315,9 +315,17 @@ export class RedisDriver implements Driver {
   private async readValue(type: string, key: string): Promise<QueryResult> {
     switch (type) {
       case "list": {
-        const items = await this.c.lrange(key, 0, PREVIEW_LIMIT - 1);
+        const [items, total] = await Promise.all([
+          this.c.lrange(key, 0, PREVIEW_LIMIT - 1),
+          this.c.llen(key),
+        ]);
         const rows = items.map((value, index) => ({ index, value }));
-        return { columns: ["index", "value"], rows, rowCount: rows.length };
+        return {
+          columns: ["index", "value"],
+          rows,
+          rowCount: rows.length,
+          message: previewNotice(rows.length, total, "elements"),
+        };
       }
       case "hash": {
         const map = await this.c.hgetall(key);
@@ -330,12 +338,20 @@ export class RedisDriver implements Driver {
         return { columns: ["member"], rows, rowCount: rows.length };
       }
       case "zset": {
-        const flat = await this.c.zrange(key, 0, PREVIEW_LIMIT - 1, "WITHSCORES");
+        const [flat, total] = await Promise.all([
+          this.c.zrange(key, 0, PREVIEW_LIMIT - 1, "WITHSCORES"),
+          this.c.zcard(key),
+        ]);
         const rows: Array<Record<string, unknown>> = [];
         for (let i = 0; i < flat.length; i += 2) {
           rows.push({ member: flat[i], score: flat[i + 1] });
         }
-        return { columns: ["member", "score"], rows, rowCount: rows.length };
+        return {
+          columns: ["member", "score"],
+          rows,
+          rowCount: rows.length,
+          message: previewNotice(rows.length, total, "members"),
+        };
       }
       case "string": {
         const value = await this.c.get(key);
@@ -551,6 +567,26 @@ export class RedisDriver implements Driver {
         );
     }
   }
+}
+
+/**
+ * Notice for a value preview that shows only its first `shown` of `total`
+ * elements, or undefined when nothing was held back.
+ *
+ * Key *listings* have always rendered a "Showing first 500 keys" node, but a
+ * list or sorted set sliced at PREVIEW_LIMIT said nothing at all: the grid was
+ * handed 200 rows with no indication more existed, so a 5,000-element list
+ * looked like a 200-element one. Truncation the user cannot see is the one
+ * thing this extension is not allowed to do.
+ */
+export function previewNotice(shown: number, total: number, unit: string): string | undefined {
+  if (total <= shown) {
+    return undefined;
+  }
+  return (
+    `Showing the first ${shown.toLocaleString()} of ${total.toLocaleString()} ${unit} — ` +
+    `this is the preview's limit, not the key's.`
+  );
 }
 
 /**

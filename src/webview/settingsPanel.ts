@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as vscode from "vscode";
 import { AiError } from "../ai/AiProvider";
-import { AiService } from "../ai/aiService";
+import { AiService, notifyAiSettingsChanged } from "../ai/aiService";
 import { AI_SETTINGS_KEY, AiStore } from "../ai/aiStore";
 import { findPrice, type PriceRow, rowStatus } from "../ai/priceTable";
 import { AI_PRESETS, presetById } from "../ai/registry";
@@ -144,6 +144,7 @@ export class SettingsPanel {
         break; // fall through to the postAiState below
       case "aiSave":
         await this.saveAiForm(msg);
+        notifyAiSettingsChanged();
         break;
       case "aiFetchModels":
         // Same save-first rule as Test: fetch for the endpoint on screen.
@@ -180,9 +181,14 @@ export class SettingsPanel {
         break;
       case "aiRevokeConsent":
         await this.aiStore.update({ consentGiven: false });
+        notifyAiSettingsChanged();
         break;
       case "aiSetConnEnabled":
         await this.aiStore.setAiEnabledFor(String(msg.connId ?? ""), !!msg.enabled);
+        // Reaches panels that are already open. Without this the assist bar
+        // stays put until the panel is reopened, which the text right above
+        // this checkbox promises it will not.
+        notifyAiSettingsChanged();
         break;
       case "aiResetPeriod":
         await this.usageStore.resetPeriod();
