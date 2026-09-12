@@ -389,7 +389,7 @@
     "release:minor": "npm version minor && npm run package",
     "release:major": "npm version major && npm run package",
     "fetch-icons": "node scripts/fetch-icons.mjs",
-    "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license --baseContentUrl https://localhost/ --baseImagesUrl https://localhost/",
+    "package": "npx --yes @vscode/vsce package",
     "publish:marketplace": "node scripts/publish.mjs",
     "release:github": "node scripts/github-release.mjs",
     "marketplace:verify": "node scripts/marketplace-status.mjs",

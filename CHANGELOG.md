@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Every README image was broken in the `.vsix` that `npm run release:*`
+  builds.** The `package` script passed `--baseContentUrl https://localhost/
+  --baseImagesUrl https://localhost/`, which overrides the URL rewriting `vsce`
+  does automatically, so `media/demo.gif` shipped as
+  `https://localhost/media/demo.gif` — a dead image on the extension page of
+  anyone installing that file, including from a GitHub release. The Marketplace
+  listing itself was never affected: `publish:marketplace` runs a bare
+  `vsce publish`, which derives the right `raw/HEAD` URLs from `repository`.
+  The flags are gone, and `--allow-missing-repository` / `--skip-license` went
+  with them — both were vestigial, since the manifest has had `repository` and
+  `license` for some time.
+- `.idea/workspace.xml` was being packaged into every published `.vsix`.
+  `.vscodeignore` now excludes `.idea/**` and `**/.DS_Store`.
+
+
 ## [1.4.0] - 2026-09-08
 
 ### Added

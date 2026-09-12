@@ -1,5 +1,7 @@
 .vscode/**
 .claude/**
+.idea/**
+**/.DS_Store
 .husky/**
 --version/**
 CLAUDE.md
