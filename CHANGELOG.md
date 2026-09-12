@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **README brought up to date with the shipped feature set.** It still described
+  four engines and a 200-row preview cap, both true at 1.2.0 and neither true
+  since: Athena, the column picker, the JSON viewer, query abort, connection
+  notes, the row gutter and SQL autocomplete were all absent from the listing
+  page, and previews have paged 100 rows at a time for some time. Adds a
+  per-engine capability table, corrects the limits section, and folds privacy
+  into one section. The Marketplace `description` now names Athena and
+  autocomplete, since it is the search snippet.
+- **Hero media re-recorded.** `media/demo.gif` was from 2026-08-06 and opened on
+  a connection form being filled in — the least persuasive eight seconds
+  available, spent on a step the viewer has not yet agreed to take. It now opens
+  on five connected engines and goes straight to the editable grid: preview,
+  page (the row gutter continuing at 101 rather than restarting), a cell edit
+  committed to Postgres, the column picker reading `Columns 6/9`, and the JSON
+  viewer's tree. `media/query-panel.png` re-shot to match. Neither showed any
+  feature added since 1.2.0.
+- **Capabilities the README had never mentioned.** Redis values are editable in
+  the grid like any other engine — a string, a list element by index, a hash
+  field or its name, a set member — and editing a string carries its remaining
+  TTL across. SSH tunnelling works for every engine except SQLite, not only
+  PostgreSQL and MySQL. AI can be switched off **per connection**, so a
+  regulated database keeps the assist bar out of its query panels.
+- **AI providers are now named correctly.** The list said "any OpenAI-compatible
+  provider" and gave DeepSeek as an example, which is not a preset; the actual
+  presets are Anthropic (Claude), OpenAI, OpenRouter and Ollama, with a custom
+  option for anything else. Anthropic is not OpenAI-compatible — it has its own
+  client — so describing every provider that way was wrong.
+- **AI screenshots.** `ai-assistance-setup.png` re-shot: the old one had
+  **"Open DB Client v1.1.1"** printed in its sidebar. `ai-usage-table.png` is
+  removed from the README rather than shipped stale — it predates the Provider
+  column (1.3.0) and shows rows reading "—" for cost, which is precisely the
+  limitation 1.3.0/1.3.1 fixed. Re-shooting it needs a real provider key.
+- **Marketplace metadata.** `pricing: "Free"` is now explicit, so the listing
+  renders the label next to the install count rather than relying on the
+  default; `Data Science` added to `categories`; `keywords` 22 → 29 (the
+  documented cap is 30 — publishing fails above it).
+
 ### Fixed
 - **Every README image was broken in the `.vsix` that `npm run release:*`
   builds.** The `package` script passed `--baseContentUrl https://localhost/
@@ -21,7 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `license` for some time.
 - `.idea/workspace.xml` was being packaged into every published `.vsix`.
   `.vscodeignore` now excludes `.idea/**` and `**/.DS_Store`.
-
 
 ## [1.4.0] - 2026-09-08
 
