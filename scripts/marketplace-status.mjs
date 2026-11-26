@@ -96,7 +96,16 @@ if (args.includes("--ovsx")) {
     );
     if (ovsxLive !== local) drift = true;
   } else {
-    console.log("Open VSX:       not published (see docs/PUBLISHING.md for the --ovsx flow)");
+    // A 404 is also what an uploaded-but-inactive extension looks like: when the
+    // namespace is also a Marketplace publisher, Open VSX hides everything under
+    // it until the namespace claim is approved. Say which case this is.
+    const ns = await fetch(`https://open-vsx.org/api/${publisher}`);
+    const { verified } = ns.ok ? await ns.json() : {};
+    console.log(
+      verified === false
+        ? `Open VSX:       not live — namespace "${publisher}" is not verified, so uploads stay inactive until the claim is approved (docs/PUBLISHING.md)`
+        : "Open VSX:       not published (see docs/PUBLISHING.md for the --ovsx flow)",
+    );
     drift = true;
   }
 }

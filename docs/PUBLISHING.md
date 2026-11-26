@@ -179,22 +179,63 @@ code --install-extension open-database-client-0.4.3.vsix
 
 The VS Code Marketplace only serves official VS Code. Editors like **Cursor**,
 **VSCodium**, and **Gitpod** pull from a separate registry, **Open VSX** —
-also free. One-time setup: create an account + access token at
-https://open-vsx.org, then create the namespace:
+also free.
+
+**One-time setup** (the `brianlab` namespace already exists — created 2026-11-26; see the claim step below):
+
+1. Sign in at https://open-vsx.org with GitHub, then **Settings → Log in with
+   Eclipse** (put your GitHub username in the Eclipse account's *GitHub
+   Username* field) and sign the **Publisher Agreement**.
+2. **Settings → Access Tokens → Generate New Token**; keep it in your password
+   manager. The namespace belongs to the account, not the token — rotating or
+   deleting a token never loses it.
+3. `npx --yes ovsx create-namespace brianlab` (with `OVSX_PAT` loaded as below).
+
+**Loading the token** — never type it into a command, a file, or a chat:
 
 ```bash
-npx --yes ovsx create-namespace brianlab -p <YOUR_OPEN_VSX_TOKEN>
+read -s "OVSX_PAT?Open VSX token: " && export OVSX_PAT
 ```
 
-After that, each release can go to both registries:
+`ovsx` reads `OVSX_PAT` itself, so no `-p` flag is needed anywhere.
+
+**Every release, both registries** — one `.vsix` is built and that exact file
+goes to the Marketplace and then Open VSX:
 
 ```bash
-OVSX_PAT=<YOUR_OPEN_VSX_TOKEN> npm run publish:marketplace -- --ovsx
+npm run publish:marketplace -- --ovsx
 ```
 
-The script publishes to the VS Code Marketplace first, then to Open VSX with
-the token from the `OVSX_PAT` environment variable (never store the token in
-the repo).
+**Open VSX only** — e.g. a version already live on the Marketplace:
+
+```bash
+npm run publish:ovsx -- --dry-run             # checks only
+npm run publish:ovsx                          # checks, package, publish
+npm run publish:ovsx -- --vsix open-database-client-1.4.2.vsix   # publish an existing build
+```
+
+Both refuse a dirty tree or an unstamped CHANGELOG, and `publish:ovsx` also
+refuses a version Open VSX already has. Then:
+
+```bash
+npm run marketplace:verify -- --ovsx
+```
+
+Listing: https://open-vsx.org/extension/brianlab/open-database-client.
+**Cursor** serves its own mirror of Open VSX, which can lag by hours — if search
+in Cursor doesn't find a fresh version yet, the publish hasn't failed. Meanwhile
+use **Extensions: Install from VSIX…** in Cursor.
+
+**Claiming the namespace is required, not cosmetic.** Because `brianlab` is
+also a VS Code Marketplace publisher, Open VSX keeps every upload under it
+**inactive** — stored, but 404 on the public API and invisible to search and
+Cursor — until the namespace is verified. File a *Claim namespace ownership*
+issue at https://github.com/EclipseFdn/open-vsx.org/issues under **Option 1
+(VS Code Publisher with Repo)**: the repo in `package.json` is owned by the
+requesting GitHub account. Approval is manual (days); already-uploaded versions
+go live on approval with no re-publish. Ours: EclipseFdn/open-vsx.org#16303
+(filed 2026-11-26). While it is pending, `marketplace:verify -- --ovsx` reports
+"not live — namespace not verified" rather than "not published".
 
 ## Common gotchas
 
@@ -216,7 +257,8 @@ npx --yes @vscode/vsce login brianlab          # authenticate (paste PAT)
 npm run release:patch                          # bump + stamp CHANGELOG + tag + build .vsix
 npm run publish:marketplace                    # checked publish of the current version
 npm run publish:marketplace -- --dry-run       # run the safety checks only
-OVSX_PAT=… npm run publish:marketplace -- --ovsx   # also publish to Open VSX
+npm run publish:marketplace -- --ovsx         # both registries, one .vsix (needs OVSX_PAT)
+npm run publish:ovsx                           # Open VSX only
 npm run marketplace:verify                     # live Marketplace version vs local
 npm run marketplace:show                       # full `vsce show` listing
 npx --yes @vscode/vsce unpublish brianlab.open-database-client  # remove (use with care)

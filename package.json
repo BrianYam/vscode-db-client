@@ -401,6 +401,7 @@
     "fetch-icons": "node scripts/fetch-icons.mjs",
     "package": "npx --yes @vscode/vsce package",
     "publish:marketplace": "node scripts/publish.mjs",
+    "publish:ovsx": "node scripts/publish-ovsx.mjs",
     "release:github": "node scripts/github-release.mjs",
     "marketplace:verify": "node scripts/marketplace-status.mjs",
     "marketplace:show": "node scripts/marketplace-status.mjs --show",
