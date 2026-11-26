@@ -98,6 +98,12 @@ Checked = implemented in this repo. Unchecked = remaining work.
 ## Packaging / Adoption
 - [x] `[SDD][PKG]` Build installable `.vsix` → `open-db-client-0.1.0.vsix`
 - [ ] `[SDD][PKG]` Install into daily-driver VS Code (Extensions → Install from VSIX)
+- [x] `[SDD][PKG]` Open VSX: `brianlab` namespace created 2026-11-26
+- [x] `[SDD][PKG]` `npm run publish:ovsx` — standalone Open VSX publish (release checks, already-published guard, token from `OVSX_PAT` only)
+- [x] `[SDD][PKG]` `publish:marketplace -- --ovsx` packages once and publishes the same `.vsix` to both registries
+- [ ] `[SDD][PKG]` Publish 1.4.2 to Open VSX; verify listing + Cursor search
+- [ ] `[SDD][PKG]` Claim the `brianlab` namespace (EclipseFdn/open-vsx.org issue) for the verified badge
+- [ ] `[SDD][PKG]` CI: on `v*` tag, package once → publish to Marketplace (`VSCE_PAT`) + Open VSX (`OVSX_PAT`) from repo secrets
 
 ## M8 — Public Launch Readiness (pre-publish gap analysis 2026-07-09)
 Lifecycle & listing surface a public user hits before/between/after use.

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`npm run publish:ovsx` publishes to Open VSX on its own** (Cursor,
+  VSCodium, Gitpod). It runs the same release checks as the Marketplace
+  publish, refuses a version Open VSX already has, and reads the token only
+  from `OVSX_PAT` so it never sits on a command line.
+
+### Changed
+- **`publish:marketplace -- --ovsx` now ships one `.vsix` to both registries.**
+  It used to let `vsce publish` and `ovsx publish` each package their own
+  build; it now packages once and uploads that file to both. It also checks
+  `OVSX_PAT` before anything goes out, rather than after the Marketplace half
+  has already published.
+
 ## [1.4.2] - 2026-09-12
 
 ### Fixed
