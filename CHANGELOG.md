@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OVSX_PAT` before anything goes out, rather than after the Marketplace half
   has already published.
 
+### Fixed
+- **`marketplace:verify -- --ovsx` no longer says "not published" for an
+  extension that is uploaded but held inactive.** When the namespace is also a
+  Marketplace publisher, Open VSX hides uploads until the namespace claim is
+  approved — the public API returns the same 404 either way. It now checks the
+  namespace and says "not live — namespace not verified" in that case, and
+  `publish:ovsx` warns before uploading into an unverified namespace.
+
 ## [1.4.2] - 2026-09-12
 
 ### Fixed

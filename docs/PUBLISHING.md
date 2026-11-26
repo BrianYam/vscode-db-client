@@ -181,7 +181,7 @@ The VS Code Marketplace only serves official VS Code. Editors like **Cursor**,
 **VSCodium**, and **Gitpod** pull from a separate registry, **Open VSX** —
 also free.
 
-**One-time setup** (the `brianlab` namespace already exists — created 2026-11-26):
+**One-time setup** (the `brianlab` namespace already exists — created 2026-11-26; see the claim step below):
 
 1. Sign in at https://open-vsx.org with GitHub, then **Settings → Log in with
    Eclipse** (put your GitHub username in the Eclipse account's *GitHub
@@ -226,9 +226,16 @@ Listing: https://open-vsx.org/extension/brianlab/open-database-client.
 in Cursor doesn't find a fresh version yet, the publish hasn't failed. Meanwhile
 use **Extensions: Install from VSIX…** in Cursor.
 
-**Verified badge:** after the first publish, open a *Claim namespace ownership*
-issue at https://github.com/EclipseFdn/open-vsx.org/issues, linking this repo
-and the Marketplace publisher page.
+**Claiming the namespace is required, not cosmetic.** Because `brianlab` is
+also a VS Code Marketplace publisher, Open VSX keeps every upload under it
+**inactive** — stored, but 404 on the public API and invisible to search and
+Cursor — until the namespace is verified. File a *Claim namespace ownership*
+issue at https://github.com/EclipseFdn/open-vsx.org/issues under **Option 1
+(VS Code Publisher with Repo)**: the repo in `package.json` is owned by the
+requesting GitHub account. Approval is manual (days); already-uploaded versions
+go live on approval with no re-publish. Ours: EclipseFdn/open-vsx.org#16303
+(filed 2026-11-26). While it is pending, `marketplace:verify -- --ovsx` reports
+"not live — namespace not verified" rather than "not published".
 
 ## Common gotchas
 

@@ -40,7 +40,17 @@ const existing = await fetch(`https://open-vsx.org/api/${publisher}/${name}/${ve
 if (existing.ok)
   fail(`${publisher}.${name}@${version} is already on Open VSX — cut a new version to publish.`);
 
-console.log(`✔ Checks passed for ${publisher}.${name}@${version} (not yet on Open VSX)`);
+// An unverified namespace hides its extensions, so the check above can't see
+// an inactive upload of this version — Open VSX would then reject a re-publish.
+const ns = await fetch(`https://open-vsx.org/api/${publisher}`);
+if (ns.ok && (await ns.json()).verified === false) {
+  console.warn(
+    `⚠ Namespace "${publisher}" is not verified on Open VSX: this upload will stay inactive until the ` +
+      "claim is approved, and an earlier inactive upload of this version can't be detected from here.",
+  );
+}
+
+console.log(`✔ Checks passed for ${publisher}.${name}@${version} (not live on Open VSX)`);
 if (dryRun) {
   console.log("Dry run — not publishing.");
   process.exit(0);

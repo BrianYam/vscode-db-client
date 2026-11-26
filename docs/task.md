@@ -101,8 +101,10 @@ Checked = implemented in this repo. Unchecked = remaining work.
 - [x] `[SDD][PKG]` Open VSX: `brianlab` namespace created 2026-11-26
 - [x] `[SDD][PKG]` `npm run publish:ovsx` — standalone Open VSX publish (release checks, already-published guard, token from `OVSX_PAT` only)
 - [x] `[SDD][PKG]` `publish:marketplace -- --ovsx` packages once and publishes the same `.vsix` to both registries
-- [ ] `[SDD][PKG]` Publish 1.4.2 to Open VSX; verify listing + Cursor search
-- [ ] `[SDD][PKG]` Claim the `brianlab` namespace (EclipseFdn/open-vsx.org issue) for the verified badge
+- [x] `[SDD][PKG]` Publish 1.4.2 to Open VSX — uploaded 2026-11-26, **inactive** until the namespace claim is approved
+- [ ] `[SDD][PKG]` Claim the `brianlab` namespace — **required** (name is also a Marketplace publisher); filed EclipseFdn/open-vsx.org#16303 (Option 1) 2026-11-26, awaiting approval
+- [ ] `[SDD][PKG]` After approval: `marketplace:verify -- --ovsx` shows 1.4.2 ✔, icon renders, found in Cursor search
+- [x] `[SDD][PKG]` `marketplace:verify -- --ovsx` distinguishes "inactive, namespace unverified" from "not published"
 - [ ] `[SDD][PKG]` CI: on `v*` tag, package once → publish to Marketplace (`VSCE_PAT`) + Open VSX (`OVSX_PAT`) from repo secrets
 
 ## M8 — Public Launch Readiness (pre-publish gap analysis 2026-07-09)
