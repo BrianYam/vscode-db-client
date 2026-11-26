@@ -1,0 +1,18 @@
+{
+  "workbench.colorTheme": "Default Dark Modern",
+  "workbench.startupEditor": "none",
+  "workbench.tips.enabled": false,
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "workbench.layoutControl.enabled": false,
+  "window.commandCenter": false,
+  "security.workspace.trust.enabled": false,
+  "extensions.ignoreRecommendations": true,
+  "telemetry.telemetryLevel": "off",
+  "chat.disableAIFeatures": true,
+  "chat.commandCenter.enabled": false,
+  "editor.fontSize": 14,
+  "editor.minimap.enabled": false,
+  "update.mode": "none",
+  "files.hotExit": "off",
+  "workbench.editor.restoreViewState": false
+}

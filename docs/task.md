@@ -1607,5 +1607,13 @@ prepared by BrianLab, product icon as the mark, no third-party logo.
       32 journeys, 79 glossary, 71 decisions, 21 danger zones, 17 open questions; every ref
       validated by the build
 - [x] `[SDD][M-MAP]` `docs/screens/` points the guide at the README images in `media/`
+- [x] `[SDD][M-MAP]` Fix: Biome rewrote the page template's `{{JS}}` placeholder and the
+      page rendered blank; template restored and excluded from Biome
+- [x] `[SDD][M-MAP]` The map shows GIFs too: `demo.gif` and `ai-query-generation.gif`
+- [x] `[SDD][M-SHOTS]` `npm run screens` (`scripts/screens.mjs`): code-server + seeded
+      Postgres/Redis in throwaway `shots-*` containers, connections via Import, Playwright
+      drives each shot from a fresh window; writes `docs/screens/<id>.png` + manifest
+- [x] `[SDD][M-SHOTS]` 26 captured screens across connections, browsing, Redis, the query
+      panel, SQLite and settings, each mapped to its journey step
 - [ ] `[SDD][M-MAP]` Brian answers the open questions in `docs/system-map/answers.md`
-- [ ] `[SDD][M-MAP]` Retake the three `media/` screenshots (all flagged *may be out of date*)
+- [ ] `[SDD][M-SHOTS]` Retake `media/ai-usage-table.png` and the AI GIF (need a real key)

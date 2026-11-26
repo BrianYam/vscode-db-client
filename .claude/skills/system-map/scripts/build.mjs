@@ -395,7 +395,7 @@ if (flag("--check")) {
 // ---------------------------------------------------------------- page data
 // The page reads one shape; map.json is turned into it here, so the format
 // people and the skill edit can change without touching the page.
-const mime = { webp: "image/webp", png: "image/png", jpg: "image/jpeg" };
+const mime = { webp: "image/webp", png: "image/png", jpg: "image/jpeg", gif: "image/gif" };
 const shots = {};
 let stale = 0;
 const screensAt = {}; // journey id -> step index -> [screen ids]
