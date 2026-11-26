@@ -6,7 +6,14 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/dist", "!**/out", "!**/*.wasm", "!**/*.vsix"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/out",
+      "!**/*.wasm",
+      "!**/*.vsix",
+      "!.claude/skills/system-map/assets/template.html"
+    ]
   },
   "formatter": {
     "enabled": true,

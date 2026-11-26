@@ -2,6 +2,7 @@
 <!--
   System map page, generated from docs/system-map/map.json by `{{BUILD_CMD}}`.
   Edit map.json, never this file. One file, no dependencies, no network requests.
+  Keep formatters off this file: its double-brace placeholders are not code.
 -->
 <html lang="en">
   <head>
@@ -31,7 +32,8 @@
     <script type="application/json" id="map-data">{{DATA}}</script>
     <script type="application/json" id="map-shots">{{SHOTS}}</script>
     <script type="text/plain" id="guide-css">{{GUIDE_CSS}}</script>
-    <script>JS
+    <script>
+{{JS}}
     </script>
   </body>
 </html>
