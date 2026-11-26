@@ -1,0 +1,52 @@
+{
+  "screens": [
+    {
+      "id": "query-panel",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "Query panel: editor, Run, and the editable results grid",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "write-and-run-query",
+          "step": 6
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts"],
+      "note": "From the README's media folder."
+    },
+    {
+      "id": "ai-setup",
+      "component": "settings-panel",
+      "platform": "web",
+      "group": "Settings",
+      "caption": "Settings: the AI Assistant section",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "set-up-ai-provider",
+          "step": 1
+        }
+      ],
+      "source": ["src/webview/settingsPanel.ts"],
+      "note": "From the README's media folder."
+    },
+    {
+      "id": "ai-usage",
+      "component": "settings-panel",
+      "platform": "web",
+      "group": "Settings",
+      "caption": "Settings: AI usage and cost tables",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "track-ai-usage-and-cost",
+          "step": 2
+        }
+      ],
+      "source": ["src/webview/settingsPanel.ts", "src/ai/usageStore.ts"],
+      "note": "From the README's media folder."
+    }
+  ]
+}

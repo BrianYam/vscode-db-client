@@ -1595,3 +1595,17 @@ actually does — but both contradict the repo's own "be honest in UX" conventio
          hide is per-connection, not a blanket response to any settings change
       Ollama is the preset to use for this: `needsKey: false`, so `isConfigured()`
       is satisfied with no API key and no server actually running
+
+## Docs · System map (requested 2026-11-26)
+Interactive map of what the extension does and why, for a contributor's first day, with a
+*How it works* guide for users. Ported from the façade-app system-map skill and rebranded:
+prepared by BrianLab, product icon as the mark, no third-party logo.
+- [x] `[SDD][M-MAP]` Skill at `.claude/skills/system-map/` (builder, viewer, guide, schema);
+      `npm run system-map` / `system-map:check`. GitHub links, `src/` drift count, optional
+      Data and Screens tabs
+- [x] `[SDD][M-MAP]` First `docs/system-map/map.json` at e1f6927 (1.4.2): 30 components,
+      32 journeys, 79 glossary, 71 decisions, 21 danger zones, 17 open questions; every ref
+      validated by the build
+- [x] `[SDD][M-MAP]` `docs/screens/` points the guide at the README images in `media/`
+- [ ] `[SDD][M-MAP]` Brian answers the open questions in `docs/system-map/answers.md`
+- [ ] `[SDD][M-MAP]` Retake the three `media/` screenshots (all flagged *may be out of date*)

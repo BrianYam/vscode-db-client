@@ -1,0 +1,25 @@
+{
+  "screens": [
+    {
+      "id": "query-panel",
+      "file": "../../media/query-panel.png",
+      "width": 1280,
+      "height": 737,
+      "capturedAt": "ffb2183"
+    },
+    {
+      "id": "ai-setup",
+      "file": "../../media/ai-assistance-setup.png",
+      "width": 1280,
+      "height": 793,
+      "capturedAt": "ffb2183"
+    },
+    {
+      "id": "ai-usage",
+      "file": "../../media/ai-usage-table.png",
+      "width": 1118,
+      "height": 1382,
+      "capturedAt": "c042d5c"
+    }
+  ]
+}

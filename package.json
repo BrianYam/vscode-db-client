@@ -389,6 +389,8 @@
     "typecheck": "tsc -p ./ --noEmit",
     "lint": "biome lint ./src ./test",
     "scan:secrets": "sh scripts/gitleaks-scan.sh",
+    "system-map": "node .claude/skills/system-map/scripts/build.mjs",
+    "system-map:check": "node .claude/skills/system-map/scripts/build.mjs --check",
     "format": "biome format --write ./src ./test",
     "check": "biome check --write ./src ./test",
     "watch": "node esbuild.js --watch",
