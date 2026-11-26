@@ -1,0 +1,207 @@
+{
+  "screens": [
+    {
+      "id": "tree-connections",
+      "file": "tree-connections.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "add-connection",
+      "file": "add-connection.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "form-ssh",
+      "file": "form-ssh.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "form-connection-string",
+      "file": "form-connection-string.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "export-connections",
+      "file": "export-connections.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "import-confirm",
+      "file": "import-confirm.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "reset-all-data",
+      "file": "reset-all-data.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "preview-table",
+      "file": "preview-table.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "table-ddl",
+      "file": "table-ddl.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "search-tables",
+      "file": "search-tables.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "redis-keys",
+      "file": "redis-keys.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "redis-search",
+      "file": "redis-search.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "redis-view-key",
+      "file": "redis-view-key.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "redis-ttl",
+      "file": "redis-ttl.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "redis-delete",
+      "file": "redis-delete.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "run-query",
+      "file": "run-query.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "autocomplete",
+      "file": "autocomplete.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "edit-cell",
+      "file": "edit-cell.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "related-row",
+      "file": "related-row.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "json-viewer",
+      "file": "json-viewer.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "column-picker",
+      "file": "column-picker.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "export-results",
+      "file": "export-results.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "lock-panel",
+      "file": "lock-panel.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "saved-query",
+      "file": "saved-query.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "sqlite-preview",
+      "file": "sqlite-preview.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "settings-ai",
+      "file": "settings-ai.png",
+      "width": 1280,
+      "height": 800,
+      "capturedAt": "2aacab4"
+    },
+    {
+      "id": "demo",
+      "file": "../../media/demo.gif",
+      "width": 1280,
+      "height": 683,
+      "capturedAt": "ffb2183"
+    },
+    {
+      "id": "ai-generate",
+      "file": "../../media/ai-query-generation.gif",
+      "width": 1600,
+      "height": 199,
+      "capturedAt": "c042d5c"
+    },
+    {
+      "id": "ai-usage",
+      "file": "../../media/ai-usage-table.png",
+      "width": 1118,
+      "height": 1382,
+      "capturedAt": "c042d5c"
+    }
+  ]
+}

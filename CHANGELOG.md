@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **System map for contributors** (docs only, nothing ships in the extension):
+  `npm run system-map` builds `docs/system-map/`, an interactive page of every
+  part, feature, decision and danger zone, with a printable *How it works* guide.
+- **`npm run screens` photographs every feature for the system map** (docs
+  only): the real extension in code-server against throwaway seeded databases,
+  driven by a browser, so screenshots can be retaken with one command.
 - **`npm run publish:ovsx` publishes to Open VSX on its own** (Cursor,
   VSCodium, Gitpod). It runs the same release checks as the Marketplace
   publish, refuses a version Open VSX already has, and reads the token only

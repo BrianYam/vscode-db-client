@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  System map page, generated from docs/system-map/map.json by `{{BUILD_CMD}}`.
+  Edit map.json, never this file. One file, no dependencies, no network requests.
+  Keep formatters off this file: its double-brace placeholders are not code.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{{TITLE}}</title>
+    <link rel="icon" href="{{FAVICON}}" />
+    <style>
+{{CSS}}
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header class="top" id="top"></header>
+      <div class="shell">
+        <main class="main" id="main"></main>
+        <div id="resizer" aria-hidden="true"></div>
+        <aside class="insp" id="insp" aria-label="Details"></aside>
+      </div>
+    </div>
+    <div id="overlay" class="overlay"></div>
+    <div id="lightbox"></div>
+    <div id="tip" class="tip" role="tooltip"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <noscript>This map needs JavaScript. The content lives in docs/system-map/data.</noscript>
+    <script type="application/json" id="map-data">{{DATA}}</script>
+    <script type="application/json" id="map-shots">{{SHOTS}}</script>
+    <script type="text/plain" id="guide-css">{{GUIDE_CSS}}</script>
+    <script>
+{{JS}}
+    </script>
+  </body>
+</html>

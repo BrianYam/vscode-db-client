@@ -1,0 +1,3 @@
+# Build output of the system map; map.json is the source.
+*-system-map.html
+*-guide.pdf

@@ -1,0 +1,16 @@
+FLUSHDB
+SET session:7f3a9c21 "{\"user\":\"ana.lima@example.com\",\"cart\":3,\"locale\":\"pt-BR\"}" EX 3600
+SET session:b81e04d9 "{\"user\":\"kenji.sato@example.com\",\"cart\":0,\"locale\":\"ja-JP\"}" EX 5400
+SET session:c2d95e17 "{\"user\":\"maria.garcia@example.com\",\"cart\":1,\"locale\":\"es-ES\"}" EX 1800
+SET session:e04f6b83 "{\"user\":\"tom.becker@example.com\",\"cart\":2,\"locale\":\"de-DE\"}" EX 7200
+SET cache:product:1042 "{\"sku\":\"MUG-STONE-12\",\"price\":18.5,\"in_stock\":42}" EX 43200
+SET cache:product:1077 "{\"sku\":\"TEE-ORG-M\",\"price\":24,\"in_stock\":7}" EX 43200
+SET cache:homepage "<rendered 18 KB>" EX 86400
+HSET user:1001 name "Ana Lima" email "ana.lima@example.com" tier "gold" country "BR"
+HSET user:1002 name "Kenji Sato" email "kenji.sato@example.com" tier "silver" country "JP"
+HSET user:1003 name "Maria Garcia" email "maria.garcia@example.com" tier "bronze" country "ES"
+LPUSH queue:emails "welcome:1003" "receipt:88412" "receipt:88413" "reset:1002"
+ZADD leaderboard:weekly 1840 "ana.lima" 1625 "kenji.sato" 1590 "maria.garcia" 1210 "tom.becker"
+SADD feature:beta "ana.lima" "tom.becker"
+SET rate:api:203.0.113.7 "42" EX 86400
+SET config:maintenance "off"

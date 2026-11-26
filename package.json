@@ -389,6 +389,9 @@
     "typecheck": "tsc -p ./ --noEmit",
     "lint": "biome lint ./src ./test",
     "scan:secrets": "sh scripts/gitleaks-scan.sh",
+    "system-map": "node .claude/skills/system-map/scripts/build.mjs",
+    "system-map:check": "node .claude/skills/system-map/scripts/build.mjs --check",
+    "screens": "node scripts/screens.mjs",
     "format": "biome format --write ./src ./test",
     "check": "biome check --write ./src ./test",
     "watch": "node esbuild.js --watch",
@@ -430,6 +433,7 @@
     "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.2",
+    "playwright-core": "^1.53.2",
     "typescript": "^5.5.0"
   }
 }

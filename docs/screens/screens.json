@@ -1,0 +1,455 @@
+{
+  "screens": [
+    {
+      "id": "tree-connections",
+      "component": "activity-tree",
+      "platform": "web",
+      "group": "Sidebar",
+      "caption": "The Connections tree: Postgres databases and schemas, Redis and SQLite side by side",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "expand-connection-to-tables",
+          "step": 4
+        },
+        {
+          "journey": "save-and-run-query-file",
+          "step": 0
+        }
+      ],
+      "source": ["src/tree/DatabaseTreeProvider.ts", "src/drivers/postgres.ts"]
+    },
+    {
+      "id": "add-connection",
+      "component": "connection-form",
+      "platform": "web",
+      "group": "Connections",
+      "caption": "The connection form, filled in for a new PostgreSQL server",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "add-connection-with-form",
+          "step": 1
+        }
+      ],
+      "source": ["src/webview/connectionFormPanel.ts"]
+    },
+    {
+      "id": "form-ssh",
+      "component": "connection-form",
+      "platform": "web",
+      "group": "Connections",
+      "caption": "The SSH tunnel section of the connection form",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "connect-through-ssh-tunnel",
+          "step": 0
+        }
+      ],
+      "source": ["src/webview/connectionFormPanel.ts"]
+    },
+    {
+      "id": "form-connection-string",
+      "component": "connection-form",
+      "platform": "web",
+      "group": "Connections",
+      "caption": "Connecting with a pasted connection string",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "paste-connection-string",
+          "step": 0
+        }
+      ],
+      "source": ["src/webview/connectionFormPanel.ts", "src/connections/connString.ts"]
+    },
+    {
+      "id": "export-connections",
+      "component": "portability",
+      "platform": "web",
+      "group": "Connections",
+      "caption": "Export Connections: three choices, the safest first",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "export-connections",
+          "step": 0
+        }
+      ],
+      "source": ["src/extension.ts", "src/connections/portability.ts"]
+    },
+    {
+      "id": "import-confirm",
+      "component": "portability",
+      "platform": "web",
+      "group": "Connections",
+      "caption": "Import Connections asks before adding anything, with the counts",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "import-connections",
+          "step": 4
+        }
+      ],
+      "source": ["src/extension.ts", "src/connections/portability.ts"]
+    },
+    {
+      "id": "reset-all-data",
+      "component": "commands",
+      "platform": "web",
+      "group": "Connections",
+      "caption": "Reset All Data: one confirmation that says it cannot be undone",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "reset-all-data",
+          "step": 1
+        }
+      ],
+      "source": ["src/extension.ts"]
+    },
+    {
+      "id": "preview-table",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Browsing",
+      "caption": "Previewing a table: the first page of rows, editable, with its SQL",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "preview-a-table",
+          "step": 4
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/drivers/postgres.ts"]
+    },
+    {
+      "id": "table-ddl",
+      "component": "postgres-driver",
+      "platform": "web",
+      "group": "Browsing",
+      "caption": "View DDL / Structure: PostgreSQL's table rebuilt as a SQL document",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "show-table-ddl",
+          "step": 5
+        }
+      ],
+      "source": ["src/drivers/postgres.ts", "src/extension.ts"]
+    },
+    {
+      "id": "search-tables",
+      "component": "activity-tree",
+      "platform": "web",
+      "group": "Browsing",
+      "caption": "Search Tables narrowing a schema to matching tables",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "search-tables",
+          "step": 0
+        }
+      ],
+      "source": ["src/tree/DatabaseTreeProvider.ts", "src/extension.ts"]
+    },
+    {
+      "id": "redis-keys",
+      "component": "activity-tree",
+      "platform": "web",
+      "group": "Redis keys",
+      "caption": "Redis keys in the tree, each with its time to live",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "search-redis-keys",
+          "step": 4
+        }
+      ],
+      "source": ["src/tree/DatabaseTreeProvider.ts", "src/drivers/redis.ts"]
+    },
+    {
+      "id": "redis-search",
+      "component": "redis-driver",
+      "platform": "web",
+      "group": "Redis keys",
+      "caption": "Search Keys: a server-side pattern, with a pinned Filter row",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "search-redis-keys",
+          "step": 0
+        }
+      ],
+      "source": ["src/tree/DatabaseTreeProvider.ts", "src/drivers/redis.ts", "src/extension.ts"]
+    },
+    {
+      "id": "redis-view-key",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Redis keys",
+      "caption": "A Redis hash opened as a grid of fields and values, with its TTL",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "view-redis-key",
+          "step": 2
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/drivers/redis.ts"]
+    },
+    {
+      "id": "redis-ttl",
+      "component": "commands",
+      "platform": "web",
+      "group": "Redis keys",
+      "caption": "Set TTL: VS Code's own input box asks for seconds",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "set-redis-key-ttl",
+          "step": 1
+        }
+      ],
+      "source": ["src/extension.ts", "src/drivers/redis.ts"]
+    },
+    {
+      "id": "redis-delete",
+      "component": "commands",
+      "platform": "web",
+      "group": "Redis keys",
+      "caption": "Delete Key asks first and names the key and database",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "delete-redis-key",
+          "step": 1
+        }
+      ],
+      "source": ["src/extension.ts", "src/drivers/redis.ts"]
+    },
+    {
+      "id": "run-query",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "A query run in the panel: revenue by country",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "write-and-run-query",
+          "step": 6
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/drivers/postgres.ts"]
+    },
+    {
+      "id": "autocomplete",
+      "component": "sql-intel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "Autocomplete offering a column and keywords at the caret",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "autocomplete-sql",
+          "step": 4
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/sqlComplete.ts", "src/sqlDialect.ts"]
+    },
+    {
+      "id": "edit-cell",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "Editing a cell in place: the new value before it is saved",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "edit-cell-and-save",
+          "step": 2
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts"]
+    },
+    {
+      "id": "related-row",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "Following a foreign key opens the related customer",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "follow-foreign-key",
+          "step": 3
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/drivers/postgres.ts"]
+    },
+    {
+      "id": "json-viewer",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "The JSON viewer open on a customer's preferences",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "inspect-json-and-pick-columns",
+          "step": 1
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/webview/jsonView.ts"]
+    },
+    {
+      "id": "column-picker",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "The column picker hiding three columns of a wide table",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "inspect-json-and-pick-columns",
+          "step": 4
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/webview/columnView.ts"]
+    },
+    {
+      "id": "export-results",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "Export CSV asks where to save",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "export-results",
+          "step": 2
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/webview/exportView.ts"]
+    },
+    {
+      "id": "lock-panel",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "A locked panel: running and editing are blocked, and it says so",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "lock-a-panel",
+          "step": 0
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts"]
+    },
+    {
+      "id": "saved-query",
+      "component": "query-store",
+      "platform": "web",
+      "group": "Query panel",
+      "caption": "A saved query file under the schema's Query folder, with its Run lens",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "save-and-run-query-file",
+          "step": 3
+        }
+      ],
+      "source": [
+        "src/extension.ts",
+        "src/connections/queryStore.ts",
+        "src/tree/DatabaseTreeProvider.ts"
+      ]
+    },
+    {
+      "id": "sqlite-preview",
+      "component": "sqlite-driver",
+      "platform": "web",
+      "group": "SQLite",
+      "caption": "A SQLite file's table, previewed and editable",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "edit-a-sqlite-file",
+          "step": 1
+        }
+      ],
+      "source": ["src/drivers/sqlite.ts", "src/webview/queryPanel.ts"]
+    },
+    {
+      "id": "settings-ai",
+      "component": "settings-panel",
+      "platform": "web",
+      "group": "AI assistant",
+      "caption": "Settings & Guides: the AI Assistant section",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "set-up-ai-provider",
+          "step": 0
+        }
+      ],
+      "source": ["src/webview/settingsPanel.ts"]
+    },
+    {
+      "id": "demo",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "README media",
+      "caption": "Demo: five engines, preview, paging, a cell edit, the column picker and the JSON viewer",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "preview-a-table",
+          "step": 0
+        }
+      ],
+      "source": [
+        "src/webview/queryPanel.ts",
+        "src/tree/DatabaseTreeProvider.ts",
+        "src/webview/jsonView.ts",
+        "src/webview/columnView.ts"
+      ],
+      "note": "Animated. From the README's media folder."
+    },
+    {
+      "id": "ai-generate",
+      "component": "query-panel",
+      "platform": "web",
+      "group": "README media",
+      "caption": "The assist bar turning a plain-English request into SQL",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "generate-sql-from-request",
+          "step": 8
+        }
+      ],
+      "source": ["src/webview/queryPanel.ts", "src/ai/aiService.ts"],
+      "note": "Animated. From the README's media folder; needs a real provider key, so it is not captured by the script."
+    },
+    {
+      "id": "ai-usage",
+      "component": "settings-panel",
+      "platform": "web",
+      "group": "README media",
+      "caption": "Settings: AI usage and cost tables",
+      "role": "Developer",
+      "shows": [
+        {
+          "journey": "track-ai-usage-and-cost",
+          "step": 2
+        }
+      ],
+      "source": ["src/webview/settingsPanel.ts", "src/ai/usageStore.ts"],
+      "note": "From the README's media folder; needs real AI usage, so it is not captured by the script."
+    }
+  ]
+}
